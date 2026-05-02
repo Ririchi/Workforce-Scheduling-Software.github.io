@@ -14,6 +14,10 @@ concurrency:
   group: "pages"
   cancel-in-progress: true
 
+env:
+  # 解決警告：強制 Actions 使用 Node.js 24 執行
+  FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
+
 jobs:
   build_site:
     runs-on: ubuntu-latest
@@ -24,10 +28,10 @@ jobs:
       - name: Install Node.js
         uses: actions/setup-node@v4
         with:
-          node-version: 20
-          cache: 'npm'
+          node-version: 22 # 升級至更穩定的版本
 
       - name: Install dependencies
+        # 即使沒有 lock file 也能安裝
         run: npm install
 
       - name: Build
@@ -36,7 +40,6 @@ jobs:
       - name: Upload Artifacts
         uses: actions/upload-pages-artifact@v3
         with:
-          # Vite 預設的輸出資料夾是 dist
           path: 'dist/'
 
   deploy:
