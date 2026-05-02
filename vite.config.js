@@ -1,45 +1,10 @@
-name: Deploy to GitHub Pages
+import { defineConfig } from 'vite'
+import react from '@vitejs/plugin-react'
 
-on:
-  push:
-    branches: "main" # 當你推送程式碼到 main 分支時觸發
-
-permissions:
-  contents: read
-  pages: write
-  id-token: write
-
-jobs:
-  build_site:
-    runs-on: ubuntu-latest
-    steps:
-      - name: Checkout
-        uses: actions/checkout@v4
-
-      - name: Install Node.js
-        uses: actions/setup-node@v4
-        with:
-          node-version: 20
-          cache: 'npm'
-
-      - name: Install dependencies
-        run: npm install
-
-      - name: Build
-        run: npm run build
-
-      - name: Upload Artifacts
-        uses: actions/upload-pages-artifact@v3
-        with:
-          path: 'dist/'
-
-  deploy:
-    needs: build_site
-    runs-on: ubuntu-latest
-    environment:
-      name: github-pages
-      url: ${{ steps.deployment.outputs.page_url }}
-    steps:
-      - name: Deploy
-        id: deployment
-        uses: actions/deploy-pages@v4
+export default defineConfig({
+  base: './', // 確保在 GitHub Pages 上的路徑正確
+  plugins: [react()],
+  build: {
+    outDir: 'dist',
+  }
+})
