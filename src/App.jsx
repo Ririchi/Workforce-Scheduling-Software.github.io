@@ -693,9 +693,9 @@ const RecordsView = ({ currentUser, swapRequests, onAction, schedule, currentMon
                 const curTargetS = normalize(rawCurTarget);
                 const storedTargetS = normalize(req.targetShift);
                 
-                // 處理 P# 與 P 的相容性比對：移除 '#' 進行基礎班別校驗
+                // 處理 P# 與 P 的相容性比對：移除 '#與(國)' 進行基礎班別校驗
                 // 依據指令：僅校驗「被換班人員 (Target)」，完全排除申請人校驗
-                const clean = (val) => val.replace(/#/g, '');
+                const clean = (val) => val.replace(/#|\(國\)/g, '');
                 return clean(curTargetS) !== clean(storedTargetS);
               });
               // --- 修正結束 ---
