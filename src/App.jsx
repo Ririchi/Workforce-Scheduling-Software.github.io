@@ -461,7 +461,7 @@ const getLeaveList = (day) => {
                   <textarea 
                     rows={1}
                     value={preLeaveData.remarks?.[currentMonth]?.[d.day] || ""} 
-                    onChange={e => { const next = deepClone(preLeaveData); if(!next.remarks) next.remarks = {};if(!next.remarks[currentMonth]) next.remarks[currentMonth] = {}; next.remarks[currentMonth][d.day] = e.target.value;   setPreLeaveData(next); // 這會觸發 App 的 saveData 並存入雲端}}
+                    onChange={e => { const next = deepClone(preLeaveData); if(!next.remarks) next.remarks = {};if(!next.remarks[currentMonth]) next.remarks[currentMonth] = {}; next.remarks[currentMonth][d.day] = e.target.value;   setPreLeaveData(next);}}
                     className={`w-full overflow-hidden bg-transparent text-[11px] font-bold text-purple-600 text-center ${(!isAdmin || isMonthDrawn) ? 'cursor-not-allowed' : ''}`}
                   />
                 </td>
@@ -474,7 +474,7 @@ const getLeaveList = (day) => {
                   <input 
                     type="text" 
                     value={preLeaveData.dailyLimits?.[currentMonth]?.[d.day] || (d.rawDay === 0 || d.rawDay === 6 || d.holiday ? preLeaveData.weekendLimit : preLeaveData.weekdayLimit)} 
-                    onChange={e => { const next = deepClone(preLeaveData);  if(!next.dailyLimits) next.dailyLimits = {};if(!next.dailyLimits[currentMonth]) next.dailyLimits[currentMonth] = {};  next.dailyLimits[currentMonth][d.day] = e.target.value; setPreLeaveData(next); // 這會觸發 App 的 saveData 並存入雲端}}
+                    onChange={e => { const next = deepClone(preLeaveData);  if(!next.dailyLimits) next.dailyLimits = {};if(!next.dailyLimits[currentMonth]) next.dailyLimits[currentMonth] = {};  next.dailyLimits[currentMonth][d.day] = e.target.value; setPreLeaveData(next);}}
                     className={`w-full bg-transparent text-center font-bold text-teal-800 outline-none ${(!isAdmin || isMonthDrawn) ? 'cursor-not-allowed' : ''}`}
                   />
                 </td>
