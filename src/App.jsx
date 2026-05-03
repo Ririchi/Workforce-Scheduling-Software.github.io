@@ -245,6 +245,9 @@ const ScheduleTableView = ({ currentMonth, employees, schedule, cellColors, days
   const isHome = currentPage === 'home';
   const isSwap = currentPage === 'swap';
   
+// 計算提示條是否存在，若存在則標頭要往下壓 (提示條高度約為 44px)
+  const headerTop = onCellClick ? 'top-[44px]' : 'top-0';
+
   const hasSupportData = useMemo(() => {
     const supportRow = schedule[currentMonth]?.["夜診支援"] || {};
     return Object.values(supportRow).some(v => v && v !== "-" && v !== "#" && v !== "例" && v !== "");
@@ -253,28 +256,27 @@ const ScheduleTableView = ({ currentMonth, employees, schedule, cellColors, days
   return (
     <div className="flex-grow flex flex-col overflow-auto bg-gray-50 font-sans relative">
       {onCellClick && (
-        <div className="sticky top-0 z-50 bg-[#2A85A1] text-white py-2.5 px-4 text-center font-black text-sm shadow-md animate-in slide-in-from-top duration-300">
+        <div className="sticky top-0 z-[100] bg-[#2A85A1] text-white py-2.5 px-4 text-center font-black text-sm shadow-md h-[44px]">
           <Info size={16} className="inline mr-2 mb-0.5" />
           換班系統：點選欲換人員班別即可申請換班
-        </div>
-      )}
+        </div>)}
       <div className="flex-grow overflow-auto">
-        <table className="w-full text-[12px] text-center border-collapse table-fixed min-w-[1600px] lg:min-w-[1800px]">
-          <thead className="sticky top-0 z-40 bg-white shadow-md">
-            <tr className="bg-gray-100 border-b-2 border-gray-300">
-              <th className="sticky left-0 z-50 bg-gray-100 border p-3 w-16 font-black text-[11px] shadow-[2px_0_5px_rgba(0,0,0,0.1)]">姓名</th>
+        <table className="w-full text-[12px] text-center border-separate border-spacing-0 table-fixed min-w-[1600px] lg:min-w-[1800px]">
+          <thead>
+            <tr className="bg-gray-100">
+              <th className={`sticky left-0 ${headerTop} z-[80] bg-gray-100 border-b-2 border-r-2 border-gray-300 p-3 w-16 font-black text-[11px] shadow-[2px_2px_5px_rgba(0,0,0,0.1)]`}>姓名</th>
+              
               {daysInMonth.map(d => {
                 const cycleEnd = isCycleEnd(d.fullDate);
-                return (
-                  <th key={d.day} className={`border p-1 w-12 font-bold ${cycleEnd ? 'border-r-4 border-r-gray-400' : ''} ${d.rawDay === 0 || d.holiday ? 'bg-[#FFB3D9]' : d.rawDay === 6 ? 'bg-[#FFB366]' : ''}`}>
+                return (<th 
+                    key={d.day} 
+                    className={`sticky ${headerTop} z-[70] border-b-2 border-r border-gray-300 p-1 w-12 font-bold ${cycleEnd ? 'border-r-4 border-r-gray-400' : ''} ${d.rawDay === 0 || d.holiday ? 'bg-[#FFB3D9]' : d.rawDay === 6 ? 'bg-[#FFB366]' : 'bg-gray-100'}`}>
                     <div className="text-[10px] opacity-60">{d.dayOfWeek}</div>
                     <div className="text-base">{d.day}</div>
-                    <div className="text-[9px] text-red-600 truncate h-4 leading-none font-normal">{String(d.holiday || "")}</div>
-                  </th>
-                );
-              })}
-            </tr>
+                    <div className="text-[9px] text-red-600 truncate h-4 leading-none font-normal">{String(d.holiday || "")}</div></th> );
+              })}</tr>
           </thead>
+
           <tbody>
             {employees.map(emp => {
               if (emp.isSeparator) return <tr key={emp.id} className="bg-gray-200 h-[2px] border-y-0"><td colSpan={daysInMonth.length + 1}></td></tr>;
