@@ -10,7 +10,7 @@ import {
 } from 'lucide-react';
 
 // --- 常數定義與初始資料 ---
-// 版本記錄：V1.7.3 - 介面優化與 Firebase 結構預備版
+// 版本記錄：V1.7.10 - 深度重構連續換班校驗：僅校驗 Target 並相容 P#/P 變化
 const WEEKDAYS_MAP = ["日", "一", "二", "三", "四", "五", "六"];
 const PALETTE = [
   { name: '無色', class: 'bg-white' },
@@ -180,7 +180,7 @@ const SwapRequestModal = ({ isOpen, onClose, onConfirm, data }) => {
             </div>
             <div className="space-y-1 text-center">
               <label className="text-[10px] font-bold text-cyan-600 uppercase tracking-tighter">欲換班同仁</label>
-              <div className="font-black text-gray-700導致 leading-none py-1">{data.targetName}</div>
+              <div className="font-black text-gray-700 leading-none py-1">{data.targetName}</div>
               <div className="bg-cyan-50 text-cyan-700 rounded-lg py-2 mt-1 font-mono text-xs border border-cyan-100 font-black">{data.targetShift}</div>
             </div>
           </div>
@@ -209,7 +209,7 @@ const Header = ({ currentMonth, setCurrentMonth, currentPage, handlePageChange, 
     <header className="bg-white border-b-2 border-gray-800 p-2 sm:p-3 sticky top-0 z-[100] shadow-md">
       <div className="max-w-full flex flex-col lg:flex-row lg:items-center justify-between gap-2">
         <div className="flex flex-wrap items-center gap-3">
-          <h1 className="text-xs font-black text-gray-800 border-r-2 border-gray-300 pr-4 leading-none cursor-pointer" onClick={() => handlePageChange('home')}>台大雲林藥劑部班表 <span className="text-[10px] text-gray-400 font-normal ml-1">V1.7.3</span></h1>
+          <h1 className="text-xs font-black text-gray-800 border-r-2 border-gray-300 pr-4 leading-none cursor-pointer" onClick={() => handlePageChange('home')}>台大雲林藥劑部班表 <span className="text-[10px] text-gray-400 font-normal ml-1">V1.7.10</span></h1>
           <div className="flex items-center gap-2">
             <input type="month" value={currentMonth} onChange={(e) => setCurrentMonth(e.target.value)} className="border-2 border-gray-300 rounded px-1.5 py-0.5 text-xs font-bold focus:border-blue-500 outline-none" />
             {isLoggedIn && (<span className="text-[11px] font-black text-blue-600 bg-blue-50 px-2 py-0.5 rounded-lg border border-blue-100 flex items-center gap-1"><User size={12}/> 哈囉, {currentUser.name}</span>)}
@@ -316,7 +316,7 @@ const ScheduleTableView = ({ currentMonth, employees, schedule, cellColors, days
                             <div className="absolute -top-3 -right-0.5 w-2 h-2 bg-blue-600 rounded-full animate-pulse shadow-sm z-10" title="換班申請中"></div>
                           )}
                           <span className={`${isSwap ? 'font-normal' : (isHome ? 'font-medium' : 'font-black')} ${isPendingSwap ? 'text-blue-900 scale-105 drop-shadow-sm' : (displayPart === "-" ? 'text-gray-300' : 'text-gray-800')} text-[13px] transition-all`}>{displayPart}</span>
-                          {leaveMsg && <span className="text-[9px] text-red-600 font-black bg-red-50 rounded px-1.5 mt-1導致 leading-none shadow-sm">{leaveMsg}</span>}
+                          {leaveMsg && <span className="text-[9px] text-red-600 font-black bg-red-50 rounded px-1.5 mt-1彈性出勤 leading-none shadow-sm">{leaveMsg}</span>}
                         </div>
                       </td>
                     );
@@ -342,12 +342,10 @@ useEffect(() => {
     if (!schedule[currentMonth]) return;
     let changed = false;
     const next = deepClone(preLeaveData);
-    // 關鍵修改：從 next[currentMonth] 改為 next.apps[currentMonth]
     if (!next.apps || !next.apps[currentMonth]) return;
     Object.keys(next.apps[currentMonth]).forEach(empName => {
       Object.keys(next.apps[currentMonth][empName]).forEach(day => {
         const sVal = schedule[currentMonth]?.[empName]?.[day];
-        // 如果班表已經變更為休假相關狀態，則清除預假標記
         if (['休', '公假', '例'].includes(sVal) && next.apps[currentMonth][empName][day] === "預假") {
           next.apps[currentMonth][empName][day] = null;
           changed = true;
@@ -357,7 +355,7 @@ useEffect(() => {
     
     if (changed) {
       setPreLeaveData(next);
-      saveData({ preLeaveData: next }); // 記得呼叫 saveData 同步回雲端
+      saveData({ preLeaveData: next }); 
     }
   }, [currentMonth, schedule]);
 
@@ -367,31 +365,30 @@ useEffect(() => {
     if (['休', '公假', '例'].includes(sVal)) return; 
     if (!isAdmin && empName !== currentUser?.name) return;
     const next = deepClone(preLeaveData);
-    // 關鍵修改：路徑增加 .apps
     if (!next.apps) next.apps = {};
     if (!next.apps[currentMonth]) next.apps[currentMonth] = {};
     if (!next.apps[currentMonth][empName]) next.apps[currentMonth][empName] = {};
     next.apps[currentMonth][empName][day] = next.apps[currentMonth][empName][day] === "預假" ? null : "預假";
     setPreLeaveData(next);
-    saveData({ preLeaveData: next }); // 同步雲端
+    saveData({ preLeaveData: next }); 
   };
 
 const getLeaveList = (day) => {
     return employees
-      .filter(e => !e.isSeparator && !getIsNightClinic(e) && e.role !== '2' && e.role !== '3' &&  preLeaveData.apps?.[currentMonth]?.[e.name]?.[day] === "預假") // 關鍵修改：加 .apps
+      .filter(e => !e.isSeparator && !getIsNightClinic(e) && e.role !== '2' && e.role !== '3' &&  preLeaveData.apps?.[currentMonth]?.[e.name]?.[day] === "預假") 
       .map(e => e.name);
   };
 
   const handleExportPreLeave = () => {
     let csv = "\ufeff項目/日期," + daysInMonth.map(d => `${d.day}(${d.dayOfWeek})`).join(",") + "\n";
-    csv += "備註," + daysInMonth.map(d => `"${remarks[currentMonth]?.[d.day] || ""}"`).join(",") + "\n";
-    csv += "可休人數," + daysInMonth.map(d => limits[currentMonth]?.[d.day] || (d.rawDay === 0 || d.rawDay === 6 || d.holiday ? defaultHolidayLimit : defaultWeekdayLimit)).join(",") + "\n";
+    csv += "備註," + daysInMonth.map(d => `"${preLeaveData.remarks?.[currentMonth]?.[d.day] || ""}"`).join(",") + "\n";
+    csv += "可休人數," + daysInMonth.map(d => preLeaveData.dailyLimits?.[currentMonth]?.[d.day] || (d.rawDay === 0 || d.rawDay === 6 || d.holiday ? defaultHolidayLimit : defaultWeekdayLimit)).join(",") + "\n";
     csv += "---藥師預假詳情---\n";
     employees.filter(e => !e.isSeparator).forEach(emp => {
       csv += `${emp.name},` + daysInMonth.map(d => {
         const sVal = schedule[currentMonth]?.[emp.name]?.[d.day];
         if (['休', '公假', '例', '休假'].includes(sVal)) return sVal;
-        return preLeaveData[currentMonth]?.[emp.name]?.[d.day] || "";
+        return preLeaveData.apps?.[currentMonth]?.[emp.name]?.[d.day] || "";
       }).join(",") + "\n";
     });
 
@@ -403,13 +400,13 @@ const getLeaveList = (day) => {
   };
   
   const handleAdminSettingChange = (type, value) => {
-    if (!isAdmin) return;
-    const next = deepClone(preLeaveData);
-    if (type === 'holiday') next.weekendLimit = value;
-    else if (type === 'weekday') next.weekdayLimit = value;
-    else if (type === 'lotteryDay') next.lotteryDay = value;
-    setPreLeaveData(next); // 這樣這三個全域設定也會存進雲端
+  if (!isAdmin) return;
+  const next = deepClone(preLeaveData);
+  if (type === 'holiday') next.weekendLimit = value;
+  else if (type === 'weekday') next.weekdayLimit = value;
+  setPreLeaveData(next); // 此處會觸發 App 的 saveData
   };
+
 
   const handleLottery = () => {
     if (isMonthDrawn) return;
@@ -418,7 +415,7 @@ const getLeaveList = (day) => {
 
     daysInMonth.forEach(d => {
       const candidates = getLeaveList(d.day);
-      const limit = parseInt(limits[currentMonth]?.[d.day] || (d.rawDay === 0 || d.rawDay === 6 || d.holiday ? defaultHolidayLimit : defaultWeekdayLimit));
+      const limit = parseInt(preLeaveData.dailyLimits?.[currentMonth]?.[d.day] || (d.rawDay === 0 || d.rawDay === 6 || d.holiday ? defaultHolidayLimit : defaultWeekdayLimit));
       const winners = [...candidates].sort(() => 0.5 - Math.random()).slice(0, limit);
       winners.forEach(name => {
         if (!nextSched[currentMonth][name]) nextSched[currentMonth][name] = {};
@@ -426,11 +423,17 @@ const getLeaveList = (day) => {
       });
     });
 
+    const nextPreLeave = {
+      ...preLeaveData,
+      drawnMonths: [...(preLeaveData.drawnMonths || []), currentMonth]
+    };
+
     setSchedule(nextSched);
-    setPreLeaveData(prev => ({ ...prev, drawnMonths: [...(prev.drawnMonths || []), currentMonth] }));
+    setPreLeaveData(nextPreLeave);
+    saveData({ schedule: nextSched, preLeaveData: nextPreLeave });
     
     setTimeout(() => {
-      alert(`${currentMonth} 抽籤完成！結果已同步至班表，請手動下載備份。`);
+      alert(`${currentMonth} 抽籤完成！結果已同步至雲端，請手動下載備份。`);
     }, 100);
   };
 
@@ -495,7 +498,7 @@ const getLeaveList = (day) => {
                 <td className="sticky left-0 z-20 bg-white border p-2 font-black shadow-sm text-center">{emp.name}</td>
                 {daysInMonth.map(d => {
                   const sVal = schedule[currentMonth]?.[emp.name]?.[d.day];
-                  const isApplied = preLeaveData[currentMonth]?.[emp.name]?.[d.day] === "預假";
+                  const isApplied = preLeaveData.apps?.[currentMonth]?.[emp.name]?.[d.day] === "預假";
                   const isFixed = ['休', '公假', '例'].includes(sVal);
                   const isWinner = sVal === '休';
                   const cycleEnd = isCycleEnd(d.fullDate);
@@ -677,24 +680,25 @@ const RecordsView = ({ currentUser, swapRequests, onAction, schedule, currentMon
           <h3 className="text-xs font-black text-indigo-400 border-l-4 border-indigo-400 pl-2 uppercase tracking-widest">待處理流程 ({pendingList.length})</h3>
           {pendingList.length === 0 ? <div className="bg-white p-10 rounded-2xl border border-dashed text-center text-gray-300 italic font-bold">目前無待核定資料</div> :
             pendingList.map(req => {
+              // --- V1.7.10 核心修正邏輯：僅校驗 Target 且忽略裝飾符 ---
               const checkDays = req.isBundle ? req.daysToSwap : [req.day];
               const isShiftMismatched = checkDays.some(d => {
-               const rawCurCreator = schedule[currentMonth]?.[req.creatorName]?.[d];
-               const rawCurTarget = schedule[currentMonth]?.[req.targetName]?.[d];
-               
-               // 建立一個標準化函數：將 null, undefined, "" 或 " " 統一視為 "-"
-               const normalize = (v) => {
-                const s = (v || "-").toString().trim();
-                return s === "" ? "-" : s;
-              };
-              
-              const curCreatorS = normalize(rawCurCreator);
-              const curTargetS = normalize(rawCurTarget);
-              const storedCreatorS = normalize(req.creatorShift);
-              const storedTargetS = normalize(req.targetShift);
-              // 進行比對
-              return curCreatorS !== storedCreatorS || curTargetS !== storedTargetS;
+                const rawCurTarget = schedule[currentMonth]?.[req.targetName]?.[d];
+                
+                const normalize = (v) => {
+                  const s = (v === null || v === undefined) ? "-" : String(v).trim();
+                  return (s === "" || s === "-") ? "-" : s;
+                };
+
+                const curTargetS = normalize(rawCurTarget);
+                const storedTargetS = normalize(req.targetShift);
+                
+                // 處理 P# 與 P 的相容性比對：移除 '#' 進行基礎班別校驗
+                // 依據指令：僅校驗「被換班人員 (Target)」，完全排除申請人校驗
+                const clean = (val) => val.replace(/#/g, '');
+                return clean(curTargetS) !== clean(storedTargetS);
               });
+              // --- 修正結束 ---
 
               return (
                 <div key={req.id} className="bg-white p-4 rounded-2xl shadow-sm border border-l-4 border-l-indigo-400 flex flex-col sm:flex-row justify-between items-start sm:items-center gap-3">
@@ -1253,7 +1257,7 @@ const ManagementReportView = ({ currentMonth, employees, schedule, personDayRule
       if (!isFourWeekMode && !isNightFeeMode) row.push(rowSum.toFixed(reportType === 'personDays' ? 1 : 0));
       csv += row.join(",") + "\n";
     });
-    const blob = new Blob([csv], { type: 'text/csv;charset=utf-8' });
+    const blob = new Blob([csv], { type: 'text/csv;charset=utf-8;' });
     const link = document.createElement("a");
     link.href = URL.createObjectURL(blob);
     link.download = `管理報表_${typeLabel}_${rtTitle}.csv`;
@@ -1324,7 +1328,7 @@ const ManagementReportView = ({ currentMonth, employees, schedule, personDayRule
                     );
                   })}
                   {!isFourWeekMode && !isNightFeeMode && (
-                    <td className="sticky right-0 z-30 bg-[#F1F8F7] border-l-2 border-b border-gray-200 p-2 font-black text-teal-800 group-hover:bg-[#E0F2F1] shadow-[-2px_0_5px_rgba(0,0,0,0.05)] text-sm">
+                    <td className="sticky right-0 z-30 bg-[#F1F8F7] border-l-2 border-b border-gray-200 p-2 font-black text-teal-800 group-hover:bg-[#E0F2F1] shadow-[-2px_0_5_rgba(0,0,0,0.05)] text-sm">
                       {rowSum > 0 ? rowSum.toFixed(reportType === 'personDays' ? 1 : 0) : "-"}
                     </td>
                   )}
@@ -1434,11 +1438,13 @@ const SchedulingView = ({ currentMonth, employees, daysInMonth, schedule, setSch
   const handlePublishSchedule = () => {
     const nextSchedule = { ...schedule, [currentMonth]: deepClone(editSched) };
     setSchedule(nextSchedule);
-    // 呼叫 saveData 將整份班表推送到雲端
     saveData({ schedule: nextSchedule }); 
+    if (exportScheduleCSV) {
+      exportScheduleCSV("發佈自動備份");
+    }
     setIsDirty(false); 
     setCurrentPage('home');
-    alert("班表發佈完成並已同步至雲端！");
+    alert("班表發佈完成！");
   };
 
   return (
@@ -1453,7 +1459,7 @@ const SchedulingView = ({ currentMonth, employees, daysInMonth, schedule, setSch
           )}
           {importPreview && (
              <div className="flex items-center gap-2 bg-blue-50 px-3 py-1 rounded border border-blue-200">
-               <span className="text-[10px] font-bold text-blue-700 animate-pulse flex items-center gap-1"><ShieldCheck size={14}/> 對比模式：全格點選切換</span>
+               <span className="text-[10px] font-bold text-blue-700 animate-pulse flex items-center gap-1"><ShieldCheck size={14}/> 對比模式：點選切換</span>
                <button onClick={confirmApplyImport} className="text-[10px] bg-blue-600 text-white px-2 py-0.5 rounded font-bold">確認套用</button>
                <button onClick={() => setImportPreview(null)} className="text-[10px] bg-gray-400 text-white px-2 py-0.5 rounded font-bold">取消</button>
              </div>
@@ -1554,21 +1560,23 @@ const App = () => {
   const [isDirty, setIsDirty] = useState(false);
   const [showExitConfirm, setShowExitConfirm] = useState(false);
   const [targetPage, setTargetPage] = useState(null);
-  // 預假資料狀態 (由 App 統一管理)
   const [preLeaveData, setPreLeaveData] = useState({apps: {},dailyLimits: {},remarks: {},weekendLimit: 10,weekdayLimit: 3,lotteryDay: 15,drawnMonths: []});
-// 統一雲端儲存函數
-  const saveData = async (updates) => {if (!auth.currentUser) return;
-    // 路徑：1.artifacts, 2.appId, 3.public, 4.data, 5.roster, 6.main (共 6 段)
-    const docRef = doc(db, 'artifacts', appId, 'public', 'data', 'roster', 'main');try {await setDoc(docRef, updates, { merge: true });} catch (error) {console.error("雲端儲存失敗:", error);
-}
+  
+  const saveData = async (updates) => {
+    if (!auth.currentUser) return;
+    const docRef = doc(db, 'artifacts', appId, 'public', 'data', 'roster', 'main');
+    try {
+      await setDoc(docRef, updates, { merge: true });
+    } catch (error) {
+      console.error("雲端儲存失敗:", error);
+    }
   };
-  useEffect(() => {const initAuth = async () => { try {if (typeof __initial_auth_token !== 'undefined' && __initial_auth_token) {await signInWithCustomToken(auth, __initial_auth_token);} else {await signInAnonymously(auth);}} catch (err) {console.warn("驗證不匹配，自動切換至匿名模式:", err);await signInAnonymously(auth);}};initAuth();
+
+  useEffect(() => {const initAuth = async () => { try {if (typeof __initial_auth_token !== 'undefined' && __initial_auth_token) {await signInWithCustomToken(auth, __initial_auth_token);} else {await signInAnonymously(auth);}} catch (err) {console.warn("驗證不匹配:", err);await signInAnonymously(auth);}};initAuth();
 }, []);
   
-  // 建立 Firestore 即時監聽
     useEffect(() => {const docRef = doc(db, 'artifacts', appId, 'public', 'data', 'roster', 'main');const unsubData = onSnapshot(docRef, (snap) => {
       if (snap.exists()) {const d = snap.data();
-        // 如果雲端有資料，則同步到本地 State
         if (d.employees) setEmployees(d.employees);
         if (d.shifts) setShifts(d.shifts);
         if (d.holidays) setHolidays(d.holidays);
@@ -1576,7 +1584,7 @@ const App = () => {
         if (d.schedule) setSchedule(d.schedule);
         if (d.cellColors) setCellColors(d.cellColors);
         if (d.swapRequests) setSwapRequests(d.swapRequests);
-        if (d.preLeaveData) setPreLeaveData(d.preLeaveData); // 同步預假資料
+        if (d.preLeaveData) setPreLeaveData(d.preLeaveData); 
       }
     }, (error) => console.error("雲端監聽失敗:", error));
 
@@ -1613,14 +1621,13 @@ const App = () => {
 
 const handleSwapApply = (targetEmp, dayInfo) => {
   if (!currentUser || targetEmp.id === currentUser.id) return;
-  // --- 關鍵修正：標準化班別 ---
   const normalize = (v) => (v || "-").toString().trim() === "" ? "-" : (v || "-").toString().trim();
   const targetShift = normalize(schedule[currentMonth]?.[targetEmp.name]?.[dayInfo.day]);
   const myShift = normalize(schedule[currentMonth]?.[currentUser.name]?.[dayInfo.day]);
   
   let isBundle = false, startDate = dayInfo.fullDate, endDate = dayInfo.fullDate, daysToSwap = [dayInfo.day];
   const targetDate = new Date(dayInfo.fullDate);
-  const dOfW = targetDate.getDay(); // 0:日, 1:一 ... 6:六
+  const dOfW = targetDate.getDay(); 
 
   const getShiftType = (val) => {
     if (val.startsWith('A1') || val.startsWith('A2')) return 'A1A2';
@@ -1632,7 +1639,6 @@ const handleSwapApply = (targetEmp, dayInfo) => {
   const type = getShiftType(targetShift) || getShiftType(myShift);
 
   if (type === 'A1A2') {
-    // 週一到週五的 A1 或 A2 班 (5天)
     if (dOfW >= 1 && dOfW <= 5) {
       isBundle = true;
       const mon = new Date(targetDate); mon.setDate(targetDate.getDate() - (dOfW - 1));
@@ -1642,7 +1648,6 @@ const handleSwapApply = (targetEmp, dayInfo) => {
       daysToSwap = []; for (let i = 0; i < 5; i++) { const d = new Date(mon); d.setDate(mon.getDate() + i); daysToSwap.push(d.getDate()); }
     }
   } else if (type === 'A3') {
-    // 週一到週四的 A3 班 (4天) - 修正點：只取週一到週四
     if (dOfW >= 1 && dOfW <= 4) {
       isBundle = true;
       const mon = new Date(targetDate); mon.setDate(targetDate.getDate() - (dOfW - 1));
@@ -1652,7 +1657,6 @@ const handleSwapApply = (targetEmp, dayInfo) => {
       daysToSwap = []; for (let i = 0; i < 4; i++) { const d = new Date(mon); d.setDate(mon.getDate() + i); daysToSwap.push(d.getDate()); }
     }
   } else if (type === 'P') {
-    // 週六到週日的 P# 合併週一到週四的 P 班 (共 6 天)
     if (dOfW === 6 || dOfW === 0 || (dOfW >= 1 && dOfW <= 4)) {
       isBundle = true;
       const sat = new Date(targetDate);
@@ -1663,16 +1667,63 @@ const handleSwapApply = (targetEmp, dayInfo) => {
       daysToSwap = []; for (let i = 0; i < 6; i++) { const d = new Date(sat); d.setDate(sat.getDate() + i); daysToSwap.push(d.getDate());  }
         }
       }
+
+    setSwapTarget({
+      date: dayInfo.fullDate,
+      dayOfWeek: dayInfo.dayOfWeek,
+      day: dayInfo.day,
+      creatorId: currentUser.id,
+      creatorName: currentUser.name,
+      creatorShift: myShift,
+      targetId: targetEmp.id,
+      targetName: targetEmp.name,
+      targetShift: targetShift,
+      isBundle,
+      startDate,
+      endDate,
+      daysToSwap
+    });
   };
 
-  const handleRecordAction = (req, action) => {
+    const handleRecordAction = (req, action) => {
     if (action === 'Approve') {
       let nextStatus = req.status;
-      if (req.status === 'PendingTarget') nextStatus = 'PendingAdmin';
-      else if (req.status === 'PendingAdmin') { nextStatus = 'Approved'; const ns = deepClone(schedule); if (!ns[currentMonth]) ns[currentMonth] = {}; (req.isBundle ? req.daysToSwap : [req.day]).forEach(d => { const cS = ns[currentMonth][req.creatorName]?.[d] || "-"; const tS = ns[currentMonth][req.targetName]?.[d] || "-"; if (!ns[currentMonth][req.creatorName]) ns[currentMonth][req.creatorName] = {}; if (!ns[currentMonth][req.targetName]) ns[currentMonth][req.targetName] = {}; ns[currentMonth][req.creatorName][d] = tS; ns[currentMonth][req.targetName][d] = cS; }); setSchedule(ns); }
-      setSwapRequests(swapRequests.map(r => r.id === req.id ? { ...r, status: nextStatus } : r));
-    } else if (action === 'Reject') setSwapRequests(swapRequests.map(r => r.id === req.id ? { ...r, status: 'Rejected' } : r));
-    else if (action === 'Delete') setSwapRequests(swapRequests.map(r => r.id === req.id ? { ...r, status: 'Deleted' } : r));
+      let updatedSchedule = null; // 新增：用來暫存新班表
+      if (req.status === 'PendingTarget') {
+        nextStatus = 'PendingAdmin';
+      } else if (req.status === 'PendingAdmin') {
+        nextStatus = 'Approved';
+        const ns = deepClone(schedule);
+        if (!ns[currentMonth]) ns[currentMonth] = {};
+        // 執行對調邏輯
+        (req.isBundle ? req.daysToSwap : [req.day]).forEach(d => {
+          const cS = ns[currentMonth][req.creatorName]?.[d] || "-";
+          const tS = ns[currentMonth][req.targetName]?.[d] || "-";
+          if (!ns[currentMonth][req.creatorName]) ns[currentMonth][req.creatorName] = {};
+          if (!ns[currentMonth][req.targetName]) ns[currentMonth][req.targetName] = {};
+          ns[currentMonth][req.creatorName][d] = tS;
+          ns[currentMonth][req.targetName][d] = cS;
+        });
+        setSchedule(ns); // 更新本地狀態
+        updatedSchedule = ns; // 標記：這一次需要存入新班表
+      }
+      const nextRequests = swapRequests.map(r => r.id === req.id ? { ...r, status: nextStatus } : r);
+      setSwapRequests(nextRequests);
+      // 核心存檔邏輯：
+      if (updatedSchedule) {
+        // 如果是最終核定，同時存入「新申請狀態」與「對調後的班表」
+        saveData({ swapRequests: nextRequests, schedule: updatedSchedule });
+      } else {
+        // 如果只是 PendingTarget -> PendingAdmin，只需存入申請單
+        saveData({ swapRequests: nextRequests });
+      }
+    } else if (action === 'Reject' || action === 'Delete') {
+      const nextRequests = action === 'Reject' 
+        ? swapRequests.map(r => r.id === req.id ? { ...r, status: 'Rejected' } : r)
+        : swapRequests.filter(r => r.id !== req.id);
+      setSwapRequests(nextRequests);
+      saveData({ swapRequests: nextRequests });
+    }
   };
 
   const exportScheduleCSV = (prefix = "") => {
@@ -1689,8 +1740,8 @@ const handleSwapApply = (targetEmp, dayInfo) => {
         {(() => {
           switch (currentPage) {
             case 'home': return <ScheduleTableView currentMonth={currentMonth} employees={employees} schedule={schedule} cellColors={cellColors} daysInMonth={daysInMonth} swapRequests={swapRequests} currentPage={currentPage} currentUser={currentUser} />;
-            case 'account': return <AccountManagementView employees={employees} setEmployees={setEmployees} setDeleteTarget={setDeleteTarget} />;
-            case 'shifts': return <ShiftsManagementView shifts={shifts} setShifts={setShifts} holidays={holidays} setHolidays={setHolidays} setDeleteShiftTarget={setDeleteShiftTarget} personDayRules={personDayRules} setPersonDayRules={setPersonDayRules} />;
+            case 'account': return <AccountManagementView employees={employees}  setEmployees={(val) => { setEmployees(val); saveData({ employees: val }); }} setDeleteTarget={setDeleteTarget} />;
+            case 'shifts': return <ShiftsManagementView shifts={shifts} setShifts={(val) => { setShifts(val); saveData({ shifts: val }); }}  holidays={holidays} setHolidays={(val) => { setHolidays(val); saveData({ holidays: val }); }}  setDeleteShiftTarget={setDeleteShiftTarget} personDayRules={personDayRules}  setPersonDayRules={(val) => { setPersonDayRules(val); saveData({ personDayRules: val }); }} />;
             case 'swap': return <ScheduleTableView currentMonth={currentMonth} employees={employees} schedule={schedule} cellColors={cellColors} daysInMonth={daysInMonth} onCellClick={handleSwapApply} swapRequests={swapRequests} currentPage={currentPage} currentUser={currentUser} />;
             case 'records': return <RecordsView currentUser={currentUser} swapRequests={swapRequests} onAction={handleRecordAction} schedule={schedule} currentMonth={currentMonth} />;
             case 'leave':  return  <PreLeaveView currentMonth={currentMonth} employees={employees} daysInMonth={daysInMonth} currentUser={currentUser} schedule={schedule} setSchedule={(val) => { setSchedule(val); saveData({ schedule: val }); }} preLeaveData={preLeaveData} setPreLeaveData={(val) => { setPreLeaveData(val); saveData({ preLeaveData: val }); }}   saveData={saveData} />;
@@ -1698,17 +1749,17 @@ const handleSwapApply = (targetEmp, dayInfo) => {
             case 'report': return <ManagementReportView currentMonth={currentMonth} employees={employees} schedule={schedule} personDayRules={personDayRules} holidays={holidays} shifts={shifts} />;
             case 'login': {
               const triggerLogin = () => { const id = document.getElementById('uid')?.value.toUpperCase(); const pwd = document.getElementById('upwd')?.value; if (!pwd) { alert("請輸入密碼！"); return; } handleLoginAction(id, pwd); };
-              return (<div className="flex flex-col items-center justify-center min-h-[60vh] p-4"><div className="bg-white p-10 rounded-[2.5rem] shadow-2xl border max-w-sm w-full text-center"><h2 className="text-xl font-black mb-2 text-gray-800">藥劑部 班表系統登入</h2><div className="text-[10px] text-gray-400 font-bold mb-8">第一次輸入的密碼會自動設定為密碼</div><div className="space-y-4"><input className="w-full border-2 p-3 rounded-2xl outline-none font-mono text-center uppercase" placeholder="員編" id="uid" onInput={(e) => e.target.value = e.target.value.toUpperCase()} onKeyDown={(e) => e.key === 'Enter' && triggerLogin()} /><div className="relative"><input className="w-full border-2 p-3 rounded-2xl outline-none text-center" type={showPassword ? "text" : "password"} placeholder="密碼" id="upwd" onKeyDown={(e) => e.key === 'Enter' && triggerLogin()} /><button onClick={()=>setShowPassword(!showPassword)} className="absolute right-4 top-4 text-gray-400">{showPassword ? <Eye size={18}/> : <EyeOff size={18}/>}</button></div><button onClick={triggerLogin} className="w-full bg-blue-600 text-white p-3 rounded-2xl font-black shadow transition-all transform active:scale-95">進入系統</button></div></div><div className="mt-12 text-[11px] text-gray-400 font-bold tracking-wider">© 2026 NTUH Yunlin Pharmacy - V1.7.3</div></div>);
+              return (<div className="flex flex-col items-center justify-center min-h-[60vh] p-4"><div className="bg-white p-10 rounded-[2.5rem] shadow-2xl border max-w-sm w-full text-center"><h2 className="text-xl font-black mb-2 text-gray-800">藥劑部 班表系統登入</h2><div className="text-[10px] text-gray-400 font-bold mb-8">第一次輸入的密碼會自動設定為密碼</div><div className="space-y-4"><input className="w-full border-2 p-3 rounded-2xl outline-none font-mono text-center uppercase" placeholder="員編" id="uid" onInput={(e) => e.target.value = e.target.value.toUpperCase()} onKeyDown={(e) => e.key === 'Enter' && triggerLogin()} /><div className="relative"><input className="w-full border-2 p-3 rounded-2xl outline-none text-center" type={showPassword ? "text" : "password"} placeholder="密碼" id="upwd" onKeyDown={(e) => e.key === 'Enter' && triggerLogin()} /><button onClick={()=>setShowPassword(!showPassword)} className="absolute right-4 top-4 text-gray-400">{showPassword ? <Eye size={18}/> : <EyeOff size={18}/>}</button></div><button onClick={triggerLogin} className="w-full bg-blue-600 text-white p-3 rounded-2xl font-black shadow transition-all transform active:scale-95">進入系統</button></div></div><div className="mt-12 text-[11px] text-gray-400 font-bold tracking-wider">© 2026 NTUH Yunlin Pharmacy - V1.7.10</div></div>);
             }
             default: return null;
           }
         })()}
       </main>
       <Modal isOpen={showExitConfirm} onClose={() => { setShowExitConfirm(false); setTargetPage(null); }} onConfirm={confirmExit} title="班表尚未發佈" message="您有變更排班表，但尚未「發佈班表」。確定要離開嗎？" confirmText="仍要離開" cancelText="留在這裏" />
-      <SwapRequestModal isOpen={!!swapTarget} onClose={()=>setSwapTarget(null)} onConfirm={()=>{ setSwapRequests([...swapRequests, {...swapTarget, id:`REQ-${Date.now()}`, status:'PendingTarget', timestamp:Date.now(), adminNote:""}]); setSwapTarget(null); }} data={swapTarget} />
-      <Modal isOpen={!!rejectingReq} onClose={()=>setRejectingReq(null)} onConfirm={()=>{ setSwapRequests(swapRequests.map(r => r.id === rejectingReq.id ? { ...r, status: 'Rejected', adminNote: rejectNote || "管理員否決" } : r)); setRejectNote(""); setRejectingReq(null); }} title="否決換班申請" confirmText="確認否決"><textarea className="w-full border-2 rounded-2xl p-3 text-sm outline-none" placeholder="原因..." rows={3} value={rejectNote} onChange={(e) => setRejectNote(e.target.value)} /></Modal>
-      <Modal isOpen={!!deleteTarget} onClose={()=>setDeleteTarget(null)} onConfirm={()=>{setEmployees(employees.filter(e=>e.id!==deleteTarget.id)); setDeleteTarget(null)}} title="確定刪除人員？" message="移除該人員將影響本期報表。" />
-      <Modal isOpen={!!deleteShiftTarget} onClose={()=>setDeleteShiftTarget(null)} onConfirm={()=>{setShifts(shifts.filter(s=>s.id!==deleteShiftTarget.id)); setDeleteShiftTarget(null)}} title="確定刪除班別？" message={`移除 ${deleteShiftTarget?.name}。`} />
+      <SwapRequestModal isOpen={!!swapTarget} onClose={()=>setSwapTarget(null)} onConfirm={()=>{ const nextRequests = [...swapRequests, {...swapTarget, id:`REQ-${Date.now()}`, status:'PendingTarget', timestamp:Date.now(), adminNote:""}]; setSwapRequests(nextRequests); saveData({ swapRequests: nextRequests }); setSwapTarget(null); }} data={swapTarget} />
+      <Modal isOpen={!!rejectingReq} onClose={()=>setRejectingReq(null)} onConfirm={()=>{ const nextRequests = swapRequests.map(r => r.id === rejectingReq.id ? { ...r, status: 'Rejected', adminNote: rejectNote || "管理員否決" } : r); setSwapRequests(nextRequests); saveData({ swapRequests: nextRequests }); setRejectNote(""); setRejectingReq(null); }} title="否決換班申請" confirmText="確認否決"><textarea className="w-full border-2 rounded-2xl p-3 text-sm outline-none" placeholder="原因..." rows={3} value={rejectNote} onChange={(e) => setRejectNote(e.target.value)} /></Modal>
+      <Modal isOpen={!!deleteTarget} onClose={()=>setDeleteTarget(null)} onConfirm={()=>{const next = employees.filter(e=>e.id!==deleteTarget.id); setEmployees(next); saveData({ employees: next }); setDeleteTarget(null)}} title="確定刪除人員？" message="移除該人員將影響本期報表。" />
+      <Modal isOpen={!!deleteShiftTarget} onClose={()=>setDeleteShiftTarget(null)} onConfirm={()=>{const next = shifts.filter(s=>s.id!==deleteShiftTarget.id); setShifts(next); saveData({ shifts: next }); setDeleteShiftTarget(null)}} title="確定刪除班別？" message={`移除 ${deleteShiftTarget?.name}。`} />
     </div>
   );
 };
