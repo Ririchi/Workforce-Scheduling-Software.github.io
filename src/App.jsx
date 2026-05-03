@@ -184,7 +184,7 @@ const SwapRequestModal = ({ isOpen, onClose, onConfirm, data }) => {
               <div className="bg-cyan-50 text-cyan-700 rounded-lg py-2 mt-1 font-mono text-xs border border-cyan-100 font-black">{data.targetShift}</div>
             </div>
           </div>
-          {isBundle && <div className="text-[10px] text-gray-400 text-center italic bg-gray-50 p-2 rounded-xl">注意：系統將自動對調該整段週期之班別</div>}
+          {isBundle && <div className="text-[10px] text-gray-400 text-center italic bg-gray-50 p-2 rounded-xl">注意：系統將自動對調整段週期之班別</div>}
         </div>
         <div className="p-6 pt-0 flex gap-3">
           <button onClick={onClose} className="flex-grow py-3 text-sm font-bold text-gray-400 bg-gray-50 rounded-xl hover:bg-gray-100 transition-colors">取消</button>
@@ -331,13 +331,10 @@ const ScheduleTableView = ({ currentMonth, employees, schedule, cellColors, days
   );
 };
 
-const PreLeaveView = ({ currentMonth, employees, daysInMonth, currentUser, schedule, setSchedule, preLeaveData, setPreLeaveData }) => {
-  // ... 內部代碼
-  
+ const PreLeaveView = ({ currentMonth, employees, daysInMonth, currentUser, schedule, setSchedule, preLeaveData, setPreLeaveData, saveData }) => {
   const [defaultHolidayLimit, setDefaultHolidayLimit] = useState(10);
   const [defaultWeekdayLimit, setDefaultWeekdayLimit] = useState(3);
   const [lotteryDay, setLotteryDay] = useState(15);
-
   const isAdmin = currentUser?.role === '0';
   const isMonthDrawn = (preLeaveData.drawnMonths || []).includes(currentMonth);
 
@@ -1338,7 +1335,7 @@ const ManagementReportView = ({ currentMonth, employees, schedule, personDayRule
   );
 };
 
-const SchedulingView = ({ currentMonth, employees, daysInMonth, schedule, setSchedule, cellColors, setCellColors, shifts, exportScheduleCSV, setCurrentPage, setIsDirty }) => {
+const SchedulingView = ({ currentMonth, employees, daysInMonth, schedule, setSchedule, cellColors, setCellColors, shifts, exportScheduleCSV, setCurrentPage, setIsDirty, saveData }) => {
   const [editSched, setEditSched] = useState({});
   const [activeColor, setActiveColor] = useState('bg-white');
   const [importPreview, setImportPreview] = useState(null);
@@ -1653,8 +1650,8 @@ const App = () => {
             case 'shifts': return <ShiftsManagementView shifts={shifts} setShifts={setShifts} holidays={holidays} setHolidays={setHolidays} setDeleteShiftTarget={setDeleteShiftTarget} personDayRules={personDayRules} setPersonDayRules={setPersonDayRules} />;
             case 'swap': return <ScheduleTableView currentMonth={currentMonth} employees={employees} schedule={schedule} cellColors={cellColors} daysInMonth={daysInMonth} onCellClick={handleSwapApply} swapRequests={swapRequests} currentPage={currentPage} currentUser={currentUser} />;
             case 'records': return <RecordsView currentUser={currentUser} swapRequests={swapRequests} onAction={handleRecordAction} schedule={schedule} currentMonth={currentMonth} />;
-            case 'leave':return (<PreLeaveView currentMonth={currentMonth} employees={employees} daysInMonth={daysInMonth} currentUser={currentUser} schedule={schedule} setSchedule={(val) => { setSchedule(val); saveData({ schedule: val }); }} preLeaveData={preLeaveData} setPreLeaveData={(val) => { setPreLeaveData(val); saveData({ preLeaveData: val }); }} />);
-            case 'schedule': return <SchedulingView currentMonth={currentMonth} employees={employees} daysInMonth={daysInMonth} schedule={schedule} setSchedule={setSchedule} cellColors={cellColors} setCellColors={setCellColors} shifts={shifts} exportScheduleCSV={exportScheduleCSV} setCurrentPage={setCurrentPage} setIsDirty={setIsDirty} />;
+            case 'leave':  return  <PreLeaveView currentMonth={currentMonth} employees={employees} daysInMonth={daysInMonth} currentUser={currentUser} schedule={schedule} setSchedule={(val) => { setSchedule(val); saveData({ schedule: val }); }} preLeaveData={preLeaveData} setPreLeaveData={(val) => { setPreLeaveData(val); saveData({ preLeaveData: val }); }}   saveData={saveData} />;
+            case 'schedule': return <SchedulingView currentMonth={currentMonth} employees={employees} daysInMonth={daysInMonth} schedule={schedule} setSchedule={setSchedule} cellColors={cellColors} setCellColors={setCellColors} shifts={shifts} exportScheduleCSV={exportScheduleCSV} setCurrentPage={setCurrentPage} setIsDirty={setIsDirty} saveData={saveData} /> ;
             case 'report': return <ManagementReportView currentMonth={currentMonth} employees={employees} schedule={schedule} personDayRules={personDayRules} holidays={holidays} shifts={shifts} />;
             case 'login': {
               const triggerLogin = () => { const id = document.getElementById('uid')?.value.toUpperCase(); const pwd = document.getElementById('upwd')?.value; if (!pwd) { alert("請輸入密碼！"); return; } handleLoginAction(id, pwd); };
