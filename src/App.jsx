@@ -1684,43 +1684,27 @@ const handleSwapApply = (targetEmp, dayInfo) => {
     });
   };
 
-    const handleRecordAction = (req, action) => {
-      if (action === 'Approve') {
-        let nextStatus = req.status;
-        if (req.status === 'PendingTarget') {nextStatus = 'PendingAdmin';} else if (req.status === 'PendingAdmin') {nextStatus = 'Approved';
+const handleRecordAction = (req, action) => {
+  if (action === 'Approve') {
+    let nextStatus = req.status;
+    if (req.status === 'PendingTarget') { nextStatus = 'PendingAdmin'; 
+      const nextRequests = swapRequests.map(r => r.id === req.id ? { ...r, status: nextStatus } : r); setSwapRequests(nextRequests); saveData({ swapRequests: nextRequests }); 
+    } else if (req.status === 'PendingAdmin') { nextStatus = 'Approved'; 
       const ns = deepClone(schedule);
-      // 核心修正：從請求的日期中取得正確月份，而非使用全域 currentMonth
       const targetMonthKey = req.date ? req.date.substring(0, 7) : currentMonth;
       if (!ns[targetMonthKey]) ns[targetMonthKey] = {};
       (req.isBundle ? req.daysToSwap : [req.day]).forEach(d => {
         const cS = ns[targetMonthKey][req.creatorName]?.[d] || "-";
         const tS = ns[targetMonthKey][req.targetName]?.[d] || "-";
         if (!ns[targetMonthKey][req.creatorName]) ns[targetMonthKey][req.creatorName] = {};
-        if (!ns[targetMonthKey][req.targetName]) ns[targetMonthKey][req.targetName] = {};
-        ns[targetMonthKey][req.creatorName][d] = tS;
-        ns[targetMonthKey][req.targetName][d] = cS;
+        if (!ns[targetMonthKey][req.targetName]) ns[targetMonthKey][req.targetName] = {};ns[targetMonthKey][req.creatorName][d] = tS;ns[targetMonthKey][req.targetName][d] = cS;
       });
-      setSchedule(ns);
-        updatedSchedule = ns; // 標記：這一次需要存入新班表
-      }
-      const nextRequests = swapRequests.map(r => r.id === req.id ? { ...r, status: nextStatus } : r);
-      setSwapRequests(nextRequests);
-      // 核心存檔邏輯：
-      if (updatedSchedule) {
-        // 如果是最終核定，同時存入「新申請狀態」與「對調後的班表」
-        saveData({ swapRequests: nextRequests, schedule: updatedSchedule });
-      } else {
-        // 如果只是 PendingTarget -> PendingAdmin，只需存入申請單
-        saveData({ swapRequests: nextRequests });
-      }
-    } else if (action === 'Reject' || action === 'Delete') {
-      const nextRequests = action === 'Reject' 
-        ? swapRequests.map(r => r.id === req.id ? { ...r, status: 'Rejected' } : r)
-        : swapRequests.filter(r => r.id !== req.id);
-      setSwapRequests(nextRequests);
-      saveData({ swapRequests: nextRequests });
+      const nextRequests = swapRequests.map(r => r.id === req.id ? { ...r, status: nextStatus } : r);setSchedule(ns);setSwapRequests(nextRequests);saveData({ schedule: ns, swapRequests: nextRequests }); 
     }
-  };
+  } else if (action === 'Reject' || action === 'Delete') {
+    const nextRequests = (action === 'Delete') ? swapRequests.filter(r => r.id !== req.id): swapRequests.map(r => r.id === req.id ? { ...r, status: 'Rejected' } : r);setSwapRequests(nextRequests);saveData({ swapRequests: nextRequests });
+  }
+};
 
   const exportScheduleCSV = (prefix = "") => {
     const rt = toROCTitle(currentMonth), fp = prefix ? `${prefix}_` : "";
