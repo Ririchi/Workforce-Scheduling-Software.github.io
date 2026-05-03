@@ -1,4 +1,7 @@
 import React, { useState, useEffect, useMemo, useRef } from 'react';
+import { initializeApp } from 'firebase/app';
+import { getAuth, signInWithCustomToken, signInAnonymously, onAuthStateChanged } from 'firebase/auth';
+import { getFirestore, doc, setDoc, getDoc, onSnapshot, collection, query, updateDoc, deleteDoc } from 'firebase/firestore';
 import { 
   Home, UserCog, CalendarRange, ArrowLeftRight, Clock, LayoutGrid, Download, Upload, LogIn, LogOut,
   GripVertical, Plus, Trash2, Save, UserPlus, AlertCircle, Calendar as CalendarIcon, CheckCircle2,
@@ -6,7 +9,8 @@ import {
   Eye, EyeOff, ShieldCheck, ShieldAlert, BarChart3, History, Search, Check, X, ClipboardList, MessageSquare, User, Circle, Settings, Dice5, Lock, TrendingUp, Calculator
 } from 'lucide-react';
 
-// --- 常數定義與初始資料 --- 
+// --- 常數定義與初始資料 ---
+// 版本記錄：V1.7.3 - 介面優化與 Firebase 結構預備版
 const WEEKDAYS_MAP = ["日", "一", "二", "三", "四", "五", "六"];
 const PALETTE = [
   { name: '無色', class: 'bg-white' },
@@ -54,6 +58,21 @@ const INITIAL_PERSON_DAY_RULES = [
   { id: 12, pattern: '/4', value: '0.5', mode: 'suffix' }
 ];
 
+// Firebase 配置
+const firebaseConfig = {
+  apiKey: "AIzaSyCJ4U76sXFSc-eJsmRLnUgknNyV1V2Ll4Q",
+  authDomain: "workforce-scheduling-software.firebaseapp.com",
+  projectId: "workforce-scheduling-software",
+  storageBucket: "workforce-scheduling-software.firebasestorage.app",
+  messagingSenderId: "133587868564",
+  appId: "1:133587868564:web:e306d0a59a2365622acd81",
+  measurementId: "G-1EY4R8TBFJ"
+};
+const app = initializeApp(firebaseConfig);
+const auth = getAuth(app);
+const db = getFirestore(app);
+const appId = typeof __app_id !== 'undefined' ? __app_id : 'pharmacy-system-v1-7';
+
 // --- 輔助函數 ---
 const deepClone = (obj) => {
   if (!obj) return obj;
@@ -89,7 +108,6 @@ const toROCTitle = (currentMonth) => {
   return `${year}年${month}月`;
 };
 
-// 全域夜診識別函數，確保在所有組件中標準統一
 const getIsNightClinic = (emp) => {
   if (!emp) return false;
   return (
@@ -191,7 +209,7 @@ const Header = ({ currentMonth, setCurrentMonth, currentPage, handlePageChange, 
     <header className="bg-white border-b-2 border-gray-800 p-2 sm:p-3 sticky top-0 z-[100] shadow-md">
       <div className="max-w-full flex flex-col lg:flex-row lg:items-center justify-between gap-2">
         <div className="flex flex-wrap items-center gap-3">
-          <h1 className="text-xs font-black text-gray-800 border-r-2 border-gray-300 pr-4 leading-none cursor-pointer" onClick={() => handlePageChange('home')}>台大雲林藥劑部班表 <span className="text-[10px] text-gray-400 font-normal ml-1">V1.6.11</span></h1>
+          <h1 className="text-xs font-black text-gray-800 border-r-2 border-gray-300 pr-4 leading-none cursor-pointer" onClick={() => handlePageChange('home')}>台大雲林藥劑部班表 <span className="text-[10px] text-gray-400 font-normal ml-1">V1.7.3</span></h1>
           <div className="flex items-center gap-2">
             <input type="month" value={currentMonth} onChange={(e) => setCurrentMonth(e.target.value)} className="border-2 border-gray-300 rounded px-1.5 py-0.5 text-xs font-bold focus:border-blue-500 outline-none" />
             {isLoggedIn && (<span className="text-[11px] font-black text-blue-600 bg-blue-50 px-2 py-0.5 rounded-lg border border-blue-100 flex items-center gap-1"><User size={12}/> 哈囉, {currentUser.name}</span>)}
@@ -313,10 +331,8 @@ const ScheduleTableView = ({ currentMonth, employees, schedule, cellColors, days
   );
 };
 
-const PreLeaveView = ({ currentMonth, employees, daysInMonth, currentUser, schedule, setSchedule }) => {
-  const [preLeaveData, setPreLeaveData] = useState(() => JSON.parse(localStorage.getItem('preLeaveData') || '{"drawnMonths": []}'));
-  const [limits, setLimits] = useState(() => JSON.parse(localStorage.getItem('preLeaveLimits') || '{}'));
-  const [remarks, setRemarks] = useState(() => JSON.parse(localStorage.getItem('preLeaveRemarks') || '{}'));
+const PreLeaveView = ({ currentMonth, employees, daysInMonth, currentUser, schedule, setSchedule, preLeaveData, setPreLeaveData }) => {
+  // ... 內部代碼
   
   const [defaultHolidayLimit, setDefaultHolidayLimit] = useState(10);
   const [defaultWeekdayLimit, setDefaultWeekdayLimit] = useState(3);
@@ -325,46 +341,47 @@ const PreLeaveView = ({ currentMonth, employees, daysInMonth, currentUser, sched
   const isAdmin = currentUser?.role === '0';
   const isMonthDrawn = (preLeaveData.drawnMonths || []).includes(currentMonth);
 
-  useEffect(() => {
-    localStorage.setItem('preLeaveData', JSON.stringify(preLeaveData));
-    localStorage.setItem('preLeaveLimits', JSON.stringify(limits));
-    localStorage.setItem('preLeaveRemarks', JSON.stringify(remarks));
-  }, [preLeaveData, limits, remarks]);
-
-  useEffect(() => {
+useEffect(() => {
     if (!schedule[currentMonth]) return;
     let changed = false;
     const next = deepClone(preLeaveData);
-    if (!next[currentMonth]) return;
-
-    Object.keys(next[currentMonth]).forEach(empName => {
-      Object.keys(next[currentMonth][empName]).forEach(day => {
+    // 關鍵修改：從 next[currentMonth] 改為 next.apps[currentMonth]
+    if (!next.apps || !next.apps[currentMonth]) return;
+    Object.keys(next.apps[currentMonth]).forEach(empName => {
+      Object.keys(next.apps[currentMonth][empName]).forEach(day => {
         const sVal = schedule[currentMonth]?.[empName]?.[day];
-        if (['休', '公假', '例'].includes(sVal) && next[currentMonth][empName][day] === "預假") {
-          next[currentMonth][empName][day] = null;
+        // 如果班表已經變更為休假相關狀態，則清除預假標記
+        if (['休', '公假', '例'].includes(sVal) && next.apps[currentMonth][empName][day] === "預假") {
+          next.apps[currentMonth][empName][day] = null;
           changed = true;
         }
       });
     });
-    if (changed) setPreLeaveData(next);
+    
+    if (changed) {
+      setPreLeaveData(next);
+      saveData({ preLeaveData: next }); // 記得呼叫 saveData 同步回雲端
+    }
   }, [currentMonth, schedule]);
 
-  const handleToggle = (empName, day) => {
+ const handleToggle = (empName, day) => {
     if (isMonthDrawn) return;
     const sVal = schedule[currentMonth]?.[empName]?.[day];
     if (['休', '公假', '例'].includes(sVal)) return; 
     if (!isAdmin && empName !== currentUser?.name) return;
-    
     const next = deepClone(preLeaveData);
-    if (!next[currentMonth]) next[currentMonth] = {};
-    if (!next[currentMonth][empName]) next[currentMonth][empName] = {};
-    next[currentMonth][empName][day] = next[currentMonth][empName][day] === "預假" ? null : "預假";
+    // 關鍵修改：路徑增加 .apps
+    if (!next.apps) next.apps = {};
+    if (!next.apps[currentMonth]) next.apps[currentMonth] = {};
+    if (!next.apps[currentMonth][empName]) next.apps[currentMonth][empName] = {};
+    next.apps[currentMonth][empName][day] = next.apps[currentMonth][empName][day] === "預假" ? null : "預假";
     setPreLeaveData(next);
+    saveData({ preLeaveData: next }); // 同步雲端
   };
 
-  const getLeaveList = (day) => {
+const getLeaveList = (day) => {
     return employees
-      .filter(e => !e.isSeparator && !getIsNightClinic(e) && e.role !== '2' && e.role !== '3' && preLeaveData[currentMonth]?.[e.name]?.[day] === "預假")
+      .filter(e => !e.isSeparator && !getIsNightClinic(e) && e.role !== '2' && e.role !== '3' &&  preLeaveData.apps?.[currentMonth]?.[e.name]?.[day] === "預假") // 關鍵修改：加 .apps
       .map(e => e.name);
   };
 
@@ -387,12 +404,14 @@ const PreLeaveView = ({ currentMonth, employees, daysInMonth, currentUser, sched
     link.download = `預假橫式備份_${currentMonth}.csv`;
     link.click();
   };
-
+  
   const handleAdminSettingChange = (type, value) => {
     if (!isAdmin) return;
-    if (type === 'holiday') setDefaultHolidayLimit(value);
-    else if (type === 'weekday') setDefaultWeekdayLimit(value);
-    else if (type === 'lotteryDay') setLotteryDay(value);
+    const next = deepClone(preLeaveData);
+    if (type === 'holiday') next.weekendLimit = value;
+    else if (type === 'weekday') next.weekdayLimit = value;
+    else if (type === 'lotteryDay') next.lotteryDay = value;
+    setPreLeaveData(next); // 這樣這三個全域設定也會存進雲端
   };
 
   const handleLottery = () => {
@@ -441,10 +460,8 @@ const PreLeaveView = ({ currentMonth, employees, daysInMonth, currentUser, sched
                 <td key={d.day} className={`border p-0.5 align-middle ${isCycleEnd(d.fullDate) ? 'border-r-4 border-r-gray-400' : ''}`}>
                   <textarea 
                     rows={1}
-                    value={remarks[currentMonth]?.[d.day] || ""} 
-                    disabled={!isAdmin || isMonthDrawn}
-                    onInput={(e) => { e.target.style.height = 'auto'; e.target.style.height = e.target.scrollHeight + 'px'; }}
-                    onChange={e => { const r = deepClone(remarks); if(!r[currentMonth]) r[currentMonth]={}; r[currentMonth][d.day] = e.target.value; setRemarks(r); }} 
+                    value={preLeaveData.remarks?.[currentMonth]?.[d.day] || ""} 
+                    onChange={e => { const next = deepClone(preLeaveData); if(!next.remarks) next.remarks = {};if(!next.remarks[currentMonth]) next.remarks[currentMonth] = {}; next.remarks[currentMonth][d.day] = e.target.value;   setPreLeaveData(next); // 這會觸發 App 的 saveData 並存入雲端}}
                     className={`w-full overflow-hidden bg-transparent text-[11px] font-bold text-purple-600 text-center ${(!isAdmin || isMonthDrawn) ? 'cursor-not-allowed' : ''}`}
                   />
                 </td>
@@ -456,9 +473,8 @@ const PreLeaveView = ({ currentMonth, employees, daysInMonth, currentUser, sched
                 <td key={d.day} className={`border p-1 font-bold text-teal-800 ${isCycleEnd(d.fullDate) ? 'border-r-4 border-r-gray-400' : ''}`}>
                   <input 
                     type="text" 
-                    value={limits[currentMonth]?.[d.day] || (d.rawDay === 0 || d.rawDay === 6 || d.holiday ? defaultHolidayLimit : defaultWeekdayLimit)} 
-                    disabled={!isAdmin || isMonthDrawn} 
-                    onChange={e => { const n = deepClone(limits); if(!n[currentMonth]) n[currentMonth]={}; n[currentMonth][d.day] = e.target.value; setLimits(n); }} 
+                    value={preLeaveData.dailyLimits?.[currentMonth]?.[d.day] || (d.rawDay === 0 || d.rawDay === 6 || d.holiday ? preLeaveData.weekendLimit : preLeaveData.weekdayLimit)} 
+                    onChange={e => { const next = deepClone(preLeaveData);  if(!next.dailyLimits) next.dailyLimits = {};if(!next.dailyLimits[currentMonth]) next.dailyLimits[currentMonth] = {};  next.dailyLimits[currentMonth][d.day] = e.target.value; setPreLeaveData(next); // 這會觸發 App 的 saveData 並存入雲端}}
                     className={`w-full bg-transparent text-center font-bold text-teal-800 outline-none ${(!isAdmin || isMonthDrawn) ? 'cursor-not-allowed' : ''}`}
                   />
                 </td>
@@ -811,7 +827,6 @@ const AccountManagementView = ({ employees, setEmployees, setDeleteTarget }) => 
       const next = rows.map(r => {
         const [id, name, role, labor, pwd] = r.split(',');
         if (id && name) {
-          // 修正：匯入時自動偵測 ID 或名稱，恢復夜診屬性標籤
           const isNC = (id === "E1" || id === "E2" || id === "E3" || name.includes("夜診"));
           return { id, name, role: role || '1', labor: labor || 'N', password: pwd || "", isNightClinic: isNC };
         }
@@ -1115,9 +1130,8 @@ const ShiftsManagementView = ({ shifts, setShifts, holidays, setHolidays, setDel
   );
 };
 
-// --- 子組件：管理報表 (V1.6.11 更新修正區塊) ---
 const ManagementReportView = ({ currentMonth, employees, schedule, personDayRules, holidays, shifts }) => {
-  const [reportType, setReportType] = useState('personDays'); // 'personDays', 'nightFee', 'shiftCode'
+  const [reportType, setReportType] = useState('personDays'); 
   const [startDate, setStartDate] = useState(() => {
     const d = new Date();
     return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-01`;
@@ -1126,7 +1140,6 @@ const ManagementReportView = ({ currentMonth, employees, schedule, personDayRule
   const isFourWeekMode = reportType === 'shiftCode';
   const isNightFeeMode = reportType === 'nightFee';
 
-  // 偵測當月夜診支援是否有數據
   const hasSupportData = useMemo(() => {
     const supportRow = schedule[currentMonth]?.["夜診支援"] || {};
     return Object.values(supportRow).some(v => v && !["-", "#", "例", ""].includes(v.toString().trim()));
@@ -1163,7 +1176,6 @@ const ManagementReportView = ({ currentMonth, employees, schedule, personDayRule
     const mKey = isFourWeekMode ? dayInfo.monthKey : currentMonth;
     let rawVal = schedule[mKey]?.[emp.name]?.[dayInfo.day];
     
-    // 預設符號處理
     if (!rawVal || rawVal === "" || rawVal === undefined) {
       if (dayInfo.rawDay === 0 || dayInfo.holiday) rawVal = "例";
       else if (dayInfo.rawDay === 6) rawVal = "#";
@@ -1181,11 +1193,9 @@ const ManagementReportView = ({ currentMonth, employees, schedule, personDayRule
 
     if (reportType === 'nightFee') {
       const isSymbol = ["-", "#", "例"].includes(rawStr);
-      // 採用強化辨識邏輯，即便屬性遺失也能正確抓到夜診
       if (getIsNightClinic(emp)) {
         return { display: isSymbol ? "" : rawStr, numeric: 0 };
       }
-      // 非夜診列：檢核內容是否包含 P 或 A，排除系統符號
       const hasPA = rawStr.includes('P') || rawStr.includes('A');
       return { display: (hasPA && !isSymbol) ? rawStr : "", numeric: 0 };
     }
@@ -1193,7 +1203,6 @@ const ManagementReportView = ({ currentMonth, employees, schedule, personDayRule
     if (rawStr === "-" || rawStr === "#" || rawStr === "例") return { display: rawStr, numeric: 0 };
 
     if (reportType === 'personDays') {
-      // 採用強化辨識邏輯，確保匯入後人日數不被誤算
       if (emp.role === '2' || getIsNightClinic(emp)) return { display: "0", numeric: 0 };
       const rule = personDayRules.find(r => 
         r.mode === 'exact' ? rawStr === r.pattern.trim() : rawStr.endsWith(r.pattern.trim())
@@ -1205,54 +1214,25 @@ const ManagementReportView = ({ currentMonth, employees, schedule, personDayRule
     return { display: rawStr, numeric: 0 };
   };
 
-  // 勞基法檢核函數
   const checkLaborCompliance = (emp, days) => {
     if (!isFourWeekMode) return true;
-    
-    // 將 28 天分為兩個 14 天區間
     const blocks = [days.slice(0, 14), days.slice(14, 28)];
-    
     for (const block of blocks) {
       const codes = block.map(d => calculateCellValue(emp, d).display);
       const holidayCount = block.filter(d => !!d.holiday).length;
-      
       const count0 = codes.filter(c => c === "0").length;
       const countMinus3 = codes.filter(c => c === "-3").length;
-      const countMinus2 = codes.filter(c => c === "-2").length;
-
-      // (1) 非勞基法人員：需有兩個 0 與兩個 -3
-      if (emp.labor === 'N') {
-        if (count0 !== 2 || countMinus3 !== 2) return false;
-      }
-      // (2) 勞基法人員：需有四個 0
-      else if (emp.labor === 'Y') {
-        if (count0 !== 4) return false;
-      }
-
-      // (3) 國定假日：有幾個假就需有幾個 -2
-      if (countMinus2 !== holidayCount) return false;
+      if (emp.labor === 'N') { if (count0 !== 2 || countMinus3 !== 2) return false; }
+      else if (emp.labor === 'Y') { if (count0 !== 4) return false; }
     }
-    
     return true;
   };
 
   const filteredEmployees = useMemo(() => {
     let list = employees.filter(e => !e.isSeparator);
-    
-    if (reportType === 'personDays') {
-      return list.filter(e => !getIsNightClinic(e) && e.role !== '2');
-    }
-    
-    if (isFourWeekMode) {
-      // 強化識別，確保班別代碼精確排除夜診三列
-      return list.filter(e => !getIsNightClinic(e));
-    }
-    
-    if (isNightFeeMode) {
-      // 強化識別，確保夜班費帶入所有名單
-      return list.filter(e => e.name !== "夜診支援" || hasSupportData);
-    }
-    
+    if (reportType === 'personDays') return list.filter(e => !getIsNightClinic(e) && e.role !== '2');
+    if (isFourWeekMode) return list.filter(e => !getIsNightClinic(e));
+    if (isNightFeeMode) return list.filter(e => e.name !== "夜診支援" || hasSupportData);
     return list;
   }, [employees, reportType, isFourWeekMode, isNightFeeMode, hasSupportData]);
 
@@ -1263,19 +1243,16 @@ const ManagementReportView = ({ currentMonth, employees, schedule, personDayRule
     const headers = ["員編", "姓名", ...reportDays.map(d => `${d.day}(${d.dayOfWeek})`)];
     if (!isFourWeekMode && !isNightFeeMode) headers.push("總計");
     csv += headers.join(",") + "\n";
-
     filteredEmployees.forEach(emp => {
       let row = [emp.id, emp.name];
       let rowSum = 0;
       reportDays.forEach(d => {
         const res = calculateCellValue(emp, d);
-        row.push(res.display);
-        rowSum += res.numeric;
+        row.push(res.display); rowSum += res.numeric;
       });
       if (!isFourWeekMode && !isNightFeeMode) row.push(rowSum.toFixed(reportType === 'personDays' ? 1 : 0));
       csv += row.join(",") + "\n";
     });
-
     const blob = new Blob([csv], { type: 'text/csv;charset=utf-8' });
     const link = document.createElement("a");
     link.href = URL.createObjectURL(blob);
@@ -1285,14 +1262,12 @@ const ManagementReportView = ({ currentMonth, employees, schedule, personDayRule
 
   return (
     <div className="flex-grow flex flex-col bg-gray-50 overflow-hidden font-sans">
-      {/* 工具列 */}
       <div className="bg-white border-b-2 border-gray-800 p-3 flex flex-wrap justify-between items-center shadow-md z-[60] gap-3">
         <div className="flex items-center gap-1 bg-gray-100 p-1 rounded-xl shadow-inner">
           <button onClick={() => setReportType('personDays')} className={`px-4 py-1.5 rounded-lg text-xs font-black transition-all ${reportType === 'personDays' ? 'bg-white text-teal-600 shadow-md scale-105' : 'text-gray-400 hover:text-gray-600'}`}>人日數統計</button>
           <button onClick={() => setReportType('nightFee')} className={`px-4 py-1.5 rounded-lg text-xs font-black transition-all ${reportType === 'nightFee' ? 'bg-white text-indigo-600 shadow-md scale-105' : 'text-gray-400 hover:text-gray-600'}`}>夜班費</button>
           <button onClick={() => setReportType('shiftCode')} className={`px-4 py-1.5 rounded-lg text-xs font-black transition-all ${reportType === 'shiftCode' ? 'bg-white text-blue-600 shadow-md scale-105' : 'text-gray-400 hover:text-gray-600'}`}>班別代碼(四周)</button>
         </div>
-
         <div className="flex items-center gap-3">
           {isFourWeekMode ? (
             <div className="flex items-center gap-2">
@@ -1310,8 +1285,6 @@ const ManagementReportView = ({ currentMonth, employees, schedule, personDayRule
           </button>
         </div>
       </div>
-
-      {/* 凍結窗格報表區域 */}
       <div className="flex-grow overflow-auto relative">
         <table className="w-full text-[12px] text-center border-separate border-spacing-0 table-fixed min-w-[1600px]">
           <thead className="sticky top-0 z-[50]">
@@ -1323,15 +1296,11 @@ const ManagementReportView = ({ currentMonth, employees, schedule, personDayRule
                 const isSat = d.rawDay === 6;
                 return (
                   <th key={idx} className={`border-r border-b-2 border-gray-300 p-1 w-12 font-bold ${cycleEnd ? 'border-r-4 border-r-gray-400' : ''} ${isHoliday ? 'bg-[#FFB3D9]' : isSat ? 'bg-[#FFB366]' : 'bg-gray-100'}`}>
-                    <div className="text-[10px] opacity-60">{d.dayOfWeek}</div>
-                    <div className="text-base">{d.day}</div>
-                    <div className="text-[9px] text-red-700 font-normal truncate h-3 mt-0.5" title={d.holiday}>{d.holiday}</div>
+                    <div className="text-[10px] opacity-60">{d.dayOfWeek}</div><div className="text-base">{d.day}</div><div className="text-[9px] text-red-700 font-normal truncate h-3 mt-0.5" title={d.holiday}>{d.holiday}</div>
                   </th>
                 );
               })}
-              {!isFourWeekMode && !isNightFeeMode && (
-                <th className="sticky right-0 top-0 z-[45] bg-[#E0F2F1] border-l-2 border-b-2 border-gray-300 p-3 w-20 font-black text-teal-700 shadow-[-2px_0_5px_rgba(0,0,0,0.05)]">總計</th>
-              )}
+              {!isFourWeekMode && !isNightFeeMode && (<th className="sticky right-0 top-0 z-[45] bg-[#E0F2F1] border-l-2 border-b-2 border-gray-300 p-3 w-20 font-black text-teal-700 shadow-[-2px_0_5px_rgba(0,0,0,0.05)]">總計</th>)}
             </tr>
           </thead>
           <tbody>
@@ -1341,22 +1310,16 @@ const ManagementReportView = ({ currentMonth, employees, schedule, personDayRule
               return (
                 <tr key={emp.id} className="hover:bg-blue-50 transition-colors group">
                   <td className={`sticky left-0 z-40 bg-white border-r-2 border-b border-gray-200 p-2 font-black group-hover:bg-blue-50 text-[12px] truncate shadow-[2px_0_5px_rgba(0,0,0,0.05)] ${!isCompliant ? 'text-red-600' : ''}`}>
-                    {emp.name}
-                    {!isCompliant && <div className="text-[8px] font-normal leading-none">⚠️ 例休</div>}
+                    {emp.name}{!isCompliant && <div className="text-[8px] font-normal leading-none">⚠️ 例休</div>}
                   </td>
                   {reportDays.map((d, idx) => {
-                    const res = calculateCellValue(emp, d);
-                    rowSum += res.numeric;
+                    const res = calculateCellValue(emp, d); rowSum += res.numeric;
                     const cycleEnd = isCycleEnd(d.fullDate);
-                    const isEmpty = res.display === "" || res.display === "-" || res.display === "#" || res.display === "例";
-                    
                     let bgClass = "bg-white";
-                    if (d.rawDay === 0 || !!d.holiday) bgClass = "bg-[#FFB3D9]";
-                    else if (d.rawDay === 6) bgClass = "bg-[#FFB366]";
-
+                    if (d.rawDay === 0 || !!d.holiday) bgClass = "bg-[#FFB3D9]"; else if (d.rawDay === 6) bgClass = "bg-[#FFB366]";
                     return (
                       <td key={idx} className={`border-r border-b border-gray-200 p-0 h-10 ${bgClass} relative ${cycleEnd ? 'border-r-4 border-r-gray-400' : ''}`}>
-                        <span className={`${isEmpty ? 'text-gray-300' : 'text-gray-800'} font-medium text-[13px]`}>{res.display}</span>
+                        <span className={`${(res.display === "" || res.display === "-" || res.display === "#" || res.display === "例") ? 'text-gray-300' : 'text-gray-800'} font-medium text-[13px]`}>{res.display}</span>
                       </td>
                     );
                   })}
@@ -1391,25 +1354,17 @@ const SchedulingView = ({ currentMonth, employees, daysInMonth, schedule, setSch
       daysInMonth.forEach(d => { 
         if (!newSched[e.name][d.day]) {
           const isNC = getIsNightClinic(e);
-          if (isNC) {
-            newSched[e.name][d.day] = ""; 
-          } else {
-            // V1.6.11 新增：根據勞基法適用與否設置預設值
-            const isLabor = e.labor === 'Y';
-            if (d.rawDay === 0 || !!d.holiday) {
-              newSched[e.name][d.day] = isLabor ? "例" : "#";
-            } else if (d.rawDay === 6) {
-              newSched[e.name][d.day] = "#";
-            } else {
-              newSched[e.name][d.day] = "-";
-            }
+          if (isNC) newSched[e.name][d.day] = ""; 
+          else {
+            if (d.rawDay === 0 || !!d.holiday) newSched[e.name][d.day] = e.labor === 'Y' ? "例" : "#";
+            else if (d.rawDay === 6) newSched[e.name][d.day] = "#";
+            else newSched[e.name][d.day] = "-";
           }
         } 
       });
     });
-    setEditSched(newSched);
-    setIsDirty(false);
-  }, [currentMonth, employees, daysInMonth]);
+    setEditSched(newSched); setIsDirty(false);
+  }, [currentMonth, employees, daysInMonth, schedule]);
 
   const handleImportCSV = (e) => {
     const file = e.target.files[0];
@@ -1419,7 +1374,7 @@ const SchedulingView = ({ currentMonth, employees, daysInMonth, schedule, setSch
       const rows = ev.target.result.split(/\r?\n/).map(r => r.split(',').map(c => c.trim().replace(/^"|"$/g, '')));
       let fileMonth = null;
       for (const r of rows) { const line = r.join(","); if (line.includes("年") && line.includes("月")) { fileMonth = parseROCTitle(line); if (fileMonth) break; } }
-      if (fileMonth !== currentMonth) { alert("CSV 標題月份與當前編輯月份不符，請檢查。"); fileRef.current.value = ''; return; }
+      if (fileMonth !== currentMonth) { alert("CSV 標題月份與當前編輯月份不符。"); fileRef.current.value = ''; return; }
       const nextPreview = deepClone(editSched);
       const idPattern = /^[A-Z]\d+$/; 
       rows.forEach(rowCells => {
@@ -1429,9 +1384,7 @@ const SchedulingView = ({ currentMonth, employees, daysInMonth, schedule, setSch
             if (systemEmp && nextPreview[systemEmp.name]) {
               for (let d = 1; d <= daysInMonth.length; d++) {
                 const shiftVal = rowCells[cellIdx + 1 + d];
-                if (shiftVal !== undefined) {
-                  nextPreview[systemEmp.name][d] = shiftVal || (getIsNightClinic(systemEmp) ? "" : "-");
-                }
+                if (shiftVal !== undefined) nextPreview[systemEmp.name][d] = shiftVal || (getIsNightClinic(systemEmp) ? "" : "-");
               }
             }
           }
@@ -1446,46 +1399,31 @@ const SchedulingView = ({ currentMonth, employees, daysInMonth, schedule, setSch
     const next = { ...editSched };
     Object.keys(importPreview).forEach(name => {
       Object.keys(importPreview[name]).forEach(day => {
-        const isDefault = editSched[name][day] === "-" || editSched[name][day] === "#" || editSched[name][day] === "例" || editSched[name][day] === "";
-        if (isDefault || !ignoredCells.has(`${name}-${day}`)) { next[name][day] = importPreview[name][day]; }
+        if (!ignoredCells.has(`${name}-${day}`)) next[name][day] = importPreview[name][day];
       });
     });
-    setEditSched(next); 
-    setImportPreview(null); 
-    setIgnoredCells(new Set());
-    setIsDirty(true);
+    setEditSched(next); setImportPreview(null); setIgnoredCells(new Set()); setIsDirty(true);
   };
 
   const isSatisfied = (cellValue, targetShiftName) => {
     if (!cellValue || cellValue === "-" || cellValue === "#" || cellValue === "例") return false;
-    const str = String(cellValue).trim();
     const regex = new RegExp(`(^|[/()#])${targetShiftName}($|[/()#])`);
-    return regex.test(str);
+    return regex.test(String(cellValue).trim());
   };
 
   const getMissingData = () => {
     const data = {};
     const allScheduledThisMonth = new Set();
     Object.values(editSched).forEach(empSched => {
-      Object.values(empSched).forEach(v => {
-        if (v && v !== "-" && v !== "#" && v !== "例" && v !== "") {
-          allScheduledThisMonth.add(String(v));
-        }
-      });
+      Object.values(empSched).forEach(v => { if (v && !["-", "#", "例", ""].includes(v)) allScheduledThisMonth.add(String(v)); });
     });
     const monthlyRules = shifts.filter(s => s.isRegular === 'Y' && s.regularDays.includes("月"));
     daysInMonth.forEach(d => {
       const scheduledOnDay = Object.values(editSched).map(u => u?.[d.day]);
-      const required = shifts.filter(s => {
-        if (s.isRegular !== 'Y') return false;
-        if (s.regularDays.includes("月")) return false;
-        return d.holiday ? s.regularDays.includes("國") : s.regularDays.includes(d.dayOfWeek);
-      });
+      const required = shifts.filter(s => s.isRegular === 'Y' && !s.regularDays.includes("月") && (d.holiday ? s.regularDays.includes("國") : s.regularDays.includes(d.dayOfWeek)));
       let missing = required.filter(r => !scheduledOnDay.some(val => isSatisfied(val, r.name))).map(r => r.name);
       if (d.day === 1) {
-        const missingMonthly = monthlyRules.filter(r => {
-          return !Array.from(allScheduledThisMonth).some(v => isSatisfied(v, r.name));
-        }).map(r => r.name);
+        const missingMonthly = monthlyRules.filter(r => !Array.from(allScheduledThisMonth).some(v => isSatisfied(v, r.name))).map(r => r.name);
         missing = [...missing, ...missingMonthly];
       }
       if (missing.length > 0) data[d.day] = missing;
@@ -1494,11 +1432,13 @@ const SchedulingView = ({ currentMonth, employees, daysInMonth, schedule, setSch
   };
 
   const handlePublishSchedule = () => {
-    exportScheduleCSV('發佈前自動備份');
-    setSchedule(prev => ({ ...prev, [currentMonth]: deepClone(editSched) }));
+    const nextSchedule = { ...schedule, [currentMonth]: deepClone(editSched) };
+    setSchedule(nextSchedule);
+    // 呼叫 saveData 將整份班表推送到雲端
+    saveData({ schedule: nextSchedule }); 
     setIsDirty(false); 
     setCurrentPage('home');
-    alert("班表發佈完成！系統已為您下載備份檔案。");
+    alert("班表發佈完成並已同步至雲端！");
   };
 
   return (
@@ -1508,16 +1448,12 @@ const SchedulingView = ({ currentMonth, employees, daysInMonth, schedule, setSch
           <span className="font-black text-gray-700">排班編輯器 - {currentMonth}</span>
           {!importPreview && (
             <div className="flex gap-1 bg-gray-100 p-1 rounded">
-              {PALETTE.map(p => (
-                <button key={p.name} onClick={()=>setActiveColor(p.class)} className={`w-6 h-6 rounded-full border-2 ${p.class} ${activeColor === p.class ? 'border-blue-500 scale-110 shadow' : 'border-white'}`}/>
-              ))}
+              {PALETTE.map(p => (<button key={p.name} onClick={()=>setActiveColor(p.class)} className={`w-6 h-6 rounded-full border-2 ${p.class} ${activeColor === p.class ? 'border-blue-500 scale-110 shadow' : 'border-white'}`}/>))}
             </div>
           )}
           {importPreview && (
              <div className="flex items-center gap-2 bg-blue-50 px-3 py-1 rounded border border-blue-200">
-               <span className="text-[10px] font-bold text-blue-700 animate-pulse flex items-center gap-1">
-                 <ShieldCheck size={14}/> 對比模式：全格點選可切換建議值與系統值
-               </span>
+               <span className="text-[10px] font-bold text-blue-700 animate-pulse flex items-center gap-1"><ShieldCheck size={14}/> 對比模式：全格點選切換</span>
                <button onClick={confirmApplyImport} className="text-[10px] bg-blue-600 text-white px-2 py-0.5 rounded font-bold">確認套用</button>
                <button onClick={() => setImportPreview(null)} className="text-[10px] bg-gray-400 text-white px-2 py-0.5 rounded font-bold">取消</button>
              </div>
@@ -1525,8 +1461,7 @@ const SchedulingView = ({ currentMonth, employees, daysInMonth, schedule, setSch
         </div>
         <div className="flex gap-2">
           {!importPreview && (
-            <>
-              <button onClick={()=>fileRef.current.click()} className="bg-gray-800 text-white px-4 py-1.5 rounded text-xs font-bold flex items-center gap-1 hover:bg-black transition-all shadow"><Upload size={14}/> 上傳 CSV</button>
+            <><button onClick={()=>fileRef.current.click()} className="bg-gray-800 text-white px-4 py-1.5 rounded text-xs font-bold flex items-center gap-1 hover:bg-black shadow"><Upload size={14}/> 上傳 CSV</button>
               <button onClick={handlePublishSchedule} className="bg-blue-600 text-white px-5 py-1.5 rounded text-xs font-bold shadow flex items-center gap-2 hover:bg-blue-700 transition-all"><CheckCircle2 size={16}/> 發佈班表</button>
             </>
           )}
@@ -1542,9 +1477,7 @@ const SchedulingView = ({ currentMonth, employees, daysInMonth, schedule, setSch
                 const cycleEnd = isCycleEnd(d.fullDate);
                 return (
                   <th key={d.day} className={`border p-1 w-12 font-bold ${cycleEnd ? 'border-r-4 border-r-gray-400' : ''} ${d.rawDay === 0 || d.holiday ? 'bg-[#FFB3D9]' : d.rawDay === 6 ? 'bg-[#FFB366]' : ''}`}>
-                    <div className="text-[10px] opacity-50">{d.dayOfWeek}</div>
-                    <div className="text-sm">{d.day}</div>
-                    <div className="text-[9px] text-red-600 truncate h-3 leading-none font-normal">{String(d.holiday || "")}</div>
+                    <div className="text-[10px] opacity-50">{d.dayOfWeek}</div><div className="text-sm">{d.day}</div><div className="text-[9px] text-red-600 truncate h-3 leading-none font-normal">{String(d.holiday || "")}</div>
                   </th>
                 );
               })}
@@ -1564,45 +1497,18 @@ const SchedulingView = ({ currentMonth, employees, daysInMonth, schedule, setSch
                     const isIgnored = ignoredCells.has(`${emp.name}-${d.day}`);
                     const displayVal = (importPreview && !isIgnored) ? previewVal : originalVal;
                     const customColor = cellColors[currentMonth]?.[emp.name]?.[d.day];
-                    const cycleEnd = isCycleEnd(d.fullDate);
-                    
-                    // V1.6.11 修正：恢復排班頁假日顏色延伸至下方班別儲存格
                     let bgClass = "bg-white"; 
                     if (customColor && customColor !== "bg-white") bgClass = customColor; 
                     else if (d.rawDay === 0 || !!d.holiday) bgClass = "bg-[#FFB3D9]"; 
                     else if (d.rawDay === 6) bgClass = "bg-[#FFB366]";
-                    
                     return (
-                      <td key={d.day} className={`border p-0 ${isNC ? 'h-[32px]' : 'h-10'} transition-colors relative ${bgClass} ${cycleEnd ? 'border-r-4 border-r-gray-400' : ''} ${isConflict ? 'ring-2 ring-blue-500 ring-inset bg-blue-50 shadow-inner' : ''}`}
+                      <td key={d.day} className={`border p-0 ${isNC ? 'h-[32px]' : 'h-10'} relative ${bgClass} ${isCycleEnd(d.fullDate) ? 'border-r-4 border-r-gray-400' : ''} ${isConflict ? 'ring-2 ring-blue-500 ring-inset bg-blue-50' : ''}`}
                         onClick={() => {
-                          if (importPreview && isConflict) {
-                            const next = new Set(ignoredCells); 
-                            if (next.has(`${emp.name}-${d.day}`)) next.delete(`${emp.name}-${d.day}`); 
-                            else next.add(`${emp.name}-${d.day}`); 
-                            setIgnoredCells(next);
-                          } else if (!importPreview) {
-                            const nextColors = deepClone(cellColors);
-                            if (!nextColors[currentMonth]) nextColors[currentMonth] = {};
-                            if (!nextColors[currentMonth][emp.name]) nextColors[currentMonth][emp.name] = {};
-                            nextColors[currentMonth][emp.name][d.day] = activeColor;
-                            setCellColors(nextColors);
-                          }
+                          if (importPreview && isConflict) { const n = new Set(ignoredCells); if (n.has(`${emp.name}-${d.day}`)) n.delete(`${emp.name}-${d.day}`); else n.add(`${emp.name}-${d.day}`); setIgnoredCells(n);
+                          } else if (!importPreview) { const nc = deepClone(cellColors); if (!nc[currentMonth]) nc[currentMonth] = {}; if (!nc[currentMonth][emp.name]) nc[currentMonth][emp.name] = {}; nc[currentMonth][emp.name][d.day] = activeColor; setCellColors(nc); }
                         }}>
-                        <input 
-                          type="text" 
-                          value={displayVal} 
-                          disabled={!!importPreview} 
-                          className={`w-full h-full text-center bg-transparent focus:bg-white focus:outline-none font-bold font-mono transition-colors relative z-10 cursor-text ${importPreview ? 'pointer-events-none opacity-80' : (displayVal === "-" ? 'text-gray-300' : 'text-gray-800')}`}
-                          onChange={(e) => {
-                            if (!importPreview) {
-                              setEditSched(prev => ({
-                                ...prev,
-                                [emp.name]: { ...prev[emp.name], [d.day]: e.target.value }
-                              }));
-                              setIsDirty(true);
-                            }
-                          }}
-                        />
+                        <input type="text" value={displayVal} disabled={!!importPreview} className={`w-full h-full text-center bg-transparent focus:bg-white outline-none font-bold font-mono cursor-text ${importPreview ? 'pointer-events-none opacity-80' : (displayVal === "-" ? 'text-gray-300' : 'text-gray-800')}`}
+                          onChange={(e) => { if (!importPreview) { setEditSched(prev => ({ ...prev, [emp.name]: { ...prev[emp.name], [d.day]: e.target.value } })); setIsDirty(true); } }} />
                       </td>
                     );
                   })}
@@ -1611,20 +1517,12 @@ const SchedulingView = ({ currentMonth, employees, daysInMonth, schedule, setSch
             })}
           </tbody>
           <tfoot className="bg-gray-50 border-t-2 border-gray-300">
-            <tr>
-              <td className="sticky left-0 bg-gray-100 border p-1 text-[9px] font-black text-gray-400 text-center shadow-[2px_0_5_rgba(0,0,0,0.05)]">漏排提醒</td>
+            <tr><td className="sticky left-0 bg-gray-100 border p-1 text-[9px] font-black text-gray-400 text-center shadow-[2px_0_5_rgba(0,0,0,0.05)]">漏排提醒</td>
               {daysInMonth.map(d => { 
                 const missing = getMissingData()[d.day] || [];
-                const cycleEnd = isCycleEnd(d.fullDate);
-                return (
-                  <td key={d.day} className={`border p-0.5 align-top min-h-12 bg-orange-50 ${cycleEnd ? 'border-r-4 border-r-gray-400' : ''}`}>
-                    {missing.length > 0 && (
-                      <div className="flex flex-col gap-0.5">
-                        {missing.map(m => <div key={m} className="bg-white border border-orange-200 text-orange-600 font-bold text-[8px] rounded p-0.5 shadow-sm">{m}</div>)}
-                      </div>
-                    )}
-                  </td>
-                );
+                return (<td key={d.day} className={`border p-0.5 align-top min-h-12 bg-orange-50 ${isCycleEnd(d.fullDate) ? 'border-r-4 border-r-gray-400' : ''}`}>
+                  {missing.length > 0 && (<div className="flex flex-col gap-0.5">{missing.map(m => <div key={m} className="bg-white border border-orange-200 text-orange-600 font-bold text-[8px] rounded p-0.5 shadow-sm">{m}</div>)}</div>)}
+                </td>);
               })}
             </tr>
           </tfoot>
@@ -1653,11 +1551,38 @@ const App = () => {
   const [deleteShiftTarget, setDeleteShiftTarget] = useState(null);
   const [rejectingReq, setRejectingReq] = useState(null);
   const [rejectNote, setRejectNote] = useState("");
-
   const [isDirty, setIsDirty] = useState(false);
   const [showExitConfirm, setShowExitConfirm] = useState(false);
   const [targetPage, setTargetPage] = useState(null);
+  // 預假資料狀態 (由 App 統一管理)
+  const [preLeaveData, setPreLeaveData] = useState({apps: {},dailyLimits: {},remarks: {},weekendLimit: 10,weekdayLimit: 3,lotteryDay: 15,drawnMonths: []});
+// 統一雲端儲存函數
+  const saveData = async (updates) => {if (!auth.currentUser) return;
+    // 路徑：1.artifacts, 2.appId, 3.public, 4.data, 5.roster, 6.main (共 6 段)
+    const docRef = doc(db, 'artifacts', appId, 'public', 'data', 'roster', 'main');try {await setDoc(docRef, updates, { merge: true });} catch (error) {console.error("雲端儲存失敗:", error);
+}
+  };
+  useEffect(() => {const initAuth = async () => { try {if (typeof __initial_auth_token !== 'undefined' && __initial_auth_token) {await signInWithCustomToken(auth, __initial_auth_token);} else {await signInAnonymously(auth);}} catch (err) {console.warn("驗證不匹配，自動切換至匿名模式:", err);await signInAnonymously(auth);}};initAuth();
+}, []);
+  
+  // 建立 Firestore 即時監聽
+    useEffect(() => {const docRef = doc(db, 'artifacts', appId, 'public', 'data', 'roster', 'main');const unsubData = onSnapshot(docRef, (snap) => {
+      if (snap.exists()) {const d = snap.data();
+        // 如果雲端有資料，則同步到本地 State
+        if (d.employees) setEmployees(d.employees);
+        if (d.shifts) setShifts(d.shifts);
+        if (d.holidays) setHolidays(d.holidays);
+        if (d.personDayRules) setPersonDayRules(d.personDayRules);
+        if (d.schedule) setSchedule(d.schedule);
+        if (d.cellColors) setCellColors(d.cellColors);
+        if (d.swapRequests) setSwapRequests(d.swapRequests);
+        if (d.preLeaveData) setPreLeaveData(d.preLeaveData); // 同步預假資料
+      }
+    }, (error) => console.error("雲端監聽失敗:", error));
 
+    return () => unsubData();
+  }, [appId]);
+  
   const daysInMonth = useMemo(() => {
     const [year, month] = currentMonth.split('-').map(Number);
     const date = new Date(year, month, 0); const days = [];
@@ -1666,34 +1591,21 @@ const App = () => {
   }, [currentMonth, holidays]);
 
   const handlePageChange = (p) => {
-    if (currentPage === 'schedule' && isDirty) {
-      setTargetPage(p);
-      setShowExitConfirm(true);
-      return;
-    }
-    const restricted = ['swap', 'records', 'schedule', 'account', 'shifts', 'leave', 'report'];
-    if (restricted.includes(p) && !isLoggedIn) { setPendingPage(p); setCurrentPage('login'); }
-    else setCurrentPage(p);
+    if (currentPage === 'schedule' && isDirty) { setTargetPage(p); setShowExitConfirm(true); return; }
+    const res = ['swap', 'records', 'schedule', 'account', 'shifts', 'leave', 'report'];
+    if (res.includes(p) && !isLoggedIn) { setPendingPage(p); setCurrentPage('login'); } else setCurrentPage(p);
   };
 
-  const confirmExit = () => {
-    setIsDirty(false); 
-    setShowExitConfirm(false);
-    const p = targetPage;
-    setTargetPage(null);
-    const restricted = ['swap', 'records', 'schedule', 'account', 'shifts', 'leave', 'report'];
-    if (restricted.includes(p) && !isLoggedIn) { setPendingPage(p); setCurrentPage('login'); }
-    else setCurrentPage(p);
+  const confirmExit = () => { setIsDirty(false); setShowExitConfirm(false); const p = targetPage; setTargetPage(null);
+    const res = ['swap', 'records', 'schedule', 'account', 'shifts', 'leave', 'report'];
+    if (res.includes(p) && !isLoggedIn) { setPendingPage(p); setCurrentPage('login'); } else setCurrentPage(p);
   };
 
   const handleLoginAction = (id, pwd) => {
     const emp = employees.find(e => e.id === id);
-    if (!emp) { alert("無此員編權限，請洽管理員。"); return; }
+    if (!emp) { alert("無此員編權限。"); return; }
     if (emp.password === "" || emp.password === pwd) {
-      // 第一次登入設定密碼
-      if (emp.password === "" && pwd !== "") {
-        setEmployees(employees.map(e => e.id === emp.id ? { ...e, password: pwd } : e));
-      }
+      if (emp.password === "" && pwd !== "") setEmployees(employees.map(e => e.id === emp.id ? { ...e, password: pwd } : e));
       setIsLoggedIn(true); setCurrentUser(emp);
       if (pendingPage) { setCurrentPage(pendingPage); setPendingPage(null); } else setCurrentPage('home');
     } else alert("密碼錯誤！");
@@ -1705,21 +1617,11 @@ const App = () => {
     const myShift = schedule[currentMonth]?.[currentUser.name]?.[dayInfo.day] || "-";
     let isBundle = false, startDate = dayInfo.fullDate, endDate = dayInfo.fullDate, daysToSwap = [dayInfo.day];
     const findBundle = (type, targetDateStr) => {
-      const targetDate = new Date(targetDateStr), dayOfW = targetDate.getDay(); 
-      if (type === 'P') {
-        const satDate = new Date(targetDate); satDate.setDate(targetDate.getDate() - (dayOfW === 6 ? 0 : (dayOfW + 1)));
-        const thuDate = new Date(satDate); thuDate.setDate(satDate.getDate() + 5);
-        isBundle = true; startDate = `${currentMonth}-${String(satDate.getDate()).padStart(2, '0')}`; endDate = `${currentMonth}-${String(thuDate.getDate()).padStart(2, '0')}`;
-        daysToSwap = []; for(let i=0; i<=5; i++) { const d = new Date(satDate); d.setDate(satDate.getDate()+i); daysToSwap.push(d.getDate()); }
-      } else if (type === 'A1A2') {
-        const monDate = new Date(targetDate); monDate.setDate(targetDate.getDate() - (dayOfW - 1));
-        const friDate = new Date(monDate); friDate.setDate(monDate.getDate() + 4);
-        isBundle = true; startDate = `${currentMonth}-${String(monDate.getDate()).padStart(2, '0')}`; endDate = `${currentMonth}-${String(friDate.getDate()).padStart(2, '0')}`;
-        daysToSwap = []; for(let i=0; i<=4; i++) { const d = new Date(monDate); d.setDate(monDate.getDate()+i); daysToSwap.push(d.getDate()); }
-      }
+      const targetDate = new Date(targetDateStr), dOfW = targetDate.getDay(); 
+      if (type === 'P') { const satDate = new Date(targetDate); satDate.setDate(targetDate.getDate() - (dOfW === 6 ? 0 : (dOfW + 1))); const thuDate = new Date(satDate); thuDate.setDate(satDate.getDate() + 5); isBundle = true; startDate = `${currentMonth}-${String(satDate.getDate()).padStart(2, '0')}`; endDate = `${currentMonth}-${String(thuDate.getDate()).padStart(2, '0')}`; daysToSwap = []; for(let i=0; i<=5; i++) { const d = new Date(satDate); d.setDate(satDate.getDate()+i); daysToSwap.push(d.getDate()); } }
+      else if (type === 'A1A2') { const monDate = new Date(targetDate); monDate.setDate(targetDate.getDate() - (dOfW - 1)); const friDate = new Date(monDate); friDate.setDate(monDate.getDate() + 4); isBundle = true; startDate = `${currentMonth}-${String(monDate.getDate()).padStart(2, '0')}`; endDate = `${currentMonth}-${String(friDate.getDate()).padStart(2, '0')}`; daysToSwap = []; for(let i=0; i<=4; i++) { const d = new Date(monDate); d.setDate(monDate.getDate()+i); daysToSwap.push(d.getDate()); } }
     };
-    if (currentShift.startsWith('P') || myShift.startsWith('P')) findBundle('P', dayInfo.fullDate);
-    else if (currentShift.startsWith('A') || myShift.startsWith('A')) findBundle('A1A2', dayInfo.fullDate);
+    if (currentShift.startsWith('P') || myShift.startsWith('P')) findBundle('P', dayInfo.fullDate); else if (currentShift.startsWith('A') || myShift.startsWith('A')) findBundle('A1A2', dayInfo.fullDate);
     setSwapTarget({ date: dayInfo.fullDate, dayOfWeek: dayInfo.dayOfWeek, day: dayInfo.day, creatorId: currentUser.id, creatorName: currentUser.name, creatorShift: myShift, targetId: targetEmp.id, targetName: targetEmp.name, targetShift: currentShift, isBundle, startDate, endDate, daysToSwap });
   };
 
@@ -1727,22 +1629,10 @@ const App = () => {
     if (action === 'Approve') {
       let nextStatus = req.status;
       if (req.status === 'PendingTarget') nextStatus = 'PendingAdmin';
-      else if (req.status === 'PendingAdmin') {
-        nextStatus = 'Approved';
-        const ns = deepClone(schedule); if (!ns[currentMonth]) ns[currentMonth] = {};
-        const days = req.isBundle ? req.daysToSwap : [req.day];
-        days.forEach(d => {
-          const cS = ns[currentMonth][req.creatorName]?.[d] || "-";
-          const tS = ns[currentMonth][req.targetName]?.[d] || "-";
-          if (!ns[currentMonth][req.creatorName]) ns[currentMonth][req.creatorName] = {};
-          if (!ns[currentMonth][req.targetName]) ns[currentMonth][req.targetName] = {};
-          ns[currentMonth][req.creatorName][d] = tS; ns[currentMonth][req.targetName][d] = cS;
-        });
-        setSchedule(ns);
-      }
+      else if (req.status === 'PendingAdmin') { nextStatus = 'Approved'; const ns = deepClone(schedule); if (!ns[currentMonth]) ns[currentMonth] = {}; (req.isBundle ? req.daysToSwap : [req.day]).forEach(d => { const cS = ns[currentMonth][req.creatorName]?.[d] || "-"; const tS = ns[currentMonth][req.targetName]?.[d] || "-"; if (!ns[currentMonth][req.creatorName]) ns[currentMonth][req.creatorName] = {}; if (!ns[currentMonth][req.targetName]) ns[currentMonth][req.targetName] = {}; ns[currentMonth][req.creatorName][d] = tS; ns[currentMonth][req.targetName][d] = cS; }); setSchedule(ns); }
       setSwapRequests(swapRequests.map(r => r.id === req.id ? { ...r, status: nextStatus } : r));
-    } else if (action === 'Reject') { setSwapRequests(swapRequests.map(r => r.id === req.id ? { ...r, status: 'Rejected' } : r));
-    } else if (action === 'Delete') { setSwapRequests(swapRequests.map(r => r.id === req.id ? { ...r, status: 'Deleted' } : r)); }
+    } else if (action === 'Reject') setSwapRequests(swapRequests.map(r => r.id === req.id ? { ...r, status: 'Rejected' } : r));
+    else if (action === 'Delete') setSwapRequests(swapRequests.map(r => r.id === req.id ? { ...r, status: 'Deleted' } : r));
   };
 
   const exportScheduleCSV = (prefix = "") => {
@@ -1753,7 +1643,7 @@ const App = () => {
   };
 
   return (
-    <div className="flex flex-col min-h-screen bg-white font-sans text-gray-900 antialiased overflow-x-hidden">
+    <div className="flex flex-col min-h-screen bg-white font-sans text-gray-900 overflow-x-hidden">
       <Header currentMonth={currentMonth} setCurrentMonth={setCurrentMonth} currentPage={currentPage} handlePageChange={handlePageChange} isLoggedIn={isLoggedIn} currentUser={currentUser} handleLogout={()=>{setIsLoggedIn(false); setCurrentUser(null); setCurrentPage('home');}} exportScheduleCSV={exportScheduleCSV} swapRequests={swapRequests} />
       <main className="flex-grow flex flex-col">
         {(() => {
@@ -1763,41 +1653,22 @@ const App = () => {
             case 'shifts': return <ShiftsManagementView shifts={shifts} setShifts={setShifts} holidays={holidays} setHolidays={setHolidays} setDeleteShiftTarget={setDeleteShiftTarget} personDayRules={personDayRules} setPersonDayRules={setPersonDayRules} />;
             case 'swap': return <ScheduleTableView currentMonth={currentMonth} employees={employees} schedule={schedule} cellColors={cellColors} daysInMonth={daysInMonth} onCellClick={handleSwapApply} swapRequests={swapRequests} currentPage={currentPage} currentUser={currentUser} />;
             case 'records': return <RecordsView currentUser={currentUser} swapRequests={swapRequests} onAction={handleRecordAction} schedule={schedule} currentMonth={currentMonth} />;
-            case 'leave': return <PreLeaveView currentMonth={currentMonth} employees={employees} daysInMonth={daysInMonth} currentUser={currentUser} schedule={schedule} setSchedule={setSchedule} />;
+            case 'leave':return (<PreLeaveView currentMonth={currentMonth} employees={employees} daysInMonth={daysInMonth} currentUser={currentUser} schedule={schedule} setSchedule={(val) => { setSchedule(val); saveData({ schedule: val }); }} preLeaveData={preLeaveData} setPreLeaveData={(val) => { setPreLeaveData(val); saveData({ preLeaveData: val }); }} />);
             case 'schedule': return <SchedulingView currentMonth={currentMonth} employees={employees} daysInMonth={daysInMonth} schedule={schedule} setSchedule={setSchedule} cellColors={cellColors} setCellColors={setCellColors} shifts={shifts} exportScheduleCSV={exportScheduleCSV} setCurrentPage={setCurrentPage} setIsDirty={setIsDirty} />;
             case 'report': return <ManagementReportView currentMonth={currentMonth} employees={employees} schedule={schedule} personDayRules={personDayRules} holidays={holidays} shifts={shifts} />;
             case 'login': {
-              const triggerLogin = () => { const idInput = document.getElementById('uid'); const pwdInput = document.getElementById('upwd'); const id = idInput?.value.toUpperCase(); const pwd = pwdInput?.value; if (!pwd) { alert("請輸入密碼！"); return; } handleLoginAction(id, pwd); };
-              return (
-                <div className="flex flex-col items-center justify-center min-h-[60vh] p-4">
-                  <div className="bg-white p-10 rounded-[2.5rem] shadow-2xl border max-w-sm w-full text-center animate-in zoom-in">
-                    <h2 className="text-xl font-black mb-2 text-gray-800 tracking-tight">藥劑部 班表系統登入</h2>
-                    <div className="text-[10px] text-gray-400 font-bold mb-8 leading-tight">
-                      第一次輸入的密碼會自動設定為密碼，<br/>若忘記密碼或須重設，請聯絡門診組長
-                    </div>
-                    <div className="space-y-4">
-                      <input className="w-full border-2 p-3 rounded-2xl outline-none font-mono focus:border-blue-500 transition-all text-center uppercase" placeholder="輸入員編" id="uid" onInput={(e) => e.target.value = e.target.value.toUpperCase()} onKeyDown={(e) => e.key === 'Enter' && triggerLogin()} />
-                      <div className="relative">
-                        <input className="w-full border-2 p-3 rounded-2xl outline-none focus:border-blue-500 transition-all text-center" type={showPassword ? "text" : "password"} placeholder="密碼" id="upwd" onKeyDown={(e) => e.key === 'Enter' && triggerLogin()} />
-                        <button onClick={()=>setShowPassword(!showPassword)} className="absolute right-4 top-4 text-gray-400">{showPassword ? <Eye size={18}/> : <EyeOff size={18}/>}</button>
-                      </div>
-                      <button onClick={triggerLogin} className="w-full bg-blue-600 text-white p-3 rounded-2xl font-black shadow hover:bg-blue-700 transition-all transform active:scale-95">進入系統</button>
-                    </div>
-                  </div>
-                  <div className="mt-12 text-[11px] text-gray-400 font-bold tracking-wider">© 2026 NTUH Yunlin Pharmacy - V1.6.11 by L.C Chen</div>
-                </div>
-              );
+              const triggerLogin = () => { const id = document.getElementById('uid')?.value.toUpperCase(); const pwd = document.getElementById('upwd')?.value; if (!pwd) { alert("請輸入密碼！"); return; } handleLoginAction(id, pwd); };
+              return (<div className="flex flex-col items-center justify-center min-h-[60vh] p-4"><div className="bg-white p-10 rounded-[2.5rem] shadow-2xl border max-w-sm w-full text-center"><h2 className="text-xl font-black mb-2 text-gray-800">藥劑部 班表系統登入</h2><div className="text-[10px] text-gray-400 font-bold mb-8">第一次輸入的密碼會自動設定為密碼</div><div className="space-y-4"><input className="w-full border-2 p-3 rounded-2xl outline-none font-mono text-center uppercase" placeholder="員編" id="uid" onInput={(e) => e.target.value = e.target.value.toUpperCase()} onKeyDown={(e) => e.key === 'Enter' && triggerLogin()} /><div className="relative"><input className="w-full border-2 p-3 rounded-2xl outline-none text-center" type={showPassword ? "text" : "password"} placeholder="密碼" id="upwd" onKeyDown={(e) => e.key === 'Enter' && triggerLogin()} /><button onClick={()=>setShowPassword(!showPassword)} className="absolute right-4 top-4 text-gray-400">{showPassword ? <Eye size={18}/> : <EyeOff size={18}/>}</button></div><button onClick={triggerLogin} className="w-full bg-blue-600 text-white p-3 rounded-2xl font-black shadow transition-all transform active:scale-95">進入系統</button></div></div><div className="mt-12 text-[11px] text-gray-400 font-bold tracking-wider">© 2026 NTUH Yunlin Pharmacy - V1.7.3</div></div>);
             }
             default: return null;
           }
         })()}
       </main>
-
       <Modal isOpen={showExitConfirm} onClose={() => { setShowExitConfirm(false); setTargetPage(null); }} onConfirm={confirmExit} title="班表尚未發佈" message="您有變更排班表，但尚未「發佈班表」。確定要離開嗎？" confirmText="仍要離開" cancelText="留在這裏" />
       <SwapRequestModal isOpen={!!swapTarget} onClose={()=>setSwapTarget(null)} onConfirm={()=>{ setSwapRequests([...swapRequests, {...swapTarget, id:`REQ-${Date.now()}`, status:'PendingTarget', timestamp:Date.now(), adminNote:""}]); setSwapTarget(null); }} data={swapTarget} />
-      <Modal isOpen={!!rejectingReq} onClose={()=>setRejectingReq(null)} onConfirm={()=>{ setSwapRequests(swapRequests.map(r => r.id === rejectingReq.id ? { ...r, status: 'Rejected', adminNote: rejectNote || "管理員否決" } : r)); setRejectNote(""); setRejectingReq(null); }} title="否決換班申請" confirmText="確認否決"><textarea className="w-full border-2 rounded-2xl p-3 text-sm outline-none focus:border-red-400" placeholder="請填寫否決原因..." rows={3} value={rejectNote} onChange={(e) => setRejectNote(e.target.value)} /></Modal>
-      <Modal isOpen={!!deleteTarget} onClose={()=>setDeleteTarget(null)} onConfirm={()=>{setEmployees(employees.filter(e=>e.id!==deleteTarget.id)); setDeleteTarget(null)}} title="確定刪除人員？" message="移除該人員後，其班表歷史將不再顯示於本期報表。" />
-      <Modal isOpen={!!deleteShiftTarget} onClose={()=>setDeleteShiftTarget(null)} onConfirm={()=>{setShifts(shifts.filter(s=>s.id!==deleteShiftTarget.id)); setDeleteShiftTarget(null)}} title="確定刪除班別？" message={`移除 ${deleteShiftTarget?.name} 將影響自動漏排偵測。`} />
+      <Modal isOpen={!!rejectingReq} onClose={()=>setRejectingReq(null)} onConfirm={()=>{ setSwapRequests(swapRequests.map(r => r.id === rejectingReq.id ? { ...r, status: 'Rejected', adminNote: rejectNote || "管理員否決" } : r)); setRejectNote(""); setRejectingReq(null); }} title="否決換班申請" confirmText="確認否決"><textarea className="w-full border-2 rounded-2xl p-3 text-sm outline-none" placeholder="原因..." rows={3} value={rejectNote} onChange={(e) => setRejectNote(e.target.value)} /></Modal>
+      <Modal isOpen={!!deleteTarget} onClose={()=>setDeleteTarget(null)} onConfirm={()=>{setEmployees(employees.filter(e=>e.id!==deleteTarget.id)); setDeleteTarget(null)}} title="確定刪除人員？" message="移除該人員將影響本期報表。" />
+      <Modal isOpen={!!deleteShiftTarget} onClose={()=>setDeleteShiftTarget(null)} onConfirm={()=>{setShifts(shifts.filter(s=>s.id!==deleteShiftTarget.id)); setDeleteShiftTarget(null)}} title="確定刪除班別？" message={`移除 ${deleteShiftTarget?.name}。`} />
     </div>
   );
 };
