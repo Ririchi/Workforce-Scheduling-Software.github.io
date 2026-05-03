@@ -253,28 +253,31 @@ const ScheduleTableView = ({ currentMonth, employees, schedule, cellColors, days
     return Object.values(supportRow).some(v => v && v !== "-" && v !== "#" && v !== "例" && v !== "");
   }, [schedule, currentMonth]);
 
-  return (
-    <div className="flex-grow flex flex-col overflow-auto bg-gray-50 font-sans relative">
+return (
+    <div className="flex-grow flex flex-col h-full bg-gray-50 font-sans overflow-hidden">
       {onCellClick && (
-        <div className="sticky top-0 z-[100] bg-[#2A85A1] text-white py-2.5 px-4 text-center font-black text-sm shadow-md h-[44px]">
+        <div className="flex-none bg-[#2A85A1] text-white py-2.5 px-4 text-center font-black text-sm shadow-md z-[110]">
           <Info size={16} className="inline mr-2 mb-0.5" />
-          換班系統：點選欲換人員班別即可申請換班
-        </div>)}
-      <div className="flex-grow overflow-auto">
+          換班系統：點選欲換人員班別即可申請換班 </div>)}
+
+      {/* 修改 3: 這裡才是真正會捲動的容器 */}
+      <div className="flex-grow overflow-auto relative">
         <table className="w-full text-[12px] text-center border-separate border-spacing-0 table-fixed min-w-[1600px] lg:min-w-[1800px]">
           <thead>
-            <tr className="bg-gray-100">
-              <th className={`sticky left-0 ${headerTop} z-[80] bg-gray-100 border-b-2 border-r-2 border-gray-300 p-3 w-16 font-black text-[11px] shadow-[2px_2px_5px_rgba(0,0,0,0.1)]`}>姓名</th>
-              
+            <tr>
+              <th className="sticky left-0 top-0 z-[100] bg-gray-100 p-3 w-16 font-black text-[11px] shadow-[2px_2px_5px_rgba(0,0,0,0.1)] border-b-2 border-r-2 border-gray-300">姓名</th>
               {daysInMonth.map(d => {
                 const cycleEnd = isCycleEnd(d.fullDate);
-                return (<th 
-                    key={d.day} 
-                    className={`sticky ${headerTop} z-[70] border-b-2 border-r border-gray-300 p-1 w-12 font-bold ${cycleEnd ? 'border-r-4 border-r-gray-400' : ''} ${d.rawDay === 0 || d.holiday ? 'bg-[#FFB3D9]' : d.rawDay === 6 ? 'bg-[#FFB366]' : 'bg-gray-100'}`}>
+                let bgClass = "bg-gray-100";
+                if (d.rawDay === 0 || d.holiday) bgClass = "bg-[#FFB3D9]";
+                else if (d.rawDay === 6) bgClass = "bg-[#FFB366]";
+                return (
+                  <th key={d.day} 
+                    className={`sticky top-0 z-[90] p-1 w-12 font-bold border-b-2 border-r border-gray-300 ${bgClass} ${cycleEnd ? 'border-r-4 border-r-gray-400' : ''}`} >
                     <div className="text-[10px] opacity-60">{d.dayOfWeek}</div>
                     <div className="text-base">{d.day}</div>
-                    <div className="text-[9px] text-red-600 truncate h-4 leading-none font-normal">{String(d.holiday || "")}</div></th> );
-              })}</tr>
+                    <div className="text-[9px] text-red-600 truncate h-4 leading-none font-normal">{String(d.holiday || "")}</div>
+                  </th>);})}</tr>
           </thead>
 
           <tbody>
@@ -457,16 +460,25 @@ const getLeaveList = (day) => {
               })}
             </tr>
             <tr className="bg-[#F3E5F5] border-b">
-              <td className="sticky left-0 z-40 bg-[#F3E5F5] border p-2 font-bold text-purple-600 text-[10px]">備註</td>
-              {daysInMonth.map(d => (
-                <td key={d.day} className={`border p-0.5 align-middle ${isCycleEnd(d.fullDate) ? 'border-r-4 border-r-gray-400' : ''}`}>
-                  <textarea 
-                    rows={1}
-                    value={preLeaveData.remarks?.[currentMonth]?.[d.day] || ""} 
-                    onChange={e => { const next = deepClone(preLeaveData); if(!next.remarks) next.remarks = {};if(!next.remarks[currentMonth]) next.remarks[currentMonth] = {}; next.remarks[currentMonth][d.day] = e.target.value;   setPreLeaveData(next);}}
-                    className={`w-full overflow-hidden bg-transparent text-[11px] font-bold text-purple-600 text-center ${(!isAdmin || isMonthDrawn) ? 'cursor-not-allowed' : ''}`}
+             <td className="sticky left-0 top-[48px] z-40 bg-[#F3E5F5] border p-2 font-bold text-purple-600 text-[10px]">備註</td>
+             {daysInMonth.map(d => (
+               <td key={d.day} className={`border p-0.5 align-middle ${isCycleEnd(d.fullDate) ? 'border-r-4 border-r-gray-400' : ''}`}>
+               <textarea 
+                rows={1}
+               value={preLeaveData.remarks?.[currentMonth]?.[d.day] || ""} 
+               disabled={!isAdmin || isMonthDrawn}
+                onChange={e => { 
+                  const next = deepClone(preLeaveData); 
+                  if(!next.remarks) next.remarks = {};
+                  if(!next.remarks[currentMonth]) next.remarks[currentMonth] = {}; 
+                  next.remarks[currentMonth][d.day] = e.target.value;   
+                  setPreLeaveData(next);
+                  saveData({ preLeaveData: next }); 
+                }}
+              className={`w-full bg-transparent text-[11px] font-bold text-purple-600 text-center outline-none resize-none overflow-hidden block ${(!isAdmin || isMonthDrawn) ? 'cursor-not-allowed opacity-70' : 'cursor-text'}`}
+              style={{ fieldSizing: 'content', minHeight: '1.5em' }}
                   />
-                </td>
+               </td>
               ))}
             </tr>
             <tr className="bg-[#E0F2F1] border-b">
@@ -727,9 +739,8 @@ const RecordsView = ({ currentUser, swapRequests, onAction, schedule, currentMon
                         )}
                       </div>
                     )}
-                    {req.creatorId === currentUser.id && req.status === 'PendingTarget' && (
-                      <button onClick={() => triggerAction(req, 'Delete')} className="w-full sm:w-auto px-4 py-2 text-gray-400 hover:text-red-500 border border-gray-100 rounded-xl transition-all font-bold text-xs">撤回申請</button>
-                    )}
+                    {req.creatorId === currentUser.id && req.status === 'PendingTarget' && (<button onClick={() => triggerAction(req, 'Delete')} 
+                    className="w-full sm:w-auto px-4 py-2 bg-gray-600 text-white hover:bg-gray-700 rounded-xl transition-all font-bold text-xs shadow-sm">撤回申請</button>)}
                   </div>
                 </div>
               );
@@ -1446,13 +1457,19 @@ const SchedulingView = ({ currentMonth, employees, daysInMonth, schedule, setSch
   };
 
   return (
-    <div className="flex-grow flex flex-col bg-gray-100 overflow-hidden font-sans">
-      <div className="bg-white border-b p-2 flex justify-between items-center shadow-sm z-20">
+    <div className="flex-grow flex flex-col h-full bg-gray-100 overflow-hidden font-sans">
+      <div className="flex-none bg-white border-b p-2 flex justify-between items-center shadow-sm z-20">
         <div className="flex gap-4 items-center">
           <span className="font-black text-gray-700">排班編輯器 - {currentMonth}</span>
           {!importPreview && (
             <div className="flex gap-1 bg-gray-100 p-1 rounded">
-              {PALETTE.map(p => (<button key={p.name} onClick={()=>setActiveColor(p.class)} className={`w-6 h-6 rounded-full border-2 ${p.class} ${activeColor === p.class ? 'border-blue-500 scale-110 shadow' : 'border-white'}`}/>))}
+              {PALETTE.map(p => (
+                <button 
+                  key={p.name} 
+                  onClick={() => setActiveColor(p.class)} 
+                  className={`w-6 h-6 rounded-full border-2 ${p.class} ${activeColor === p.class ? 'border-blue-500 scale-110 shadow' : 'border-white'}`}
+                />
+              ))}
             </div>
           )}
           {importPreview && (
@@ -1465,23 +1482,35 @@ const SchedulingView = ({ currentMonth, employees, daysInMonth, schedule, setSch
         </div>
         <div className="flex gap-2">
           {!importPreview && (
-            <><button onClick={()=>fileRef.current.click()} className="bg-gray-800 text-white px-4 py-1.5 rounded text-xs font-bold flex items-center gap-1 hover:bg-black shadow"><Upload size={14}/> 上傳 CSV</button>
+            <>
+              <button onClick={() => fileRef.current.click()} className="bg-gray-800 text-white px-4 py-1.5 rounded text-xs font-bold flex items-center gap-1 hover:bg-black shadow"><Upload size={14}/> 上傳 CSV</button>
               <button onClick={handlePublishSchedule} className="bg-blue-600 text-white px-5 py-1.5 rounded text-xs font-bold shadow flex items-center gap-2 hover:bg-blue-700 transition-all"><CheckCircle2 size={16}/> 發佈班表</button>
             </>
           )}
           <input type="file" ref={fileRef} className="hidden" accept=".csv" onChange={handleImportCSV} />
         </div>
       </div>
-      <div className="flex-grow overflow-auto p-4 select-none">
-        <table className="w-full text-[11px] text-center border-collapse table-fixed bg-white shadow-xl min-w-[1000px]">
-          <thead className="sticky top-0 bg-white z-20 shadow">
+      <div className="flex-grow overflow-auto relative p-4 select-none">
+        <table className="w-full text-[11px] text-center border-separate border-spacing-0 table-fixed bg-white shadow-xl min-w-[1000px]">
+          <thead>
             <tr className="bg-gray-50 border-b text-[10px]">
-              <th className="w-20 border p-2 sticky left-0 bg-gray-100 z-30 font-black shadow-[2px_0_5_rgba(0,0,0,0.05)]">姓名</th>
+              <th className="sticky left-0 top-0 z-[100] bg-gray-100 p-2 w-20 font-black shadow-[2px_2px_5px_rgba(0,0,0,0.05)] border-b-2 border-r-2 border-gray-200">
+                姓名
+              </th>
               {daysInMonth.map(d => {
                 const cycleEnd = isCycleEnd(d.fullDate);
+                let bgClass = "bg-gray-50";
+                if (d.rawDay === 0 || d.holiday) bgClass = "bg-[#FFB3D9]";
+                else if (d.rawDay === 6) bgClass = "bg-[#FFB366]";
+                
                 return (
-                  <th key={d.day} className={`border p-1 w-12 font-bold ${cycleEnd ? 'border-r-4 border-r-gray-400' : ''} ${d.rawDay === 0 || d.holiday ? 'bg-[#FFB3D9]' : d.rawDay === 6 ? 'bg-[#FFB366]' : ''}`}>
-                    <div className="text-[10px] opacity-50">{d.dayOfWeek}</div><div className="text-sm">{d.day}</div><div className="text-[9px] text-red-600 truncate h-3 leading-none font-normal">{String(d.holiday || "")}</div>
+                  <th 
+                    key={d.day} 
+                    className={`sticky top-0 z-[90] p-1 w-12 font-bold border-b-2 border-r border-gray-200 ${bgClass} ${cycleEnd ? 'border-r-4 border-r-gray-400' : ''}`}
+                  >
+                    <div className="text-[10px] opacity-50">{d.dayOfWeek}</div>
+                    <div className="text-sm">{d.day}</div>
+                    <div className="text-[9px] text-red-600 truncate h-3 leading-none font-normal">{String(d.holiday || "")}</div>
                   </th>
                 );
               })}
@@ -1493,7 +1522,9 @@ const SchedulingView = ({ currentMonth, employees, daysInMonth, schedule, setSch
               const isNC = getIsNightClinic(emp);
               return (
                 <tr key={emp.id} className="hover:bg-blue-50 border-b group transition-colors">
-                  <td className="sticky left-0 bg-white border p-2 font-black z-10 group-hover:bg-blue-50 shadow-[2px_0_5_rgba(0,0,0,0.05)]">{emp.name}</td>
+                  <td className="sticky left-0 z-10 bg-white border-r border-gray-200 p-2 font-black group-hover:bg-blue-50 shadow-[2px_0_5px_rgba(0,0,0,0.05)]">
+                    {emp.name}
+                  </td>
                   {daysInMonth.map((d) => {
                     const originalVal = editSched[emp.name]?.[d.day] || (isNC ? "" : "-");
                     const previewVal = importPreview ? importPreview[emp.name]?.[d.day] : null;
@@ -1520,7 +1551,7 @@ const SchedulingView = ({ currentMonth, employees, daysInMonth, schedule, setSch
               );
             })}
           </tbody>
-          <tfoot className="bg-gray-50 border-t-2 border-gray-300">
+          <tfoot className="sticky bottom-0 z-20 bg-gray-50 border-t-2 border-gray-300">
             <tr><td className="sticky left-0 bg-gray-100 border p-1 text-[9px] font-black text-gray-400 text-center shadow-[2px_0_5_rgba(0,0,0,0.05)]">漏排提醒</td>
               {daysInMonth.map(d => { 
                 const missing = getMissingData()[d.day] || [];
@@ -1716,9 +1747,9 @@ const handleRecordAction = (req, action) => {
   };
 
   return (
-    <div className="flex flex-col min-h-screen bg-white font-sans text-gray-900 overflow-x-hidden">
+    <div className="flex flex-col h-screen bg-white font-sans text-gray-900 overflow-hidden">
       <Header currentMonth={currentMonth} setCurrentMonth={setCurrentMonth} currentPage={currentPage} handlePageChange={handlePageChange} isLoggedIn={isLoggedIn} currentUser={currentUser} handleLogout={()=>{setIsLoggedIn(false); setCurrentUser(null); setCurrentPage('home');}} exportScheduleCSV={exportScheduleCSV} swapRequests={swapRequests} />
-      <main className="flex-grow flex flex-col">
+      <main className="flex-grow flex flex-col overflow-hidden">
         {(() => {
           switch (currentPage) {
             case 'home': return <ScheduleTableView currentMonth={currentMonth} employees={employees} schedule={schedule} cellColors={cellColors} daysInMonth={daysInMonth} swapRequests={swapRequests} currentPage={currentPage} currentUser={currentUser} />;
