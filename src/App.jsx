@@ -680,25 +680,21 @@ const RecordsView = ({ currentUser, swapRequests, onAction, schedule, currentMon
           <h3 className="text-xs font-black text-indigo-400 border-l-4 border-indigo-400 pl-2 uppercase tracking-widest">待處理流程 ({pendingList.length})</h3>
           {pendingList.length === 0 ? <div className="bg-white p-10 rounded-2xl border border-dashed text-center text-gray-300 italic font-bold">目前無待核定資料</div> :
             pendingList.map(req => {
-              // --- V1.7.10 核心修正邏輯：僅校驗 Target 且忽略裝飾符 ---
+              // 核心修正：不要直接用全域的 currentMonth，要抓取該筆申請資料的月份
+              // 假設 req.date 格式為 "2026-05-20"，切割出 "2026-05"
+              const reqMonthKey = req.date ? req.date.substring(0, 7) : currentMonth;
               const checkDays = req.isBundle ? req.daysToSwap : [req.day];
               const isShiftMismatched = checkDays.some(d => {
-                const rawCurTarget = schedule[currentMonth]?.[req.targetName]?.[d];
-                
+                // 這裡改用 reqMonthKey 確保抓到正確月份的班表資料
+                const rawCurTarget = schedule[reqMonthKey]?.[req.targetName]?.[d];
                 const normalize = (v) => {
                   const s = (v === null || v === undefined) ? "-" : String(v).trim();
-                  return (s === "" || s === "-") ? "-" : s;
-                };
-
+                  return (s === "" || s === "-") ? "-" : s;};
                 const curTargetS = normalize(rawCurTarget);
                 const storedTargetS = normalize(req.targetShift);
-                
-                // 處理 P# 與 P 的相容性比對：移除 '#與(國)' 進行基礎班別校驗
-                // 依據指令：僅校驗「被換班人員 (Target)」，完全排除申請人校驗
                 const clean = (val) => val.replace(/#|\(國\)/g, '');
                 return clean(curTargetS) !== clean(storedTargetS);
-              });
-              // --- 修正結束 ---
+  });
 
               return (
                 <div key={req.id} className="bg-white p-4 rounded-2xl shadow-sm border border-l-4 border-l-indigo-400 flex flex-col sm:flex-row justify-between items-start sm:items-center gap-3">
@@ -1511,7 +1507,7 @@ const SchedulingView = ({ currentMonth, employees, daysInMonth, schedule, setSch
                       <td key={d.day} className={`border p-0 ${isNC ? 'h-[32px]' : 'h-10'} relative ${bgClass} ${isCycleEnd(d.fullDate) ? 'border-r-4 border-r-gray-400' : ''} ${isConflict ? 'ring-2 ring-blue-500 ring-inset bg-blue-50' : ''}`}
                         onClick={() => {
                           if (importPreview && isConflict) { const n = new Set(ignoredCells); if (n.has(`${emp.name}-${d.day}`)) n.delete(`${emp.name}-${d.day}`); else n.add(`${emp.name}-${d.day}`); setIgnoredCells(n);
-                          } else if (!importPreview) { const nc = deepClone(cellColors); if (!nc[currentMonth]) nc[currentMonth] = {}; if (!nc[currentMonth][emp.name]) nc[currentMonth][emp.name] = {}; nc[currentMonth][emp.name][d.day] = activeColor; setCellColors(nc); }
+                          } else if (!importPreview) { const nc = deepClone(cellColors); if (!nc[currentMonth]) nc[currentMonth] = {}; if (!nc[currentMonth][emp.name]) nc[currentMonth][emp.name] = {}; nc[currentMonth][emp.name][d.day] = activeColor; setCellColors(nc);saveData({ cellColors: nc }); }
                         }}>
                         <input type="text" value={displayVal} disabled={!!importPreview} className={`w-full h-full text-center bg-transparent focus:bg-white outline-none font-bold font-mono cursor-text ${importPreview ? 'pointer-events-none opacity-80' : (displayVal === "-" ? 'text-gray-300' : 'text-gray-800')}`}
                           onChange={(e) => { if (!importPreview) { setEditSched(prev => ({ ...prev, [emp.name]: { ...prev[emp.name], [d.day]: e.target.value } })); setIsDirty(true); } }} />
@@ -1609,15 +1605,18 @@ const App = () => {
     if (res.includes(p) && !isLoggedIn) { setPendingPage(p); setCurrentPage('login'); } else setCurrentPage(p);
   };
 
-  const handleLoginAction = (id, pwd) => {
-    const emp = employees.find(e => e.id === id);
-    if (!emp) { alert("無此員編權限。"); return; }
-    if (emp.password === "" || emp.password === pwd) {
-      if (emp.password === "" && pwd !== "") setEmployees(employees.map(e => e.id === emp.id ? { ...e, password: pwd } : e));
-      setIsLoggedIn(true); setCurrentUser(emp);
-      if (pendingPage) { setCurrentPage(pendingPage); setPendingPage(null); } else setCurrentPage('home');
-    } else alert("密碼錯誤！");
-  };
+const handleLoginAction = (id, pwd) => {
+  const emp = employees.find(e => e.id === id);
+  if (!emp) { alert("無此員編權限。"); return; }
+  if (emp.password === "" || emp.password === pwd) {
+    if (emp.password === "" && pwd !== "") {
+      const nextEmployees = employees.map(e => e.id === emp.id ? { ...e, password: pwd } : e); setEmployees(nextEmployees);saveData({ employees: nextEmployees });
+      const updatedEmp = { ...emp, password: pwd };setCurrentUser(updatedEmp);
+    } else {setCurrentUser(emp); } setIsLoggedIn(true);
+    if (pendingPage) { setCurrentPage(pendingPage);  setPendingPage(null); 
+    } else {setCurrentPage('home');}
+  } else {alert("密碼錯誤！");}
+};
 
 const handleSwapApply = (targetEmp, dayInfo) => {
   if (!currentUser || targetEmp.id === currentUser.id) return;
@@ -1686,25 +1685,22 @@ const handleSwapApply = (targetEmp, dayInfo) => {
   };
 
     const handleRecordAction = (req, action) => {
-    if (action === 'Approve') {
-      let nextStatus = req.status;
-      let updatedSchedule = null; // 新增：用來暫存新班表
-      if (req.status === 'PendingTarget') {
-        nextStatus = 'PendingAdmin';
-      } else if (req.status === 'PendingAdmin') {
-        nextStatus = 'Approved';
-        const ns = deepClone(schedule);
-        if (!ns[currentMonth]) ns[currentMonth] = {};
-        // 執行對調邏輯
-        (req.isBundle ? req.daysToSwap : [req.day]).forEach(d => {
-          const cS = ns[currentMonth][req.creatorName]?.[d] || "-";
-          const tS = ns[currentMonth][req.targetName]?.[d] || "-";
-          if (!ns[currentMonth][req.creatorName]) ns[currentMonth][req.creatorName] = {};
-          if (!ns[currentMonth][req.targetName]) ns[currentMonth][req.targetName] = {};
-          ns[currentMonth][req.creatorName][d] = tS;
-          ns[currentMonth][req.targetName][d] = cS;
-        });
-        setSchedule(ns); // 更新本地狀態
+      if (action === 'Approve') {
+        let nextStatus = req.status;
+        if (req.status === 'PendingTarget') {nextStatus = 'PendingAdmin';} else if (req.status === 'PendingAdmin') {nextStatus = 'Approved';
+      const ns = deepClone(schedule);
+      // 核心修正：從請求的日期中取得正確月份，而非使用全域 currentMonth
+      const targetMonthKey = req.date ? req.date.substring(0, 7) : currentMonth;
+      if (!ns[targetMonthKey]) ns[targetMonthKey] = {};
+      (req.isBundle ? req.daysToSwap : [req.day]).forEach(d => {
+        const cS = ns[targetMonthKey][req.creatorName]?.[d] || "-";
+        const tS = ns[targetMonthKey][req.targetName]?.[d] || "-";
+        if (!ns[targetMonthKey][req.creatorName]) ns[targetMonthKey][req.creatorName] = {};
+        if (!ns[targetMonthKey][req.targetName]) ns[targetMonthKey][req.targetName] = {};
+        ns[targetMonthKey][req.creatorName][d] = tS;
+        ns[targetMonthKey][req.targetName][d] = cS;
+      });
+      setSchedule(ns);
         updatedSchedule = ns; // 標記：這一次需要存入新班表
       }
       const nextRequests = swapRequests.map(r => r.id === req.id ? { ...r, status: nextStatus } : r);
@@ -1740,7 +1736,7 @@ const handleSwapApply = (targetEmp, dayInfo) => {
         {(() => {
           switch (currentPage) {
             case 'home': return <ScheduleTableView currentMonth={currentMonth} employees={employees} schedule={schedule} cellColors={cellColors} daysInMonth={daysInMonth} swapRequests={swapRequests} currentPage={currentPage} currentUser={currentUser} />;
-            case 'account': return <AccountManagementView employees={employees}  setEmployees={(val) => { setEmployees(val); saveData({ employees: val }); }} setDeleteTarget={setDeleteTarget} />;
+            case 'account': return <AccountManagementView employees={employees} setEmployees={(val) => { setEmployees(val); saveData({ employees: val });}} setDeleteTarget={setDeleteTarget} />;
             case 'shifts': return <ShiftsManagementView shifts={shifts} setShifts={(val) => { setShifts(val); saveData({ shifts: val }); }}  holidays={holidays} setHolidays={(val) => { setHolidays(val); saveData({ holidays: val }); }}  setDeleteShiftTarget={setDeleteShiftTarget} personDayRules={personDayRules}  setPersonDayRules={(val) => { setPersonDayRules(val); saveData({ personDayRules: val }); }} />;
             case 'swap': return <ScheduleTableView currentMonth={currentMonth} employees={employees} schedule={schedule} cellColors={cellColors} daysInMonth={daysInMonth} onCellClick={handleSwapApply} swapRequests={swapRequests} currentPage={currentPage} currentUser={currentUser} />;
             case 'records': return <RecordsView currentUser={currentUser} swapRequests={swapRequests} onAction={handleRecordAction} schedule={schedule} currentMonth={currentMonth} />;
