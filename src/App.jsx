@@ -184,7 +184,7 @@ const SwapRequestModal = ({ isOpen, onClose, onConfirm, data }) => {
               <div className="bg-cyan-50 text-cyan-700 rounded-lg py-2 mt-1 font-mono text-xs border border-cyan-100 font-black">{data.targetShift}</div>
             </div>
           </div>
-          {isBundle && <div className="text-[10px] text-gray-400 text-center italic bg-gray-50 p-2 rounded-xl">注意：系統將自動對調整段週期之班別</div>}
+          {isBundle && <div className="text-[10px] text-gray-400 text-center italic bg-gray-50 p-2 rounded-xl">注意：系統將自動對調該整段週期之班別</div>}
         </div>
         <div className="p-6 pt-0 flex gap-3">
           <button onClick={onClose} className="flex-grow py-3 text-sm font-bold text-gray-400 bg-gray-50 rounded-xl hover:bg-gray-100 transition-colors">取消</button>
@@ -679,18 +679,21 @@ const RecordsView = ({ currentUser, swapRequests, onAction, schedule, currentMon
             pendingList.map(req => {
               const checkDays = req.isBundle ? req.daysToSwap : [req.day];
               const isShiftMismatched = checkDays.some(d => {
-                const curCreatorS = (schedule[currentMonth]?.[req.creatorName]?.[d] || "-").toString().trim();
-                const curTargetS = (schedule[currentMonth]?.[req.targetName]?.[d] || "-").toString().trim();
-                const storedCreatorS = req.creatorShift.toString().trim();
-                const storedTargetS = req.targetShift.toString().trim();
-
-                const isMatch = (current, stored) => {
-                  if (stored.startsWith('P') && current.startsWith('P')) return true;
-                  if (stored.startsWith('A') && current.startsWith('A')) return true;
-                  return current === stored;
-                };
-
-                return !isMatch(curCreatorS, storedCreatorS) || !isMatch(curTargetS, storedTargetS);
+               const rawCurCreator = schedule[currentMonth]?.[req.creatorName]?.[d];
+               const rawCurTarget = schedule[currentMonth]?.[req.targetName]?.[d];
+               
+               // 建立一個標準化函數：將 null, undefined, "" 或 " " 統一視為 "-"
+               const normalize = (v) => {
+                const s = (v || "-").toString().trim();
+                return s === "" ? "-" : s;
+              };
+              
+              const curCreatorS = normalize(rawCurCreator);
+              const curTargetS = normalize(rawCurTarget);
+              const storedCreatorS = normalize(req.creatorShift);
+              const storedTargetS = normalize(req.targetShift);
+              // 進行比對
+              return curCreatorS !== storedCreatorS || curTargetS !== storedTargetS;
               });
 
               return (
@@ -1608,18 +1611,58 @@ const App = () => {
     } else alert("密碼錯誤！");
   };
 
-  const handleSwapApply = (targetEmp, dayInfo) => {
-    if (!currentUser || targetEmp.id === currentUser.id || getIsNightClinic(targetEmp)) return;
-    const currentShift = schedule[currentMonth]?.[targetEmp.name]?.[dayInfo.day] || "-";
-    const myShift = schedule[currentMonth]?.[currentUser.name]?.[dayInfo.day] || "-";
-    let isBundle = false, startDate = dayInfo.fullDate, endDate = dayInfo.fullDate, daysToSwap = [dayInfo.day];
-    const findBundle = (type, targetDateStr) => {
-      const targetDate = new Date(targetDateStr), dOfW = targetDate.getDay(); 
-      if (type === 'P') { const satDate = new Date(targetDate); satDate.setDate(targetDate.getDate() - (dOfW === 6 ? 0 : (dOfW + 1))); const thuDate = new Date(satDate); thuDate.setDate(satDate.getDate() + 5); isBundle = true; startDate = `${currentMonth}-${String(satDate.getDate()).padStart(2, '0')}`; endDate = `${currentMonth}-${String(thuDate.getDate()).padStart(2, '0')}`; daysToSwap = []; for(let i=0; i<=5; i++) { const d = new Date(satDate); d.setDate(satDate.getDate()+i); daysToSwap.push(d.getDate()); } }
-      else if (type === 'A1A2') { const monDate = new Date(targetDate); monDate.setDate(targetDate.getDate() - (dOfW - 1)); const friDate = new Date(monDate); friDate.setDate(monDate.getDate() + 4); isBundle = true; startDate = `${currentMonth}-${String(monDate.getDate()).padStart(2, '0')}`; endDate = `${currentMonth}-${String(friDate.getDate()).padStart(2, '0')}`; daysToSwap = []; for(let i=0; i<=4; i++) { const d = new Date(monDate); d.setDate(monDate.getDate()+i); daysToSwap.push(d.getDate()); } }
-    };
-    if (currentShift.startsWith('P') || myShift.startsWith('P')) findBundle('P', dayInfo.fullDate); else if (currentShift.startsWith('A') || myShift.startsWith('A')) findBundle('A1A2', dayInfo.fullDate);
-    setSwapTarget({ date: dayInfo.fullDate, dayOfWeek: dayInfo.dayOfWeek, day: dayInfo.day, creatorId: currentUser.id, creatorName: currentUser.name, creatorShift: myShift, targetId: targetEmp.id, targetName: targetEmp.name, targetShift: currentShift, isBundle, startDate, endDate, daysToSwap });
+const handleSwapApply = (targetEmp, dayInfo) => {
+  if (!currentUser || targetEmp.id === currentUser.id) return;
+  // --- 關鍵修正：標準化班別 ---
+  const normalize = (v) => (v || "-").toString().trim() === "" ? "-" : (v || "-").toString().trim();
+  const targetShift = normalize(schedule[currentMonth]?.[targetEmp.name]?.[dayInfo.day]);
+  const myShift = normalize(schedule[currentMonth]?.[currentUser.name]?.[dayInfo.day]);
+  
+  let isBundle = false, startDate = dayInfo.fullDate, endDate = dayInfo.fullDate, daysToSwap = [dayInfo.day];
+  const targetDate = new Date(dayInfo.fullDate);
+  const dOfW = targetDate.getDay(); // 0:日, 1:一 ... 6:六
+
+  const getShiftType = (val) => {
+    if (val.startsWith('A1') || val.startsWith('A2')) return 'A1A2';
+    if (val.startsWith('A3')) return 'A3';
+    if (val.startsWith('P')) return 'P';
+    return null;
+  };
+
+  const type = getShiftType(targetShift) || getShiftType(myShift);
+
+  if (type === 'A1A2') {
+    // 週一到週五的 A1 或 A2 班 (5天)
+    if (dOfW >= 1 && dOfW <= 5) {
+      isBundle = true;
+      const mon = new Date(targetDate); mon.setDate(targetDate.getDate() - (dOfW - 1));
+      const fri = new Date(mon); fri.setDate(mon.getDate() + 4);
+      startDate = `${currentMonth}-${String(mon.getDate()).padStart(2, '0')}`;
+      endDate = `${currentMonth}-${String(fri.getDate()).padStart(2, '0')}`;
+      daysToSwap = []; for (let i = 0; i < 5; i++) { const d = new Date(mon); d.setDate(mon.getDate() + i); daysToSwap.push(d.getDate()); }
+    }
+  } else if (type === 'A3') {
+    // 週一到週四的 A3 班 (4天) - 修正點：只取週一到週四
+    if (dOfW >= 1 && dOfW <= 4) {
+      isBundle = true;
+      const mon = new Date(targetDate); mon.setDate(targetDate.getDate() - (dOfW - 1));
+      const thu = new Date(mon); thu.setDate(mon.getDate() + 3);
+      startDate = `${currentMonth}-${String(mon.getDate()).padStart(2, '0')}`;
+      endDate = `${currentMonth}-${String(thu.getDate()).padStart(2, '0')}`;
+      daysToSwap = []; for (let i = 0; i < 4; i++) { const d = new Date(mon); d.setDate(mon.getDate() + i); daysToSwap.push(d.getDate()); }
+    }
+  } else if (type === 'P') {
+    // 週六到週日的 P# 合併週一到週四的 P 班 (共 6 天)
+    if (dOfW === 6 || dOfW === 0 || (dOfW >= 1 && dOfW <= 4)) {
+      isBundle = true;
+      const sat = new Date(targetDate);
+      if (dOfW === 6) {} else if (dOfW === 0) sat.setDate(targetDate.getDate() - 1); else sat.setDate(targetDate.getDate() - (dOfW + 1));
+      const thu = new Date(sat); thu.setDate(sat.getDate() + 5);
+      startDate = `${currentMonth}-${String(sat.getDate()).padStart(2, '0')}`;
+      endDate = `${currentMonth}-${String(thu.getDate()).padStart(2, '0')}`;
+      daysToSwap = []; for (let i = 0; i < 6; i++) { const d = new Date(sat); d.setDate(sat.getDate() + i); daysToSwap.push(d.getDate());  }
+        }
+      }
   };
 
   const handleRecordAction = (req, action) => {
