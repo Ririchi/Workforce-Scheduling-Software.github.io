@@ -1653,7 +1653,12 @@ const handleLoginAction = (id, pwd) => {
 
 const handleSwapApply = (targetEmp, dayInfo) => {
   if (!currentUser || targetEmp.id === currentUser.id) return;
-  if (currentUser.isApplying) {alert("您目前有一筆換班申請正在流程中（待同仁或組長核定），請於該申請完成或撤回後再發起新申請。");return;}
+  const targetDateStr = dayInfo.fullDate;
+  const isDateLocked = currentUser.applyingDates?.includes(targetDateStr);
+  if (isDateLocked) {
+    alert(`您在 ${targetDateStr} 已經有一筆換班申請正在流程中，請待該申請完成或撤回後，再發起同一天的申請。`);
+    return;
+  }
   const normalize = (v) => (v || "-").toString().trim() === "" ? "-" : (v || "-").toString().trim();
   const targetShift = normalize(schedule[currentMonth]?.[targetEmp.name]?.[dayInfo.day]);
   const myShift = normalize(schedule[currentMonth]?.[currentUser.name]?.[dayInfo.day]);
@@ -1719,41 +1724,73 @@ const handleSwapApply = (targetEmp, dayInfo) => {
   };
 
 const handleRecordAction = (req, action) => {
-  const updateEmpLock = (empId, lockStatus) => {
-    const nextEmployees = employees.map(e => 
-      e.id === empId ? { ...e, isApplying: lockStatus } : e);setEmployees(nextEmployees);
-    return nextEmployees; };
+  const unlockDate = (empId, dateToRemove) => {
+    const nextEmployees = employees.map(e => {
+      if (e.id === empId) {
+        const currentDates = e.applyingDates || [];
+        return { ...e, applyingDates: currentDates.filter(d => d !== dateToRemove) };
+      }
+      return e;
+    });
+    setEmployees(nextEmployees);
+    return nextEmployees;
+  };
 
   if (action === 'Approve') {
     if (req.status === 'PendingTarget') {
-      const nextRequests = swapRequests.map(r => r.id === req.id ? { ...r, status: 'PendingAdmin' } : r);setSwapRequests(nextRequests);saveData({ swapRequests: nextRequests });
-    } else if (req.status === 'PendingAdmin') {
+      const nextRequests = swapRequests.map(r => r.id === req.id ? { ...r, status: 'PendingAdmin' } : r);
+      setSwapRequests(nextRequests);
+      saveData({ swapRequests: nextRequests });
+    } 
+    else if (req.status === 'PendingAdmin') {
       const nextStatus = 'Approved';
       const ns = deepClone(schedule);
       const targetMonthKey = req.date ? req.date.substring(0, 7) : currentMonth;
+      
       if (!ns[targetMonthKey]) ns[targetMonthKey] = {};
+      
       (req.isBundle ? req.daysToSwap : [req.day]).forEach(d => {
         const cS = ns[targetMonthKey][req.creatorName]?.[d] || "-";
         const tS = ns[targetMonthKey][req.targetName]?.[d] || "-";
         if (!ns[targetMonthKey][req.creatorName]) ns[targetMonthKey][req.creatorName] = {};
-        if (!ns[targetMonthKey][req.targetName]) ns[targetMonthKey][req.targetName] = {};ns[targetMonthKey][req.creatorName][d] = tS;ns[targetMonthKey][req.targetName][d] = cS;
+        if (!ns[targetMonthKey][req.targetName]) ns[targetMonthKey][req.targetName] = {};
+        ns[targetMonthKey][req.creatorName][d] = tS;
+        ns[targetMonthKey][req.targetName][d] = cS;
       });
-      const nextRequests = swapRequests.map(r => r.id === req.id ? { ...r, status: nextStatus } : r);const nextEmps = employees.map(e => e.id === req.creatorId ? { ...e, isApplying: false } : e);setSchedule(ns);setSwapRequests(nextRequests);setEmployees(nextEmps); aveData({ schedule: ns, swapRequests: nextRequests, employees: nextEmps });
+
+      const nextRequests = swapRequests.map(r => r.id === req.id ? { ...r, status: nextStatus } : r);
+      const nextEmps = unlockDate(req.creatorId, req.date);
+
+      setSchedule(ns);
+      setSwapRequests(nextRequests);
+      saveData({ schedule: ns, swapRequests: nextRequests, employees: nextEmps });
     }
-  } else if (action === 'Reject' || action === 'Delete') {
-const nextRequests = (action === 'Delete') 
-      ? swapRequests.filter(r => r.id !== req.id) 
+  } 
+  else if (action === 'Reject' || action === 'Delete') {
+    const nextRequests = (action === 'Delete') 
+      ? swapRequests.filter(r => r.id !== req.id)
       : swapRequests.map(r => r.id === req.id ? { ...r, status: 'Rejected' } : r);
 
-    const nextEmps = employees.map(e =>  e.id === req.creatorId ? { ...e, isApplying: false } : e); setSwapRequests(nextRequests);setEmployees(nextEmps);saveData({ swapRequests: nextRequests,  employees: nextEmps  });
-    if (currentUser && req.creatorId === currentUser.id) {setCurrentUser(prev => ({ ...prev, isApplying: false }));}}};
+    const nextEmps = unlockDate(req.creatorId, req.date);
+
+    setSwapRequests(nextRequests);
+    saveData({ swapRequests: nextRequests, employees: nextEmps });
+
+    if (currentUser && req.creatorId === currentUser.id) {
+      setCurrentUser(prev => ({
+        ...prev,
+        applyingDates: (prev.applyingDates || []).filter(d => d !== req.date)
+      }));
+    }
+  }
+}; 
     const exportScheduleCSV = (prefix = "") => {
     const rt = toROCTitle(currentMonth), fp = prefix ? `${prefix}_` : "";
     let csv = `\ufeff醫院藥劑部 ${rt} 班表,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,\n`; csv += "員編,姓名," + daysInMonth.map(d => `${d.day}(${d.dayOfWeek})`).join(",") + "\n";
     employees.forEach(emp => { if (emp.isSeparator) return; let row = [emp.id, emp.name]; daysInMonth.forEach(d => row.push(schedule[currentMonth]?.[emp.name]?.[d.day] || "-")); csv += row.join(",") + "\n"; });
     const b = new Blob([csv], { type: 'text/csv;charset=utf-8' }), l = document.createElement("a"); l.href = URL.createObjectURL(b); l.download = `${fp}班表_${currentMonth}.csv`; l.click();
   };
-
+  
   return (
     <div className="flex flex-col h-screen bg-white font-sans text-gray-900 overflow-hidden">
       <Header currentMonth={currentMonth} setCurrentMonth={setCurrentMonth} currentPage={currentPage} handlePageChange={handlePageChange} isLoggedIn={isLoggedIn} currentUser={currentUser} handleLogout={()=>{setIsLoggedIn(false); setCurrentUser(null); setCurrentPage('home');}} exportScheduleCSV={exportScheduleCSV} swapRequests={swapRequests} />
@@ -1777,10 +1814,38 @@ const nextRequests = (action === 'Delete')
         })()}
       </main>
       <Modal isOpen={showExitConfirm} onClose={() => { setShowExitConfirm(false); setTargetPage(null); }} onConfirm={confirmExit} title="班表尚未發佈" message="您有變更排班表，但尚未「發佈班表」。確定要離開嗎？" confirmText="仍要離開" cancelText="留在這裏" />
-      <SwapRequestModal isOpen={!!swapTarget}  onClose={() => setSwapTarget(null)} onConfirm={() => { 
-        const nextRequests = [...swapRequests, { ...swapTarget, id: `REQ-${Date.now()}`, status: 'PendingTarget', timestamp: Date.now(), adminNote: "" }];
-        const nextEmps = employees.map(e => e.id === currentUser.id ? { ...e, isApplying: true } : e ); setSwapRequests(nextRequests);setEmployees(nextEmps); saveData({ swapRequests: nextRequests,employees: nextEmps  });  setCurrentUser({ ...currentUser, isApplying: true });setSwapTarget(null);  }}  data={swapTarget} />   
-     <Modal isOpen={!!rejectingReq} onClose={()=>setRejectingReq(null)} onConfirm={()=>{ const nextRequests = swapRequests.map(r => r.id === rejectingReq.id ? { ...r, status: 'Rejected', adminNote: rejectNote || "管理員否決" } : r); setSwapRequests(nextRequests); saveData({ swapRequests: nextRequests }); setRejectNote(""); setRejectingReq(null); }} title="否決換班申請" confirmText="確認否決"><textarea className="w-full border-2 rounded-2xl p-3 text-sm outline-none" placeholder="原因..." rows={3} value={rejectNote} onChange={(e) => setRejectNote(e.target.value)} /></Modal>
+      <SwapRequestModal 
+         isOpen={!!swapTarget}  
+         onClose={() => setSwapTarget(null)} 
+         onConfirm={() => { 
+          const targetDateStr = swapTarget.date; 
+          const nextRequests = [
+           ...swapRequests, 
+            { ...swapTarget, id: `REQ-${Date.now()}`, status: 'PendingTarget', timestamp: Date.now(), adminNote: "" }
+          ];
+
+           const nextEmps = employees.map(e => {
+             if (e.id === currentUser.id) {
+             const currentDates = e.applyingDates || [];
+             return { ...e, applyingDates: [...currentDates, targetDateStr] };
+          }
+          return e;
+          });
+
+          setSwapRequests(nextRequests);
+          setEmployees(nextEmps); 
+          saveData({ swapRequests: nextRequests, employees: nextEmps });  
+
+          setCurrentUser({ 
+            ...currentUser, 
+            applyingDates: [...(currentUser.applyingDates || []), targetDateStr] 
+          });
+
+          setSwapTarget(null);  
+        }}  
+        data={swapTarget} 
+      />
+       <Modal isOpen={!!rejectingReq} onClose={()=>setRejectingReq(null)} onConfirm={()=>{ const nextRequests = swapRequests.map(r => r.id === rejectingReq.id ? { ...r, status: 'Rejected', adminNote: rejectNote || "管理員否決" } : r); setSwapRequests(nextRequests); saveData({ swapRequests: nextRequests }); setRejectNote(""); setRejectingReq(null); }} title="否決換班申請" confirmText="確認否決"><textarea className="w-full border-2 rounded-2xl p-3 text-sm outline-none" placeholder="原因..." rows={3} value={rejectNote} onChange={(e) => setRejectNote(e.target.value)} /></Modal>
       <Modal isOpen={!!deleteTarget} onClose={()=>setDeleteTarget(null)} onConfirm={()=>{const next = employees.filter(e=>e.id!==deleteTarget.id); setEmployees(next); saveData({ employees: next }); setDeleteTarget(null)}} title="確定刪除人員？" message="移除該人員將影響本期報表。" />
       <Modal isOpen={!!deleteShiftTarget} onClose={()=>setDeleteShiftTarget(null)} onConfirm={()=>{const next = shifts.filter(s=>s.id!==deleteShiftTarget.id); setShifts(next); saveData({ shifts: next }); setDeleteShiftTarget(null)}} title="確定刪除班別？" message={`移除 ${deleteShiftTarget?.name}。`} />
     </div>
