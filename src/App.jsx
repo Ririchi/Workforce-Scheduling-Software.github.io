@@ -1653,6 +1653,7 @@ const handleLoginAction = (id, pwd) => {
 
 const handleSwapApply = (targetEmp, dayInfo) => {
   if (!currentUser || targetEmp.id === currentUser.id) return;
+  if (currentUser.isApplying) {alert("您目前有一筆換班申請正在流程中（待同仁或組長核定），請於該申請完成或撤回後再發起新申請。");return;}
   const normalize = (v) => (v || "-").toString().trim() === "" ? "-" : (v || "-").toString().trim();
   const targetShift = normalize(schedule[currentMonth]?.[targetEmp.name]?.[dayInfo.day]);
   const myShift = normalize(schedule[currentMonth]?.[currentUser.name]?.[dayInfo.day]);
