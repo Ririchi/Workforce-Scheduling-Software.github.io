@@ -10,7 +10,7 @@ import {
 } from 'lucide-react';
 
 // --- 常數定義與初始資料 ---
-// 版本記錄：V1.7.10 - 深度重構連續換班校驗：僅校驗 Target 並相容 P#/P 變化
+// 版本記錄：V1.7.11 
 const WEEKDAYS_MAP = ["日", "一", "二", "三", "四", "五", "六"];
 const PALETTE = [
   { name: '無色', class: 'bg-white' },
@@ -209,7 +209,7 @@ const Header = ({ currentMonth, setCurrentMonth, currentPage, handlePageChange, 
     <header className="bg-white border-b-2 border-gray-800 p-2 sm:p-3 sticky top-0 z-[100] shadow-md">
       <div className="max-w-full flex flex-col lg:flex-row lg:items-center justify-between gap-2">
         <div className="flex flex-wrap items-center gap-3">
-          <h1 className="text-xs font-black text-gray-800 border-r-2 border-gray-300 pr-4 leading-none cursor-pointer" onClick={() => handlePageChange('home')}>台大雲林藥劑部班表 <span className="text-[10px] text-gray-400 font-normal ml-1">V1.7.10</span></h1>
+          <h1 className="text-xs font-black text-gray-800 border-r-2 border-gray-300 pr-4 leading-none cursor-pointer" onClick={() => handlePageChange('home')}>台大雲林藥劑部班表 <span className="text-[10px] text-gray-400 font-normal ml-1">V1.7.11</span></h1>
           <div className="flex items-center gap-2">
             <input type="month" value={currentMonth} onChange={(e) => setCurrentMonth(e.target.value)} className="border-2 border-gray-300 rounded px-1.5 py-0.5 text-xs font-bold focus:border-blue-500 outline-none" />
             {isLoggedIn && (<span className="text-[11px] font-black text-blue-600 bg-blue-50 px-2 py-0.5 rounded-lg border border-blue-100 flex items-center gap-1"><User size={12}/> 哈囉, {currentUser.name}</span>)}
@@ -404,13 +404,13 @@ const getLeaveList = (day) => {
     link.click();
   };
   
-  const handleAdminSettingChange = (type, value) => {
+const handleAdminSettingChange = (type, value) => {
   if (!isAdmin) return;
   const next = deepClone(preLeaveData);
   if (type === 'holiday') next.weekendLimit = value;
   else if (type === 'weekday') next.weekdayLimit = value;
-  setPreLeaveData(next); // 此處會觸發 App 的 saveData
-  };
+  else if (type === 'lotteryDay') next.lotteryDay = value; setPreLeaveData(next);saveData({ preLeaveData: next }); 
+};
 
 
   const handleLottery = () => {
@@ -574,18 +574,18 @@ const getLeaveList = (day) => {
             <span className="text-[11px] font-black text-gray-500">假日名額</span>
             <input 
               type="number" 
-              value={defaultHolidayLimit} 
+              value={preLeaveData.weekendLimit || 10} 
               onChange={e => handleAdminSettingChange('holiday', parseInt(e.target.value) || 0)}
               className="w-10 text-center border-b font-bold outline-none text-blue-600"
               disabled={!isAdmin || isMonthDrawn}
             />
           </div>
 
-          <div className="flex items-center gap-2 bg-white px-3 py-1.5 rounded-xl border border-gray-200 shadow-sm">
+          <div className="flex items-center gap-2 bg-white px-3 pay-1.5 rounded-xl border border-gray-200 shadow-sm">
             <span className="text-[11px] font-black text-gray-500">平日名額</span>
             <input 
               type="number" 
-              value={defaultWeekdayLimit} 
+              value={preLeaveData.weekdayLimit || 3} 
               onChange={e => handleAdminSettingChange('weekday', parseInt(e.target.value) || 0)}
               className="w-10 text-center border-b font-bold outline-none text-blue-600"
               disabled={!isAdmin || isMonthDrawn}
@@ -596,7 +596,7 @@ const getLeaveList = (day) => {
             <span className="text-[11px] font-black text-gray-500">抽籤日</span>
             <input 
               type="number" 
-              value={lotteryDay} 
+              value={preLeaveData.lotteryDay || 15} 
               onChange={e => handleAdminSettingChange('lotteryDay', parseInt(e.target.value) || 1)}
               className="w-10 text-center border-b font-bold outline-none text-blue-600"
               disabled={!isAdmin || isMonthDrawn}
@@ -831,24 +831,36 @@ const AccountManagementView = ({ employees, setEmployees, setDeleteTarget }) => 
     link.click();
   };
 
-  const handleImport = (e) => {
-    const file = e.target.files[0];
-    if (!file) return;
-    const reader = new FileReader();
-    reader.onload = (ev) => {
-      const rows = ev.target.result.split(/\r?\n/).map(r => r.trim()).filter(Boolean).slice(1);
-      const next = rows.map(r => {
-        const [id, name, role, labor, pwd] = r.split(',');
-        if (id && name) {
-          const isNC = (id === "E1" || id === "E2" || id === "E3" || name.includes("夜診"));
-          return { id, name, role: role || '1', labor: labor || 'N', password: pwd || "", isNightClinic: isNC };
-        }
-        return null;
-      }).filter(Boolean);
-      if (next.length > 0) { setEmployees(next); alert(`匯入成功，已載入 ${next.length} 筆資料。`); }
-    };
-    reader.readAsText(file);
+const handleImport = (e) => {
+  const file = e.target.files[0];
+  if (!file) return;
+  const reader = new FileReader();
+  reader.onload = (ev) => {
+    const rows = ev.target.result.split(/\r?\n/).map(r => r.trim()).filter(Boolean).slice(1);
+    
+    let addedCount = 0;
+    let existingIds = new Set(employees.map(emp => emp.id)); // 先取得目前所有員編
+    let nextEmployees = [...employees];
+
+    rows.forEach(r => {
+      const [id, name, role, labor, pwd] = r.split(',');
+      if (id && name && !existingIds.has(id)) {
+        const isNC = (id === "E1" || id === "E2" || id === "E3" || name.includes("夜診"));
+        nextEmployees.push({ id, name, role: role || '1', labor: labor || 'N', password: pwd || "", isNightClinic: isNC });
+        existingIds.add(id); // 避免同一份 CSV 內有重複
+        addedCount++;
+      }
+    });
+
+    if (addedCount > 0) { 
+      setEmployees(nextEmployees); 
+      alert(`匯入完成！共新增 ${addedCount} 名新員工，已重複的員編已自動忽略。`); 
+    } else {
+      alert("匯入檔案中沒有新的人員資料。");
+    }
   };
+  reader.readAsText(file);
+};
 
   return (
     <div className="p-4 max-w-6xl mx-auto grid grid-cols-1 lg:grid-cols-12 gap-6 font-sans">
@@ -856,9 +868,14 @@ const AccountManagementView = ({ employees, setEmployees, setDeleteTarget }) => 
         <h2 className="text-lg font-black mb-4 flex items-center gap-2 text-gray-800"><UserCog size={20}/> 人員管理</h2>
         <form className="space-y-3" onSubmit={(e) => {
           e.preventDefault();
-          if (editingId) setEmployees(employees.map(emp => emp.id === editingId ? formData : emp));
-          else setEmployees([...employees, formData]);
-          setEditingId(null);
+          if (editingId) {setEmployees(employees.map(emp => emp.id === editingId ? formData : emp));setEditingId(null);
+          } else {
+          const isDuplicate = employees.some(emp => emp.id === formData.id);
+
+          if (isDuplicate) {alert("該員編已存在，系統已自動忽略。"); 
+        } else {setEmployees([...employees, formData]);alert("成功新增 1 名員工。");
+      }
+    }
           setFormData({id: '', name: '', role: '1', labor: 'N', password: ''});
         }}>
           <div className="grid grid-cols-2 gap-2">
@@ -1807,7 +1824,7 @@ const handleRecordAction = (req, action) => {
             case 'report': return <ManagementReportView currentMonth={currentMonth} employees={employees} schedule={schedule} personDayRules={personDayRules} holidays={holidays} shifts={shifts} />;
             case 'login': {
               const triggerLogin = () => { const id = document.getElementById('uid')?.value.toUpperCase(); const pwd = document.getElementById('upwd')?.value; if (!pwd) { alert("請輸入密碼！"); return; } handleLoginAction(id, pwd); };
-              return (<div className="flex flex-col items-center justify-center min-h-[60vh] p-4"><div className="bg-white p-10 rounded-[2.5rem] shadow-2xl border max-w-sm w-full text-center"><h2 className="text-xl font-black mb-2 text-gray-800">藥劑部 班表系統登入</h2><div className="text-[10px] text-gray-400 font-bold mb-8">第一次輸入的密碼會自動設定為密碼</div><div className="space-y-4"><input className="w-full border-2 p-3 rounded-2xl outline-none font-mono text-center uppercase" placeholder="員編" id="uid" onInput={(e) => e.target.value = e.target.value.toUpperCase()} onKeyDown={(e) => e.key === 'Enter' && triggerLogin()} /><div className="relative"><input className="w-full border-2 p-3 rounded-2xl outline-none text-center" type={showPassword ? "text" : "password"} placeholder="密碼" id="upwd" onKeyDown={(e) => e.key === 'Enter' && triggerLogin()} /><button onClick={()=>setShowPassword(!showPassword)} className="absolute right-4 top-4 text-gray-400">{showPassword ? <Eye size={18}/> : <EyeOff size={18}/>}</button></div><button onClick={triggerLogin} className="w-full bg-blue-600 text-white p-3 rounded-2xl font-black shadow transition-all transform active:scale-95">進入系統</button></div></div><div className="mt-12 text-[11px] text-gray-400 font-bold tracking-wider">© 2026 NTUH Yunlin Pharmacy - V1.7.10</div></div>);
+              return (<div className="flex flex-col items-center justify-center min-h-[60vh] p-4"><div className="bg-white p-10 rounded-[2.5rem] shadow-2xl border max-w-sm w-full text-center"><h2 className="text-xl font-black mb-2 text-gray-800">藥劑部 班表系統登入</h2><div className="text-[10px] text-gray-400 font-bold mb-8">第一次輸入的密碼會自動設定為密碼</div><div className="space-y-4"><input className="w-full border-2 p-3 rounded-2xl outline-none font-mono text-center uppercase" placeholder="員編" id="uid" onInput={(e) => e.target.value = e.target.value.toUpperCase()} onKeyDown={(e) => e.key === 'Enter' && triggerLogin()} /><div className="relative"><input className="w-full border-2 p-3 rounded-2xl outline-none text-center" type={showPassword ? "text" : "password"} placeholder="密碼" id="upwd" onKeyDown={(e) => e.key === 'Enter' && triggerLogin()} /><button onClick={()=>setShowPassword(!showPassword)} className="absolute right-4 top-4 text-gray-400">{showPassword ? <Eye size={18}/> : <EyeOff size={18}/>}</button></div><button onClick={triggerLogin} className="w-full bg-blue-600 text-white p-3 rounded-2xl font-black shadow transition-all transform active:scale-95">進入系統</button></div></div><div className="mt-12 text-[11px] text-gray-400 font-bold tracking-wider">© 2026 NTUH Yunlin Pharmacy - V1.7.11</div></div>);
             }
             default: return null;
           }
