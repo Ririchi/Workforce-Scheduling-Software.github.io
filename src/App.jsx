@@ -10,7 +10,7 @@ import {
 } from 'lucide-react';
 
 // --- 常數定義與初始資料 ---
-// 版本記錄：V1.7.11 
+// 版本記錄：V1.7.10 - 深度重構連續換班校驗：僅校驗 Target 並相容 P#/P 變化
 const WEEKDAYS_MAP = ["日", "一", "二", "三", "四", "五", "六"];
 const PALETTE = [
   { name: '無色', class: 'bg-white' },
@@ -81,7 +81,7 @@ const deepClone = (obj) => {
 
 const isCycleEnd = (dateStr) => {
   if (!dateStr) return false;
-  const baseEnd = new Date('2025-12-21').getTime();
+  const baseEnd = new Date('2025-12-20').getTime();
   const target = new Date(dateStr).getTime();
   const diffDays = Math.round((target - baseEnd) / (1000 * 60 * 60 * 24));
   return diffDays >= 0 && diffDays % 14 === 0;
@@ -209,7 +209,7 @@ const Header = ({ currentMonth, setCurrentMonth, currentPage, handlePageChange, 
     <header className="bg-white border-b-2 border-gray-800 p-2 sm:p-3 sticky top-0 z-[100] shadow-md">
       <div className="max-w-full flex flex-col lg:flex-row lg:items-center justify-between gap-2">
         <div className="flex flex-wrap items-center gap-3">
-          <h1 className="text-xs font-black text-gray-800 border-r-2 border-gray-300 pr-4 leading-none cursor-pointer" onClick={() => handlePageChange('home')}>台大雲林藥劑部班表 <span className="text-[10px] text-gray-400 font-normal ml-1">V1.7.11</span></h1>
+          <h1 className="text-xs font-black text-gray-800 border-r-2 border-gray-300 pr-4 leading-none cursor-pointer" onClick={() => handlePageChange('home')}>台大雲林藥劑部班表 <span className="text-[10px] text-gray-400 font-normal ml-1">V1.7.10</span></h1>
           <div className="flex items-center gap-2">
             <input type="month" value={currentMonth} onChange={(e) => setCurrentMonth(e.target.value)} className="border-2 border-gray-300 rounded px-1.5 py-0.5 text-xs font-bold focus:border-blue-500 outline-none" />
             {isLoggedIn && (<span className="text-[11px] font-black text-blue-600 bg-blue-50 px-2 py-0.5 rounded-lg border border-blue-100 flex items-center gap-1"><User size={12}/> 哈囉, {currentUser.name}</span>)}
@@ -1509,30 +1509,28 @@ const SchedulingView = ({ currentMonth, employees, daysInMonth, schedule, setSch
       </div>
       <div className="flex-grow overflow-auto relative p-4 select-none">
         <table className="w-full text-[11px] text-center border-separate border-spacing-0 table-fixed bg-white shadow-xl min-w-[1000px]">
-          <thead>
-            <tr className="bg-gray-50 border-b text-[10px]">
-              <th className="sticky left-0 top-0 z-[100] bg-gray-100 p-2 w-20 font-black shadow-[2px_2px_5px_rgba(0,0,0,0.05)] border-b-2 border-r-2 border-gray-200">
-                姓名
+
+      <thead>
+        <tr className="bg-gray-50 border-b text-[10px]">
+          <th className="sticky left-0 top-0 z-[100] bg-gray-100 p-2 w-20 font-black border-b-2 border-r-2 border-gray-200">姓名
+          </th>
+          {daysInMonth.map(d => {
+            const cycleEnd = isCycleEnd(d.fullDate);
+            let bgClass = "bg-gray-50";
+            if (d.rawDay === 0 || d.holiday) bgClass = "bg-[#FFB3D9]";
+            else if (d.rawDay === 6) bgClass = "bg-[#FFB366]";
+            return (
+              <th 
+                key={d.day} 
+                className={`sticky top-0 z-[90] p-1 w-12 font-bold border-b-2 border-r border-gray-200 ${bgClass} ${cycleEnd ? 'border-r-4 border-r-gray-400' : ''}`}>
+                <div className="text-[10px] opacity-50">{d.dayOfWeek}</div>
+                <div className="text-sm">{d.day}</div>
+                <div className="text-[9px] text-red-600 truncate h-3 leading-none font-normal">{String(d.holiday || "")}</div>
               </th>
-              {daysInMonth.map(d => {
-                const cycleEnd = isCycleEnd(d.fullDate);
-                let bgClass = "bg-gray-50";
-                if (d.rawDay === 0 || d.holiday) bgClass = "bg-[#FFB3D9]";
-                else if (d.rawDay === 6) bgClass = "bg-[#FFB366]";
-                
-                return (
-                  <th 
-                    key={d.day} 
-                    className={`sticky top-0 z-[90] p-1 w-12 font-bold border-b-2 border-r border-gray-200 ${bgClass} ${cycleEnd ? 'border-r-4 border-r-gray-400' : ''}`}
-                  >
-                    <div className="text-[10px] opacity-50">{d.dayOfWeek}</div>
-                    <div className="text-sm">{d.day}</div>
-                    <div className="text-[9px] text-red-600 truncate h-3 leading-none font-normal">{String(d.holiday || "")}</div>
-                  </th>
-                );
-              })}
-            </tr>
-          </thead>
+            );
+          })}
+        </tr>
+      </thead>
           <tbody>
             {employees.map((emp) => {
               if (emp.isSeparator) return <tr key={emp.id} className="bg-gray-200 h-[1.5px]"><td colSpan={daysInMonth.length + 1}></td></tr>;
@@ -1568,16 +1566,30 @@ const SchedulingView = ({ currentMonth, employees, daysInMonth, schedule, setSch
               );
             })}
           </tbody>
-          <tfoot className="sticky bottom-0 z-20 bg-gray-50 border-t-2 border-gray-300">
-            <tr><td className="sticky left-0 bg-gray-100 border p-1 text-[9px] font-black text-gray-400 text-center shadow-[2px_0_5_rgba(0,0,0,0.05)]">漏排提醒</td>
-              {daysInMonth.map(d => { 
-                const missing = getMissingData()[d.day] || [];
-                return (<td key={d.day} className={`border p-0.5 align-top min-h-12 bg-orange-50 ${isCycleEnd(d.fullDate) ? 'border-r-4 border-r-gray-400' : ''}`}>
-                  {missing.length > 0 && (<div className="flex flex-col gap-0.5">{missing.map(m => <div key={m} className="bg-white border border-orange-200 text-orange-600 font-bold text-[8px] rounded p-0.5 shadow-sm">{m}</div>)}</div>)}
-                </td>);
-              })}
-            </tr>
-          </tfoot>
+<tfoot className="bg-gray-50 border-t-2 border-gray-300">
+  <tr>
+    {/* 修正：移除 "sticky left-0" */}
+    <td className="bg-gray-100 border p-1 text-[9px] font-black text-gray-400 text-center border-r-2">
+      漏排提醒
+    </td>
+    {daysInMonth.map(d => { 
+      const missing = getMissingData()[d.day] || [];
+      return (
+        <td key={d.day} className={`aborder p-0.5 align-top min-h-12 bg-orange-50 ${isCycleEnd(d.fullDate) ? 'border-r-4 border-r-gray-400' : ''}`}>
+          {missing.length > 0 && (
+            <div className="flex flex-col gap-0.5">
+              {missing.map(m => (
+                <div key={m} className="bg-white border border-orange-200 text-orange-600 font-bold text-[8px] rounded p-0.5 shadow-sm">
+                  {m}
+                </div>
+              ))}
+            </div>
+          )}
+        </td>
+      );
+    })}
+  </tr>
+</tfoot>
         </table>
       </div>
     </div>
@@ -1824,7 +1836,7 @@ const handleRecordAction = (req, action) => {
             case 'report': return <ManagementReportView currentMonth={currentMonth} employees={employees} schedule={schedule} personDayRules={personDayRules} holidays={holidays} shifts={shifts} />;
             case 'login': {
               const triggerLogin = () => { const id = document.getElementById('uid')?.value.toUpperCase(); const pwd = document.getElementById('upwd')?.value; if (!pwd) { alert("請輸入密碼！"); return; } handleLoginAction(id, pwd); };
-              return (<div className="flex flex-col items-center justify-center min-h-[60vh] p-4"><div className="bg-white p-10 rounded-[2.5rem] shadow-2xl border max-w-sm w-full text-center"><h2 className="text-xl font-black mb-2 text-gray-800">藥劑部 班表系統登入</h2><div className="text-[10px] text-gray-400 font-bold mb-8">第一次輸入的密碼會自動設定為密碼</div><div className="space-y-4"><input className="w-full border-2 p-3 rounded-2xl outline-none font-mono text-center uppercase" placeholder="員編" id="uid" onInput={(e) => e.target.value = e.target.value.toUpperCase()} onKeyDown={(e) => e.key === 'Enter' && triggerLogin()} /><div className="relative"><input className="w-full border-2 p-3 rounded-2xl outline-none text-center" type={showPassword ? "text" : "password"} placeholder="密碼" id="upwd" onKeyDown={(e) => e.key === 'Enter' && triggerLogin()} /><button onClick={()=>setShowPassword(!showPassword)} className="absolute right-4 top-4 text-gray-400">{showPassword ? <Eye size={18}/> : <EyeOff size={18}/>}</button></div><button onClick={triggerLogin} className="w-full bg-blue-600 text-white p-3 rounded-2xl font-black shadow transition-all transform active:scale-95">進入系統</button></div></div><div className="mt-12 text-[11px] text-gray-400 font-bold tracking-wider">© 2026 NTUH Yunlin Pharmacy - V1.7.11</div></div>);
+              return (<div className="flex flex-col items-center justify-center min-h-[60vh] p-4"><div className="bg-white p-10 rounded-[2.5rem] shadow-2xl border max-w-sm w-full text-center"><h2 className="text-xl font-black mb-2 text-gray-800">藥劑部 班表系統登入</h2><div className="text-[10px] text-gray-400 font-bold mb-8">第一次輸入的密碼會自動設定為密碼</div><div className="space-y-4"><input className="w-full border-2 p-3 rounded-2xl outline-none font-mono text-center uppercase" placeholder="員編" id="uid" onInput={(e) => e.target.value = e.target.value.toUpperCase()} onKeyDown={(e) => e.key === 'Enter' && triggerLogin()} /><div className="relative"><input className="w-full border-2 p-3 rounded-2xl outline-none text-center" type={showPassword ? "text" : "password"} placeholder="密碼" id="upwd" onKeyDown={(e) => e.key === 'Enter' && triggerLogin()} /><button onClick={()=>setShowPassword(!showPassword)} className="absolute right-4 top-4 text-gray-400">{showPassword ? <Eye size={18}/> : <EyeOff size={18}/>}</button></div><button onClick={triggerLogin} className="w-full bg-blue-600 text-white p-3 rounded-2xl font-black shadow transition-all transform active:scale-95">進入系統</button></div></div><div className="mt-12 text-[11px] text-gray-400 font-bold tracking-wider">© 2026 NTUH Yunlin Pharmacy - V1.7.10</div></div>);
             }
             default: return null;
           }
