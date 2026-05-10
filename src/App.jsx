@@ -10,7 +10,7 @@ import {
 } from 'lucide-react';
 
 // --- 常數定義與初始資料 ---
-// 版本記錄：V1.8.1- 深度重構連續換班校驗：僅校驗 Target 並相容 P#/P 變化
+// 版本記錄：V1.8.1 - 深度重構連續換班校驗：僅校驗 Target 並相容 P#/P 變化
 const WEEKDAYS_MAP = ["日", "一", "二", "三", "四", "五", "六"];
 const PALETTE = [
   { name: '無色', class: 'bg-white' },
@@ -156,70 +156,41 @@ const Modal = ({ isOpen, onClose, onConfirm, title, message, confirmText = "確�
   );
 };
 
-const SwapRequestModal = ({ isOpen, onClose, swapTarget, onConfirm, onContinue }) => {
+const SwapRequestModal = ({ isOpen, onClose, swapTarget, onConfirm, setIsModalOpen }) => {
   if (!isOpen || !swapTarget) return null;
-
-  const isChain = swapTarget.participants?.length > 2;
-  const isBundle = swapTarget.isBundle;
 
   return (
     <div className="fixed inset-0 z-[200] flex items-center justify-center p-4 bg-black/60 backdrop-blur-sm">
-      <div className="bg-white rounded-3xl w-full max-w-md overflow-hidden shadow-2xl animate-in fade-in zoom-in duration-200">
-        {/* Header - 根據模式顯示不同標題 */}
-        <div className={`${isBundle ? 'bg-amber-600' : 'bg-blue-600'} p-5 text-white text-center`}>
-          <h3 className="text-lg font-black tracking-wider">
-            {isBundle ? "整段換班申請確認" : "換班申請確認"}
-          </h3>
-          <p className="text-[10px] opacity-80 mt-1">
-            {isBundle ? `區間換班: ${data.date} 起` : `${data.date} (${data.dayOfWeek})`}
-          </p>
+      <div className="bg-white rounded-3xl w-full max-w-md overflow-hidden shadow-2xl">
+        <div className="bg-gradient-to-r from-cyan-600 to-blue-700 p-6 text-white text-center">
+          <ArrowLeftRight className="mx-auto mb-2" size={32}/>
+          <h3 className="text-xl font-black">換班申請</h3>
+          {isBundle && <span className="inline-block mt-1 bg-yellow-400 text-blue-900 text-[10px] px-2 py-0.5 rounded-full font-black animate-pulse">整段換班</span>}
+          <p className="text-blue-100 text-xs mt-1">需經同仁與組長核定</p>
         </div>
-
-        <div className="p-4 space-y-2">
-          {/* 需求 3 & 4：多人/一對一 班別流向直式 UI */}
-          <div className="space-y-1.5 max-h-80 overflow-y-auto pr-1 custom-scrollbar">
-            {participants.map((p, idx) => {
-              // 我的新班別是下一個人的舊班別；最後一個人的新班別是第一個人的舊班別
-              const nextPerson = participants[idx + 1] || participants[0];
-              return (
-                <div key={idx} className="flex items-center gap-2 bg-gray-50 p-2 rounded-xl border border-gray-100">
-                  <div className={`w-5 h-5 rounded flex items-center justify-center text-[10px] font-black shrink-0 ${idx === 0 ? 'bg-blue-600 text-white' : 'bg-blue-100 text-blue-600'}`}>
-                    {idx + 1}
-                  </div>
-                  <div className="flex items-center gap-2 flex-grow">
-                    <span className="text-xs font-black text-gray-700">{p.name}</span>
-                    {/* 陳麗珺(-) → (B9) 格式 */}
-                    <span className="text-[11px] font-bold text-blue-600">
-                      ({p.oldShift}) → ({nextPerson.oldShift})
-                    </span>
-                  </div>
-                </div>
-              );
-            })}
-            
-            {/* 需求 3：環狀回歸提示 (僅在多人模式顯示) */}
-            {!isBundle && participants.length > 2 && (
-              <div className="flex items-center justify-center gap-2 py-2 opacity-40">
-                <div className="h-[1px] flex-grow border-t border-dashed border-blue-400"></div>
-                <span className="text-[9px] font-black text-blue-500 italic">班別互換已形成閉環</span>
-                <div className="h-[1px] flex-grow border-t border-dashed border-blue-400"></div>
-              </div>
-            )}
+        <div className="p-6 space-y-4">
+          <div className="text-center bg-gray-50 p-3 rounded-2xl border border-dashed font-bold text-blue-800">
+            {isBundle ? `${data.startDate} ~ ${data.endDate}` : `${data.date} (${data.dayOfWeek})`}
           </div>
-
-          {/* 整段換班特別提示 */}
-          {isBundle && (
-            <div className="bg-amber-50 border border-amber-200 p-2 rounded-lg text-[10px] text-amber-700 font-bold leading-tight">
-              ※ 整段換班將影響後續所有日期，在換班完成前，該時段內雙方皆不可再申請其他換班。
+          <div className="grid grid-cols-2 gap-4">
+            <div className="space-y-1 text-center border-r border-gray-100">
+              <label className="text-[10px] font-bold text-blue-500 uppercase tracking-tighter">申請人</label>
+              <div className="font-black text-gray-700 leading-none py-1">{data.creatorName}</div>
+              <div className="bg-blue-50 text-blue-700 rounded-lg py-2 mt-1 font-mono text-xs border border-blue-100 font-black">{data.creatorShift}</div>
             </div>
-          )}
+            <div className="space-y-1 text-center">
+              <label className="text-[10px] font-bold text-cyan-600 uppercase tracking-tighter">欲換班同仁</label>
+              <div className="font-black text-gray-700 leading-none py-1">{data.targetName}</div>
+              <div className="bg-cyan-50 text-cyan-700 rounded-lg py-2 mt-1 font-mono text-xs border border-cyan-100 font-black">{data.targetShift}</div>
+            </div>
+          </div>
+          {isBundle && <div className="text-[10px] text-gray-400 text-center italic bg-gray-50 p-2 rounded-xl">注意：系統將自動對調該整段週期之班別</div>}
         </div>
-
-        <div className="p-6 bg-gray-50 flex flex-col gap-3">
-          {/* 需求 2: 只有在「非整段」模式下，才顯示「多人換班(繼續點選)」按鈕 */}
-          {!isBundle && (
+<div className="p-6 bg-gray-50 flex flex-col gap-3">
+          {/* 只有非整段換班，才顯示「多人換班」按鈕 */}
+          {!swapTarget.isBundle && (
             <button
-              onClick={onContinue} // 這裡要接 handleContinueAdding
+              onClick={() => setIsModalOpen(false)} // 關鍵：關閉視窗，但不清空 swapTarget，讓使用者能繼續選人
               className="w-full py-3 bg-white border-2 border-blue-600 text-blue-600 rounded-2xl font-black text-sm hover:bg-blue-50 transition-colors"
             >
               ＋ 多人連鎖換班 (繼續點選下一位)
@@ -233,7 +204,10 @@ const SwapRequestModal = ({ isOpen, onClose, swapTarget, onConfirm, onContinue }
             確認並送出申請
           </button>
 
-          <button onClick={onClose} className="w-full py-2 text-gray-400 font-bold text-xs">
+          <button 
+            onClick={onClose} // 原本的 onClose 通常會執行 setSwapTarget(null)，清空所有選擇
+            className="w-full py-2 text-gray-400 font-bold text-xs hover:text-gray-600 transition-colors"
+          >
             取消並清空
           </button>
         </div>
@@ -256,7 +230,7 @@ const Header = ({ currentMonth, setCurrentMonth, currentPage, handlePageChange, 
     <header className="bg-white border-b-2 border-gray-800 p-2 sm:p-3 sticky top-0 z-[100] shadow-md">
       <div className="max-w-full flex flex-col lg:flex-row lg:items-center justify-between gap-2">
         <div className="flex flex-wrap items-center gap-3">
-          <h1 className="text-xs font-black text-gray-800 border-r-2 border-gray-300 pr-4 leading-none cursor-pointer" onClick={() => handlePageChange('home')}>台大雲林藥劑部班表 <span className="text-[10px] text-gray-400 font-normal ml-1">V1.8.1 </span></h1>
+          <h1 className="text-xs font-black text-gray-800 border-r-2 border-gray-300 pr-4 leading-none cursor-pointer" onClick={() => handlePageChange('home')}>台大雲林藥劑部班表 <span className="text-[10px] text-gray-400 font-normal ml-1">V1.8.1</span></h1>
           <div className="flex items-center gap-2">
             <input type="month" value={currentMonth} onChange={(e) => setCurrentMonth(e.target.value)} className="border-2 border-gray-300 rounded px-1.5 py-0.5 text-xs font-bold focus:border-blue-500 outline-none" />
             {isLoggedIn && (<span className="text-[11px] font-black text-blue-600 bg-blue-50 px-2 py-0.5 rounded-lg border border-blue-100 flex items-center gap-1"><User size={12}/> 哈囉, {currentUser.name}</span>)}
@@ -288,156 +262,87 @@ const Header = ({ currentMonth, setCurrentMonth, currentPage, handlePageChange, 
   );
 };
 
-const ScheduleTableView = ({ 
-  currentMonth, employees, schedule, cellColors, daysInMonth, 
-  onCellClick, swapRequests = [], currentPage, currentUser,
-  swapTarget, handleSwapBack, setIsModalOpen, 
-  isCycleEnd 
-}) => {
+const ScheduleTableView = ({ currentMonth, employees, schedule, cellColors, daysInMonth, onCellClick, swapRequests = [], currentPage, currentUser }) => {
+  const isHome = currentPage === 'home';
   const isSwap = currentPage === 'swap';
+  
+// 計算提示條是否存在，若存在則標頭要往下壓 (提示條高度約為 44px)
+  const headerTop = onCellClick ? 'top-[44px]' : 'top-0';
 
-  // 檢查夜診支援是否有資料
-  const hasSupportData = React.useMemo(() => {
+  const hasSupportData = useMemo(() => {
     const supportRow = schedule[currentMonth]?.["夜診支援"] || {};
     return Object.values(supportRow).some(v => v && v !== "-" && v !== "#" && v !== "例" && v !== "");
   }, [schedule, currentMonth]);
 
-  return (
+return (
     <div className="flex-grow flex flex-col h-full bg-gray-50 font-sans overflow-hidden">
-      
-        {/* 換班頁面頂部輔助狀態列 */}
-        {isSwap && (
-          <div className={`flex-none transition-all duration-300 ${swapTarget ? 'bg-blue-600' : 'bg-[#2A85A1]'} text-white py-2.5 px-4 shadow-md z-[110]`}>
-            {!swapTarget ? (
-              <div className="text-center font-black text-sm">
-                <span className="inline-block animate-bounce mr-2">💡</span>
-                換班系統：點選欲換人員班別即可發起申請
-              </div>
-            ) : (
-              <div className="flex justify-between items-center max-w-5xl mx-auto">
-                <div className="flex items-center gap-3">
-                  <div className="flex -space-x-2">
-                    {swapTarget.participants?.map((p, i) => (
-                      <div key={i} className="w-7 h-7 rounded-full bg-white text-blue-600 border-2 border-blue-600 flex items-center justify-center text-[10px] font-black shadow-sm">
-                        {p.name[0]}
-                      </div>
-                    ))}
-                  </div>
-                  <span className="text-xs font-black">
-                    正在發起 {swapTarget.isBundle ? '整段' : '一對一/多人'}換班 ({swapTarget.participants?.length} 人)
-                  </span>
-                </div>
-                
-                <div className="flex gap-2">
-                  {/* 修正 1: 只有在「非整段」且「人數 > 2」時才顯示回到上一步 */}
-                  {!swapTarget.isBundle && swapTarget.participants?.length > 2 && (
-                    <button 
-                      onClick={handleSwapBack} 
-                      className="bg-white/20 hover:bg-white/30 px-3 py-1.5 rounded-lg text-xs font-bold flex items-center gap-1 transition-colors"
-                    >
-                      <Undo2 size={14}/> 回到上一步
-                    </button>
-                  )}
-                  
-                  <button 
-                    onClick={() => setIsModalOpen(true)} 
-                    className="bg-yellow-400 text-blue-900 px-3 py-1.5 rounded-lg text-xs font-black hover:bg-yellow-300 transition-colors shadow-sm"
-                  >
-                    確認申請單
-                  </button>
-                </div>
-              </div>
-            )}
-          </div>
-        )}
-        
-      {/* 核心滾動區域：確保 sticky 屬性能運作 */}
+      {onCellClick && (
+        <div className="flex-none bg-[#2A85A1] text-white py-2.5 px-4 text-center font-black text-sm shadow-md z-[110]">
+          <Info size={16} className="inline mr-2 mb-0.5" />
+          換班系統：點選欲換人員班別即可申請換班 </div>)}
+
+      {/* 修改 3: 這裡才是真正會捲動的容器 */}
       <div className="flex-grow overflow-auto relative">
-        <table className="w-full text-center border-separate border-spacing-0 table-fixed min-w-[1600px] lg:min-w-[1800px]">
-            <thead className="sticky top-0 z-[120]">
-              <tr>
-                <th className="sticky left-0 top-0 z-[130] bg-gray-100 p-3 w-[85px] font-black text-[14px] text-black border-b-2 border-r-2 border-gray-300 shadow-[2px_2px_5px_rgba(0,0,0,0.1)]">
-                  姓名
-                </th>
-                {daysInMonth.map(d => {
-                  const isSunOrHoliday = d.rawDay === 0 || !!d.holiday;
-                  const isSat = d.rawDay === 6;
-                  const cycleEnd = isCycleEnd(d.fullDate);
-                  const displayWeekDay = d.weekDay || d.dayOfWeek;
-                  return (
-                    <th 
-                      key={d.day} 
-                      className={`p-0 border-b-2 border-gray-300 relative min-w-[55px] h-[65px] ${cycleEnd ? 'border-r-4 border-r-gray-400' : 'border-r'} ${isSunOrHoliday ? 'bg-[#FFB3D9]' : isSat ? 'bg-[#FFB366]' : 'bg-gray-50'}`}
-                    >
-                      <div className="flex flex-col items-center justify-center h-full">
-                        <span className="text-gray-500 text-[13px] font-medium leading-none mb-1">{displayWeekDay}</span>
-                        <span className="text-black text-[18px] font-normal leading-none">{d.day}</span>
-                        <div className="min-h-[14px] mt-1">
-                          {d.holiday && (
-                            <span className="text-red-500 text-[10px] font-black leading-none block transform scale-90">
-                              {d.holiday}
-                            </span>
-                          )}
-                        </div>
-                      </div>
-                    </th>
-                  );
-                })}
-              </tr>
-            </thead>
-          <tbody className="z-10">
+        <table className="w-full text-[12px] text-center border-separate border-spacing-0 table-fixed min-w-[1600px] lg:min-w-[1800px]">
+          <thead>
+            <tr>
+              <th className="sticky left-0 top-0 z-[100] bg-gray-100 p-3 w-16 font-black text-[11px] shadow-[2px_2px_5px_rgba(0,0,0,0.1)] border-b-2 border-r-2 border-gray-300">姓名</th>
+              {daysInMonth.map(d => {
+                const cycleEnd = isCycleEnd(d.fullDate);
+                let bgClass = "bg-gray-100";
+                if (d.rawDay === 0 || d.holiday) bgClass = "bg-[#FFB3D9]";
+                else if (d.rawDay === 6) bgClass = "bg-[#FFB366]";
+                return (
+                  <th key={d.day} 
+                    className={`sticky top-0 z-[90] p-1 w-12 font-bold border-b-2 border-r border-gray-300 ${bgClass} ${cycleEnd ? 'border-r-4 border-r-gray-400' : ''}`} >
+                    <div className="text-[10px] opacity-60">{d.dayOfWeek}</div>
+                    <div className="text-base">{d.day}</div>
+                    <div className="text-[9px] text-red-600 truncate h-4 leading-none font-normal">{String(d.holiday || "")}</div>
+                  </th>);})}</tr>
+          </thead>
+
+          <tbody>
             {employees.map(emp => {
               if (emp.isSeparator) return <tr key={emp.id} className="bg-gray-200 h-[2px] border-y-0"><td colSpan={daysInMonth.length + 1}></td></tr>;
-              if (isSwap && (emp.role === '2' || emp.role === '3')) return null;
-              if (emp.name === "夜診支援" && !hasSupportData) return null;
+              const isNC = getIsNightClinic(emp);
+              if (isSwap && (isNC || emp.role === '2' || emp.role === '3')) return null;
+              if (currentPage !== 'schedule' && emp.name === "夜診支援" && !hasSupportData) return null;
 
               return (
                 <tr key={emp.id} className="hover:bg-blue-50 transition-colors border-b group">
-                  {/* 姓名欄：sticky 在左側 */}
-                  <td className="sticky left-0 z-20 bg-white border p-2 w-[85px] font-black group-hover:bg-blue-50 text-[13px] text-center leading-tight shadow-[2px_0_5px_rgba(0,0,0,0.05)] text-black">
-                    {emp.name}
-                  </td>
+                  <td className="sticky left-0 z-20 bg-white border p-2 font-black group-hover:bg-blue-50 text-[12px] truncate shadow-[2px_0_5_rgba(0,0,0,0.05)]">{emp.name}</td>
                   {daysInMonth.map(d => {
                     const val = schedule[currentMonth]?.[emp.name]?.[d.day] || "-";
                     const customColor = cellColors[currentMonth]?.[emp.name]?.[d.day];
-                    const isSunOrHoliday = d.rawDay === 0 || !!d.holiday;
-                    const isSat = d.rawDay === 6;
                     const cycleEnd = isCycleEnd(d.fullDate);
-
-                    let bgClass = "bg-white";
-                    if (isSunOrHoliday) bgClass = "bg-[#FFB3D9]";
-                    else if (isSat) bgClass = "bg-[#FFB366]";
-                    else if (customColor && customColor !== "bg-white") bgClass = customColor;
-
-                    const isInChain = isSwap && swapTarget && swapTarget.date === d.fullDate && swapTarget.participants?.some(p => p.id === emp.id);
-                    const isPending = isSwap && swapRequests.some(r => 
-                      (r.status === 'PendingTarget' || r.status === 'PendingAdmin') &&
-                      (r.creatorName === emp.name || r.targetName === emp.name || r.participants?.some(p => p.name === emp.name)) &&
-                      (r.isBundle ? (r.daysToSwap?.includes(d.day)) : (r.date === d.fullDate))
+                    
+                    const isPendingSwap = currentPage === 'swap' && swapRequests.some(r => 
+                      (r.creatorId === currentUser?.id || r.targetId === currentUser?.id) &&
+                      (r.creatorName === emp.name || r.targetName === emp.name) && 
+                      (r.isBundle ? (d.day >= r.daysToSwap[0] && d.day <= r.daysToSwap[r.daysToSwap.length - 1]) : (r.date === d.fullDate)) &&
+                      (r.status === 'PendingTarget' || r.status === 'PendingAdmin')
                     );
 
-                    let finalBg = bgClass;
-                    if (isInChain) finalBg = "bg-blue-100 ring-2 ring-blue-500 z-10";
-                    else if (isPending) finalBg = "bg-blue-100/60";
+                    let bgClass = "bg-white";
+                    if (isPendingSwap) bgClass = "bg-blue-100/60"; 
+                    else if (customColor && customColor !== "bg-white") bgClass = customColor;
+                    else if (d.rawDay === 0 || !!d.holiday) bgClass = "bg-[#FFB3D9]";
+                    else if (d.rawDay === 6) bgClass = "bg-[#FFB366]";
+
+                    const parts = val.split('/');
+                    const displayPart = (parts[1] && !isNaN(parts[1])) ? (parts[0] || "-") : val;
+                    const leaveMsg = (parts[1] && !isNaN(parts[1])) ? `假:${parts[1]}h` : null;
 
                     return (
-                      <td 
-                        key={d.day} 
-                        className={`border p-0 h-[40px] transition-all relative ${cycleEnd ? 'border-r-4 border-r-gray-400' : 'border-r'} ${finalBg} ${isSwap ? 'cursor-pointer hover:shadow-inner' : 'cursor-default'}`} 
-                        onClick={() => isSwap && onCellClick(emp, d)}
-                      >
-                        <div className="flex flex-col items-center justify-center h-full relative text-black">
-                          {isPending && !isInChain && (
-                            <div className="absolute -top-3 -right-0.5 w-2 h-2 bg-blue-600 rounded-full animate-pulse z-10"></div>
+                      <td key={d.day} 
+                        className={`border p-0 ${isNC ? 'h-[32px]' : 'h-10'} ${bgClass} ${onCellClick && !isNC ? 'cursor-pointer hover:bg-blue-50 shadow-inner' : 'cursor-default'} transition-all relative ${cycleEnd ? 'border-r-4 border-r-gray-400' : ''}`} 
+                        onClick={() => onCellClick && !isNC && onCellClick(emp, d)}>
+                        <div className={`flex flex-col items-center justify-center h-full relative`}>
+                          {isPendingSwap && (
+                            <div className="absolute -top-3 -right-0.5 w-2 h-2 bg-blue-600 rounded-full animate-pulse shadow-sm z-10" title="換班申請中"></div>
                           )}
-                          {isInChain && (
-                            <div className="absolute -top-3 -right-0.5 w-4 h-4 bg-blue-600 text-white rounded-full text-[9px] font-black flex items-center justify-center z-20">
-                              {swapTarget.participants.findIndex(p => p.id === emp.id) + 1}
-                            </div>
-                          )}
-                          <span className={`text-[13px] ${isInChain || isPending ? 'text-blue-900 font-black' : (val === "-" ? 'text-gray-300' : 'font-black')}`}>
-                            {val}
-                          </span>
+                          <span className={`${isSwap ? 'font-normal' : (isHome ? 'font-medium' : 'font-black')} ${isPendingSwap ? 'text-blue-900 scale-105 drop-shadow-sm' : (displayPart === "-" ? 'text-gray-300' : 'text-gray-800')} text-[13px] transition-all`}>{displayPart}</span>
+                          {leaveMsg && <span className="text-[9px] text-red-600 font-black bg-red-50 rounded px-1.5 mt-1 leading-none shadow-sm">{leaveMsg}</span>}
                         </div>
                       </td>
                     );
@@ -452,7 +357,7 @@ const ScheduleTableView = ({
   );
 };
 
-  const PreLeaveView = ({ currentMonth, employees, daysInMonth, currentUser, schedule, setSchedule, preLeaveData, setPreLeaveData, saveData }) => {
+ const PreLeaveView = ({ currentMonth, employees, daysInMonth, currentUser, schedule, setSchedule, preLeaveData, setPreLeaveData, saveData }) => {
   const [defaultHolidayLimit, setDefaultHolidayLimit] = useState(10);
   const [defaultWeekdayLimit, setDefaultWeekdayLimit] = useState(3);
   const [lotteryDay, setLotteryDay] = useState(15);
@@ -809,85 +714,58 @@ const RecordsView = ({ currentUser, swapRequests, onAction, schedule, currentMon
         <section className="space-y-3">
           <h3 className="text-xs font-black text-indigo-400 border-l-4 border-indigo-400 pl-2 uppercase tracking-widest">待處理流程 ({pendingList.length})</h3>
           {pendingList.length === 0 ? <div className="bg-white p-10 rounded-2xl border border-dashed text-center text-gray-300 italic font-bold">目前無待核定資料</div> :
-pendingList.map(req => {
+            pendingList.map(req => {
+              // 核心修正：不要直接用全域的 currentMonth，要抓取該筆申請資料的月份
+              // 假設 req.date 格式為 "2026-05-20"，切割出 "2026-05"
               const reqMonthKey = req.date ? req.date.substring(0, 7) : currentMonth;
-              const isChain = req.participants && req.participants.length > 2;
-              
-              // 判定班別是否與現狀不符 (邏輯維持)
               const checkDays = req.isBundle ? req.daysToSwap : [req.day];
               const isShiftMismatched = checkDays.some(d => {
+                // 這裡改用 reqMonthKey 確保抓到正確月份的班表資料
                 const rawCurTarget = schedule[reqMonthKey]?.[req.targetName]?.[d];
-                const normalize = (v) => (v === null || v === undefined || String(v).trim() === "" || String(v).trim() === "-") ? "-" : String(v).trim();
+                const normalize = (v) => {
+                  const s = (v === null || v === undefined) ? "-" : String(v).trim();
+                  return (s === "" || s === "-") ? "-" : s;};
+                const curTargetS = normalize(rawCurTarget);
+                const storedTargetS = normalize(req.targetShift);
                 const clean = (val) => val.replace(/#|\(國\)/g, '');
-                return clean(normalize(rawCurTarget)) !== clean(normalize(req.targetShift));
-              });
+                return clean(curTargetS) !== clean(storedTargetS);
+  });
 
               return (
-                <div key={req.id} className="bg-white p-4 rounded-3xl shadow-sm border border-l-4 border-l-indigo-400 space-y-4">
-                  {/* 上半部：日期與類型標籤 */}
-                  <div className="flex justify-between items-start">
-                    <div className="space-y-1">
-                      <div className="flex items-center gap-2">
-                        <span className="font-black text-blue-600 text-lg leading-none">{req.isBundle ? `${req.startDate} ~ ${req.endDate.split('-')[2]}` : req.date}</span>
-                        <span className={`text-[10px] px-2 py-0.5 rounded-full font-black ${req.isBundle ? 'bg-amber-100 text-amber-600' : isChain ? 'bg-purple-100 text-purple-600' : 'bg-blue-100 text-blue-600'}`}>
-                          {req.isBundle ? '整段換班' : isChain ? '多人連鎖' : '單日換班'}
-                        </span>
-                      </div>
-                      <p className="text-[10px] text-gray-400 font-bold tracking-tighter">🕒 送出時間: {new Date(req.timestamp).toLocaleString()}</p>
+                <div key={req.id} className="bg-white p-4 rounded-2xl shadow-sm border border-l-4 border-l-indigo-400 flex flex-col sm:flex-row justify-between items-start sm:items-center gap-3">
+                  <div className="space-y-1">
+                    <div className="flex items-center gap-2">
+                      <span className="font-black text-blue-600 text-base">{req.isBundle ? `${req.startDate}~${req.endDate}` : req.date}</span>
+                      {req.isBundle && <span className="text-[9px] bg-yellow-100 text-yellow-700 px-1.5 rounded font-black">整段</span>}
+                    </div>
+                    <div className="text-[11px] font-bold text-gray-700 flex flex-wrap items-center gap-1">
+                      <span className="text-blue-500">{req.creatorName} ({req.creatorShift})</span> 
+                      <span className="text-gray-300 mx-1">⇄</span> 
+                      <span className="text-cyan-600">{req.targetName} ({req.targetShift})</span>
+                      <span className="text-[10px] text-gray-400 font-normal ml-2">🕒 送出: {new Date(req.timestamp).toLocaleString()}</span>
                     </div>
                     <StatusProgress req={req}/>
-                  </div>
-
-                  {/* 中間：直式申請單與班別流向 (需求 3 & 4) */}
-                  <div className="bg-gray-50 rounded-2xl p-3 space-y-2 border border-gray-100">
-                    {(req.participants || [
-                      { id: req.creatorId, name: req.creatorName, oldShift: req.creatorShift },
-                      { id: req.targetId, name: req.targetName, oldShift: req.targetShift }
-                    ]).map((p, idx, arr) => {
-                      const nextP = arr[idx + 1] || arr[0]; // 形成環狀
-                      return (
-                        <div key={idx} className="flex items-center justify-between">
-                          <div className="flex items-center gap-2">
-                            <div className={`w-5 h-5 rounded-md flex items-center justify-center text-[10px] font-black ${idx === 0 ? 'bg-blue-600 text-white' : 'bg-blue-100 text-blue-600'}`}>
-                              {idx + 1}
-                            </div>
-                            <div className="flex items-center gap-1.5">
-                              <span className="text-sm font-black text-gray-700">{p.name}</span>
-                              <span className="text-[11px] font-bold text-blue-600 bg-white px-1.5 py-0.5 rounded border border-gray-200">
-                                ({p.oldShift || p.creatorShift || p.targetShift}) → ({nextP.oldShift || nextP.creatorShift || nextP.targetShift})
-                              </span>
-                            </div>
-                          </div>
-                          {idx === 0 && <span className="text-[9px] font-black text-gray-300 uppercase">發起人</span>}
-                          {idx === arr.length - 1 && isChain && <span className="text-[9px] font-black text-blue-400 italic">回歸首位 ↑</span>}
-                        </div>
-                      );
-                    })}
-                  </div>
-
-                  {/* 下半部：警示與操作按鈕 */}
-                  <div className="flex flex-col sm:flex-row gap-3 items-center pt-2 border-t border-gray-50">
                     {isShiftMismatched && (
-                      <div className="flex-grow text-[10px] bg-red-50 text-red-600 p-2 rounded-xl font-black border border-red-100 flex items-center gap-2">
-                        <AlertCircle size={14}/> 班別已變更，請組長重新評估
+                      <div className="mt-2 text-[10px] bg-red-50 text-red-600 p-2 rounded-lg font-black border border-red-100 flex items-center gap-2 animate-pulse">
+                        <AlertCircle size={14}/> 班別已更換，請再次確認換班內容
                       </div>
                     )}
-                    <div className="flex gap-2 w-full sm:w-auto ml-auto">
-                      {((req.status === 'PendingTarget' && req.targetId === currentUser.id) || (isAdmin && req.status === 'PendingAdmin')) && (
-                        <>
-                          <button onClick={() => triggerAction(req, 'Reject')} className="flex-1 px-5 py-2 bg-red-50 text-red-600 text-xs font-black rounded-xl hover:bg-red-100 transition-all">否決</button>
-                          <button onClick={() => triggerAction(req, 'Approve')} className="flex-1 px-5 py-2 bg-blue-600 text-white text-xs font-black rounded-xl hover:bg-blue-700 shadow-md transition-all">核定</button>
-                        </>
-                      )}
-                      {req.creatorId === currentUser.id && req.status === 'PendingTarget' && (
-                        <button onClick={() => triggerAction(req, 'Delete')} className="w-full px-5 py-2 bg-gray-100 text-gray-500 hover:bg-gray-200 rounded-xl font-black text-xs">撤回申請</button>
-                      )}
-                    </div>
+                  </div>
+                  <div className="flex gap-2 w-full sm:w-auto mt-2 sm:mt-0">
+                    {((req.status === 'PendingTarget' && req.targetId === currentUser.id) || (isAdmin && req.status === 'PendingAdmin')) && (
+                      <div className="flex gap-2 w-full">
+                        <button onClick={() => triggerAction(req, 'Reject')} className="flex-1 sm:flex-none px-4 py-2 bg-red-50 text-red-600 text-xs font-black rounded-xl hover:bg-red-100 flex items-center justify-center gap-1 transition-all"><X size={14}/> 否決</button>
+                        {!isShiftMismatched && (
+                          <button onClick={() => triggerAction(req, 'Approve')} className="flex-1 sm:flex-none px-4 py-2 bg-blue-600 text-white text-xs font-black rounded-xl hover:bg-blue-700 flex items-center justify-center gap-1 shadow-md transition-all"><Check size={14}/> 核定</button>
+                        )}
+                      </div>
+                    )}
+                    {req.creatorId === currentUser.id && req.status === 'PendingTarget' && (<button onClick={() => triggerAction(req, 'Delete')} 
+                    className="w-full sm:w-auto px-4 py-2 bg-gray-600 text-white hover:bg-gray-700 rounded-xl transition-all font-bold text-xs shadow-sm">撤回申請</button>)}
                   </div>
                 </div>
               );
-            })
-          }
+            })}
         </section>
 
         <section className="space-y-3">
@@ -1067,7 +945,7 @@ const handleImport = (e) => {
               {/* 表格主體：可滑動區域 */}
               <div 
                 className="overflow-y-auto custom-scrollbar" 
-                style={{ maxHeight: 'calc(100vh - 350px)' }} // 動態計算高度，確保底部不被切掉
+                style={{ maxHeight: 'calc(120vh - 350px)' }} // 動態計算高度，確保底部不被切掉
               >
                 <table className="w-full text-sm">
                   <tbody>
@@ -1794,7 +1672,7 @@ const App = () => {
     }
   };
 
-    useEffect(() => {const initAuth = async () => { try {if (typeof __initial_auth_token !== 'undefined' && __initial_auth_token) {await signInWithCustomToken(auth, __initial_auth_token);} else {await signInAnonymously(auth);}} catch (err) {console.warn("驗證不匹配:", err);await signInAnonymously(auth);}};initAuth();
+  useEffect(() => {const initAuth = async () => { try {if (typeof __initial_auth_token !== 'undefined' && __initial_auth_token) {await signInWithCustomToken(auth, __initial_auth_token);} else {await signInAnonymously(auth);}} catch (err) {console.warn("驗證不匹配:", err);await signInAnonymously(auth);}};initAuth();
 }, []);
   
     useEffect(() => {const docRef = doc(db, 'artifacts', appId, 'public', 'data', 'roster', 'main');const unsubData = onSnapshot(docRef, (snap) => {
@@ -1844,68 +1722,51 @@ const handleLoginAction = (id, pwd) => {
   } else {alert("密碼錯誤！");}
 };
 
-// 需求 2：點擊「多人換班」按鈕時觸發，關閉視窗回到班表
-const handleContinueAdding = () => {
-  setIsModalOpen(false); // 關閉視窗，但不 setSwapTarget(null)
-};
-
+// 新增：多人換班回到上一步的邏輯
 const handleSwapBack = () => {
   if (!swapTarget || !swapTarget.participants) return;
   
-  // 如果參與者大於 2 人，移除最後一個加入的人
+  // 如果參與者大於 2 人，移除名單中最後一個加入的人
   if (swapTarget.participants.length > 2) {
     setSwapTarget(prev => ({
       ...prev,
       participants: prev.participants.slice(0, -1)
     }));
-    // 回退後自動開啟視窗顯示目前的最新名單
+    // 移除後自動重新打開對話框，顯示更新後的名單
     setIsModalOpen(true);
   } else {
-    // 如果只剩 2 人（初始狀態），則直接清空換班目標
+    // 如果名單只剩 2 人（初始狀態），則直接清空整個換班目標
     setSwapTarget(null);
+    setIsModalOpen(false);
   }
 };
 
 const handleSwapApply = (targetEmp, dayInfo) => {
   if (!currentUser || targetEmp.id === currentUser.id) return;
 
-  // --- 1. 衝突檢查函式：定義單日或整段是否已被佔用 ---
+  // --- 內部衝突檢查函式 ---
   const checkDateConflict = (empId, dateStr) => {
     return swapRequests.some(req => {
-      // 只檢查待核定的申請
       if (req.status !== 'PendingTarget' && req.status !== 'PendingAdmin') return false;
-      
       const isParticipant = req.creatorId === empId || 
                             req.targetId === empId || 
                             req.participants?.some(p => p.id === empId);
       if (!isParticipant) return false;
-
-      // 如果該申請是整段，檢查日期是否在區間內
       if (req.isBundle && req.daysToSwap) {
         const bundleDates = req.daysToSwap.map(d => `${currentMonth}-${String(d).padStart(2, '0')}`);
         return bundleDates.includes(dateStr);
       }
       return req.date === dateStr;
     });
-  };
+  }
 
   const dateStr = dayInfo.fullDate;
 
-  // --- 2. 處理多人連鎖換班 (當已經有點選第一個人時) ---
+  // --- A. 多人連鎖點選邏輯 (當已經點了第一個人) ---
   if (swapTarget) {
-    if (swapTarget.isBundle) {
-      alert("整段換班不支援多人連鎖模式。");
-      return;
-    }
-    if (swapTarget.date !== dateStr) {
-      alert("多人換班僅限同一天。");
-      return;
-    }
-    if (swapTarget.participants.some(p => p.id === targetEmp.id)) {
-      alert("此同仁已在換班名單中。");
-      return;
-    }
-    // 檢查目標對象在該日是否有衝突
+    if (swapTarget.isBundle) return; // 整段換班禁止連鎖
+    if (swapTarget.date !== dateStr) { alert("多人換班僅限同一天"); return; }
+    if (swapTarget.participants.some(p => p.id === targetEmp.id)) { alert("此同仁已在名單中"); return; }
     if (checkDateConflict(targetEmp.id, dateStr)) {
       alert(`${targetEmp.name} 在 ${dateStr} 已有換班流程正在進行。`);
       return;
@@ -1914,21 +1775,18 @@ const handleSwapApply = (targetEmp, dayInfo) => {
     const tShift = (schedule[currentMonth]?.[targetEmp.name]?.[dayInfo.day] || "-").toString().trim();
     setSwapTarget(prev => ({
       ...prev,
-      participants: [
-        ...prev.participants,
-        { id: targetEmp.id, name: targetEmp.name, oldShift: tShift }
-      ]
+      participants: [...prev.participants, { id: targetEmp.id, name: targetEmp.name, oldShift: tShift }]
     }));
-    setIsModalOpen(true); // 點選第二人後開啟視窗確認鏈條
+    setIsModalOpen(true); // 點完第二人後立即跳出對話框
     return;
   }
 
-  // --- 3. 初始發起換班 (計算 A1A2/A3/P 整段邏輯) ---
+  // --- B. 初始點擊：判定整段 (A1A2/A3/P) 與互斥檢查 ---
   const normalize = (v) => (v || "-").toString().trim() === "" ? "-" : (v || "-").toString().trim();
   const targetShift = normalize(schedule[currentMonth]?.[targetEmp.name]?.[dayInfo.day]);
   const myShift = normalize(schedule[currentMonth]?.[currentUser.name]?.[dayInfo.day]);
   
-  let isBundle = false, startDate = dateStr, endDate = dateStr, daysToSwap = [dayInfo.day];
+  let isBundle = false, daysToSwap = [dayInfo.day];
   const targetDate = new Date(dateStr);
   const dOfW = targetDate.getDay(); 
 
@@ -1941,7 +1799,6 @@ const handleSwapApply = (targetEmp, dayInfo) => {
 
   const type = getShiftType(targetShift) || getShiftType(myShift);
 
-  // A1A2/A3/P 整段判定規則
   if (type === 'A1A2' && dOfW >= 1 && dOfW <= 5) {
       isBundle = true;
       const mon = new Date(targetDate); mon.setDate(targetDate.getDate() - (dOfW - 1));
@@ -1957,18 +1814,17 @@ const handleSwapApply = (targetEmp, dayInfo) => {
       daysToSwap = []; for (let i = 0; i < 6; i++) { const d = new Date(sat); d.setDate(sat.getDate() + i); daysToSwap.push(d.getDate()); }
   }
 
-  // --- 4. 互斥鎖定校驗 (整段區間檢查) ---
+  // 整段互斥檢查：區間內任何一天有申請則否決
   const conflictDay = daysToSwap.find(d => {
     const checkStr = `${currentMonth}-${String(d).padStart(2, '0')}`;
     return checkDateConflict(currentUser.id, checkStr) || checkDateConflict(targetEmp.id, checkStr);
   });
 
   if (conflictDay) {
-    alert(`無法發起換班：在申請區間中的 ${currentMonth}-${String(conflictDay).padStart(2, '0')} 藥師已有其他待核定申請，請先處理該申請或避開該區間。`);
+    alert(`無法發起換班：在申請區間中的 ${currentMonth}-${String(conflictDay).padStart(2, '0')} 已有其他換班申請。`);
     return;
   }
 
-  // --- 5. 設定狀態並彈出確認窗 ---
   setSwapTarget({
     date: dateStr,
     day: dayInfo.day,
@@ -1979,7 +1835,7 @@ const handleSwapApply = (targetEmp, dayInfo) => {
       { id: targetEmp.id, name: targetEmp.name, oldShift: targetShift }
     ]
   });
-  setIsModalOpen(true);
+  setIsModalOpen(true); // 初始點擊也立即跳出對話框
 };
 
 const handleRecordAction = (req, action) => {
@@ -2056,10 +1912,10 @@ const handleRecordAction = (req, action) => {
       <main className="flex-grow flex flex-col overflow-hidden">
         {(() => {
           switch (currentPage) {
-            case 'home': return <ScheduleTableView currentMonth={currentMonth} employees={employees} schedule={schedule} cellColors={cellColors} daysInMonth={daysInMonth} swapRequests={swapRequests} currentPage={currentPage} currentUser={currentUser} isCycleEnd={isCycleEnd}/>;
+            case 'home': return <ScheduleTableView currentMonth={currentMonth} employees={employees} schedule={schedule} cellColors={cellColors} daysInMonth={daysInMonth} swapRequests={swapRequests} currentPage={currentPage} currentUser={currentUser} />;
             case 'account': return <AccountManagementView employees={employees} setEmployees={(val) => { setEmployees(val); saveData({ employees: val });}} setDeleteTarget={setDeleteTarget} />;
             case 'shifts': return <ShiftsManagementView shifts={shifts} setShifts={(val) => { setShifts(val); saveData({ shifts: val }); }}  holidays={holidays} setHolidays={(val) => { setHolidays(val); saveData({ holidays: val }); }}  setDeleteShiftTarget={setDeleteShiftTarget} personDayRules={personDayRules}  setPersonDayRules={(val) => { setPersonDayRules(val); saveData({ personDayRules: val }); }} />;
-            case 'swap': return <ScheduleTableView currentMonth={currentMonth} employees={employees} schedule={schedule} cellColors={cellColors} daysInMonth={daysInMonth} onCellClick={handleSwapApply} swapRequests={swapRequests} currentPage={currentPage} currentUser={currentUser} swapTarget={swapTarget} handleSwapBack={handleSwapBack} setIsModalOpen={setIsModalOpen} isCycleEnd={isCycleEnd}/>;
+            case 'swap': return <ScheduleTableView currentMonth={currentMonth} employees={employees} schedule={schedule} cellColors={cellColors} daysInMonth={daysInMonth} onCellClick={handleSwapApply} swapRequests={swapRequests} currentPage={currentPage} currentUser={currentUser} swapTarget={swapTarget}  handleSwapBack={handleSwapBack}  setIsModalOpen={setIsModalOpen} isCycleEnd={isCycleEnd}/>;
             case 'records': return <RecordsView currentUser={currentUser} swapRequests={swapRequests} onAction={handleRecordAction} schedule={schedule} currentMonth={currentMonth} />;
             case 'leave':  return  <PreLeaveView currentMonth={currentMonth} employees={employees} daysInMonth={daysInMonth} currentUser={currentUser} schedule={schedule} setSchedule={(val) => { setSchedule(val); saveData({ schedule: val }); }} preLeaveData={preLeaveData} setPreLeaveData={(val) => { setPreLeaveData(val); saveData({ preLeaveData: val }); }}   saveData={saveData} />;
             case 'schedule': return <SchedulingView currentMonth={currentMonth} employees={employees} daysInMonth={daysInMonth} schedule={schedule} setSchedule={setSchedule} cellColors={cellColors} setCellColors={setCellColors} shifts={shifts} exportScheduleCSV={exportScheduleCSV} setCurrentPage={setCurrentPage} setIsDirty={setIsDirty} saveData={saveData} /> ;
@@ -2074,37 +1930,50 @@ const handleRecordAction = (req, action) => {
       </main>
       <Modal isOpen={showExitConfirm} onClose={() => { setShowExitConfirm(false); setTargetPage(null); }} onConfirm={confirmExit} title="班表尚未發佈" message="您有變更排班表，但尚未「發佈班表」。確定要離開嗎？" confirmText="仍要離開" cancelText="留在這裏" />
       <SwapRequestModal 
-         isOpen={!!swapTarget}  
-         onClose={() => setSwapTarget(null)} 
-         onConfirm={() => { 
-          const targetDateStr = swapTarget.date; 
-          const nextRequests = [
-           ...swapRequests, 
-            { ...swapTarget, id: `REQ-${Date.now()}`, status: 'PendingTarget', timestamp: Date.now(), adminNote: "" }
-          ];
+        isOpen={isModalOpen} // 改用 isModalOpen 判斷，而不是 !!swapTarget
+        onClose={() => { 
+          setIsModalOpen(false); 
+          setSwapTarget(null); 
+        }} 
+          onConfirm={() => {
+            const targetDateStr = swapTarget.date; 
+            const nextRequests = [
+              ...swapRequests, 
+              { 
+                ...swapTarget, 
+                id: `REQ-${Date.now()}`, 
+                creatorId: currentUser.id, // 確保紀錄 creatorId 方便後續互斥檢查
+                creatorName: currentUser.name,
+                status: 'PendingTarget', 
+                timestamp: Date.now(), 
+                adminNote: "" 
+              }
+            ];
 
-           const nextEmps = employees.map(e => {
-             if (e.id === currentUser.id) {
-             const currentDates = e.applyingDates || [];
-             return { ...e, applyingDates: [...currentDates, targetDateStr] };
-          }
-          return e;
-          });
+            const nextEmps = employees.map(e => {
+              if (e.id === currentUser.id) {
+                const currentDates = e.applyingDates || [];
+                return { ...e, applyingDates: [...currentDates, targetDateStr] };
+              }
+              return e;
+            });
 
-          setSwapRequests(nextRequests);
-          setEmployees(nextEmps); 
-          saveData({ swapRequests: nextRequests, employees: nextEmps });  
+            setSwapRequests(nextRequests);
+            setEmployees(nextEmps); 
+            saveData({ swapRequests: nextRequests, employees: nextEmps });  
 
-          setCurrentUser({ 
-            ...currentUser, 
-            applyingDates: [...(currentUser.applyingDates || []), targetDateStr] 
-          });
+            setCurrentUser({ 
+              ...currentUser, 
+              applyingDates: [...(currentUser.applyingDates || []), targetDateStr] 
+            });
 
-          setSwapTarget(null);  
-        }}  
-        data={swapTarget} 
-      />
-       <Modal isOpen={!!rejectingReq} onClose={()=>setRejectingReq(null)} onConfirm={()=>{ const nextRequests = swapRequests.map(r => r.id === rejectingReq.id ? { ...r, status: 'Rejected', adminNote: rejectNote || "管理員否決" } : r); setSwapRequests(nextRequests); saveData({ swapRequests: nextRequests }); setRejectNote(""); setRejectingReq(null); }} title="否決換班申請" confirmText="確認否決"><textarea className="w-full border-2 rounded-2xl p-3 text-sm outline-none" placeholder="原因..." rows={3} value={rejectNote} onChange={(e) => setRejectNote(e.target.value)} /></Modal>
+            setSwapTarget(null);
+                setIsModalOpen(false); // 確認後關閉
+              }}  
+              data={swapTarget} 
+              setIsModalOpen={setIsModalOpen} // 務必傳入這行，讓多人換班按鈕能關閉視窗
+            />
+      <Modal isOpen={!!rejectingReq} onClose={()=>setRejectingReq(null)} onConfirm={()=>{ const nextRequests = swapRequests.map(r => r.id === rejectingReq.id ? { ...r, status: 'Rejected', adminNote: rejectNote || "管理員否決" } : r); setSwapRequests(nextRequests); saveData({ swapRequests: nextRequests }); setRejectNote(""); setRejectingReq(null); }} title="否決換班申請" confirmText="確認否決"><textarea className="w-full border-2 rounded-2xl p-3 text-sm outline-none" placeholder="原因..." rows={3} value={rejectNote} onChange={(e) => setRejectNote(e.target.value)} /></Modal>
       <Modal isOpen={!!deleteTarget} onClose={()=>setDeleteTarget(null)} onConfirm={()=>{const next = employees.filter(e=>e.id!==deleteTarget.id); setEmployees(next); saveData({ employees: next }); setDeleteTarget(null)}} title="確定刪除人員？" message="移除該人員將影響本期報表。" />
       <Modal isOpen={!!deleteShiftTarget} onClose={()=>setDeleteShiftTarget(null)} onConfirm={()=>{const next = shifts.filter(s=>s.id!==deleteShiftTarget.id); setShifts(next); saveData({ shifts: next }); setDeleteShiftTarget(null)}} title="確定刪除班別？" message={`移除 ${deleteShiftTarget?.name}。`} />
     </div>
