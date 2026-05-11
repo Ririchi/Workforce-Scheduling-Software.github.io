@@ -1694,10 +1694,10 @@ const App = () => {
   const [currentPage, setCurrentPage] = useState('home');
   const [pendingPage, setPendingPage] = useState(null); 
   const [isLoggedIn, setIsLoggedIn] = useState(false);
-  const [currentUser, setCurrentUser] = useState({ id: 'admin', name: 'Ririchi', role: '0' });
+  const [currentUser, setCurrentUser] = useState({ id: 'RIRICHI', name: 'Ririchi', role: '0' });
   const [currentMonth, setCurrentMonth] = useState('2026-05');
   const [showPassword, setShowPassword] = useState(false);
-  const [employees, setEmployees] = useState([{ id: 'admin', name: 'Ririchi', role: '0' }]);
+  const [employees, setEmployees] = useState([{ id: 'RIRICHI', name: 'Ririchi', role: '0' }]);
   const [shifts, setShifts] = useState([{ id: 'D', name: 'D', color: 'bg-blue-100' }]);
   const [holidays, setHolidays] = useState({ "2026-05-01": "勞動節" });
   const [personDayRules, setPersonDayRules] = useState(INITIAL_PERSON_DAY_RULES);
