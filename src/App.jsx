@@ -1691,7 +1691,7 @@ const SchedulingView = ({ currentMonth, employees, daysInMonth, schedule, setSch
 };
 
 const App = () => {
-  const [currentPage, setCurrentPage] = useState('home');
+  const [currentPage, setCurrentPage] = useState('schedule');//要記得把schedule改回home
   const [pendingPage, setPendingPage] = useState(null); 
   const [isLoggedIn, setIsLoggedIn] = useState(false);
   const [currentUser, setCurrentUser] = useState({ id: 'RIRICHI', name: 'Ririchi', role: '0' });
