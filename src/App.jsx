@@ -375,6 +375,7 @@ return (
 
 useEffect(() => {
     if (!schedule[currentMonth]) return;
+  
     let changed = false;
     const next = deepClone(preLeaveData);
     if (!next.apps || !next.apps[currentMonth]) return;
@@ -1693,11 +1694,11 @@ const App = () => {
   const [currentPage, setCurrentPage] = useState('home');
   const [pendingPage, setPendingPage] = useState(null); 
   const [isLoggedIn, setIsLoggedIn] = useState(false);
-  const [currentUser, setCurrentUser] = useState(null);
+  const [currentUser, setCurrentUser] = useState({ id: 'admin', name: 'Ririchi', role: '0' });
   const [currentMonth, setCurrentMonth] = useState('2026-05');
   const [showPassword, setShowPassword] = useState(false);
-  const [employees, setEmployees] = useState(INITIAL_EMPLOYEES);
-  const [shifts, setShifts] = useState(INITIAL_SHIFTS);
+  const [employees, setEmployees] = useState([{ id: 'admin', name: 'Ririchi', role: '0' }]);
+  const [shifts, setShifts] = useState([{ id: 'D', name: 'D', color: 'bg-blue-100' }]);
   const [holidays, setHolidays] = useState({ "2026-05-01": "勞動節" });
   const [personDayRules, setPersonDayRules] = useState(INITIAL_PERSON_DAY_RULES);
   const [schedule, setSchedule] = useState({});
@@ -1726,7 +1727,7 @@ const App = () => {
 
   useEffect(() => {const initAuth = async () => { try {if (typeof __initial_auth_token !== 'undefined' && __initial_auth_token) {await signInWithCustomToken(auth, __initial_auth_token);} else {await signInAnonymously(auth);}} catch (err) {console.warn("驗證不匹配:", err);await signInAnonymously(auth);}};initAuth();
 }, []);
-  
+  /* 暫時註解監聽，避免抓到空資料崩潰
     useEffect(() => {const docRef = doc(db, 'artifacts', appId, 'public', 'data', 'roster', 'main');const unsubData = onSnapshot(docRef, (snap) => {
       if (snap.exists()) {const d = snap.data();
         if (d.employees) setEmployees(d.employees);
@@ -1742,7 +1743,7 @@ const App = () => {
 
     return () => unsubData();
   }, [appId]);
-  
+  */
   const daysInMonth = useMemo(() => {
     const [year, month] = currentMonth.split('-').map(Number);
     const date = new Date(year, month, 0); const days = [];
