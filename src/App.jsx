@@ -6,11 +6,11 @@ import {
   Home, UserCog, CalendarRange, ArrowLeftRight, Clock, LayoutGrid, Download, Upload, LogIn, LogOut,
   GripVertical, Plus, Trash2, Save, UserPlus, AlertCircle, Calendar as CalendarIcon, CheckCircle2,
   XCircle, Undo2, Redo2, Copy, FileText, SeparatorHorizontal, Info, ChevronLeft, ChevronRight, PaintBucket,
-  Eye, EyeOff, ShieldCheck, ShieldAlert, BarChart3, History, Search, Check, X, ClipboardList, MessageSquare, User, Circle, Settings, Dice5, Lock, TrendingUp, Calculator
+  Eye, EyeOff, ShieldCheck, ShieldAlert, BarChart3, History, Search, Check, X, ClipboardList, MessageSquare, User, Circle, Settings, Dice5, Lock, TrendingUp, aCalculator
 } from 'lucide-react';
 
 // --- 常數定義與初始資料 ---
-// 版本記錄：V1.7.10 - 深度重構連續換班校驗：僅校驗 Target 並相容 P#/P 變化
+// 版本記錄：V1.8 - 深度重構連續換班校驗：僅校驗 Target 並相容 P#/P 變化
 const WEEKDAYS_MAP = ["日", "一", "二", "三", "四", "五", "六"];
 const PALETTE = [
   { name: '無色', class: 'bg-white' },
@@ -60,18 +60,18 @@ const INITIAL_PERSON_DAY_RULES = [
 
 // Firebase 配置
 const firebaseConfig = {
-  apiKey: "AIzaSyCJ4U76sXFSc-eJsmRLnUgknNyV1V2Ll4Q",
-  authDomain: "workforce-scheduling-software.firebaseapp.com",
-  projectId: "workforce-scheduling-software",
-  storageBucket: "workforce-scheduling-software.firebasestorage.app",
-  messagingSenderId: "133587868564",
-  appId: "1:133587868564:web:e306d0a59a2365622acd81",
-  measurementId: "G-1EY4R8TBFJ"
+  apiKey: "AIzaSyApEBgpAFaytqPBtPTEXE-fr8o4LdzKzPA",
+  authDomain: "pharmacy-scheduling-e20ad.firebaseapp.com",
+  projectId: "pharmacy-scheduling-e20ad",
+  storageBucket: "pharmacy-scheduling-e20ad.firebasestorage.app",
+  messagingSenderId: "779276168089",
+  appId: "1:779276168089:web:c57dfd4db57beef3804108",
+  measurementId: "G-BVDVEYZEDT"
 };
 const app = initializeApp(firebaseConfig);
 const auth = getAuth(app);
 const db = getFirestore(app);
-const appId = typeof __app_id !== 'undefined' ? __app_id : 'pharmacy-system-v1-7';
+const appId = typeof __app_id !== 'undefined' ? __app_id : 'pharmacy-system-v1-8';
 
 // --- 輔助函數 ---
 const deepClone = (obj) => {
@@ -239,7 +239,7 @@ const Header = ({ currentMonth, setCurrentMonth, currentPage, handlePageChange, 
     <header className="bg-white border-b-2 border-gray-800 p-2 sm:p-3 sticky top-0 z-[100] shadow-md">
       <div className="max-w-full flex flex-col lg:flex-row lg:items-center justify-between gap-2">
         <div className="flex flex-wrap items-center gap-3">
-          <h1 className="text-xs font-black text-gray-800 border-r-2 border-gray-300 pr-4 leading-none cursor-pointer" onClick={() => handlePageChange('home')}>台大雲林藥劑部班表 <span className="text-[10px] text-gray-400 font-normal ml-1">V1.7.10</span></h1>
+          <h1 className="text-xs font-black text-gray-800 border-r-2 border-gray-300 pr-4 leading-none cursor-pointer" onClick={() => handlePageChange('home')}>台大雲林藥劑部班表 <span className="text-[10px] text-gray-400 font-normal ml-1">V1.8</span></h1>
           <div className="flex items-center gap-2">
             <input type="month" value={currentMonth} onChange={(e) => setCurrentMonth(e.target.value)} className="border-2 border-gray-300 rounded px-1.5 py-0.5 text-xs font-bold focus:border-blue-500 outline-none" />
             {isLoggedIn && (<span className="text-[11px] font-black text-blue-600 bg-blue-50 px-2 py-0.5 rounded-lg border border-blue-100 flex items-center gap-1"><User size={12}/> 哈囉, {currentUser.name}</span>)}
@@ -375,7 +375,6 @@ return (
 
 useEffect(() => {
     if (!schedule[currentMonth]) return;
-  
     let changed = false;
     const next = deepClone(preLeaveData);
     if (!next.apps || !next.apps[currentMonth]) return;
@@ -1691,14 +1690,14 @@ const SchedulingView = ({ currentMonth, employees, daysInMonth, schedule, setSch
 };
 
 const App = () => {
-  const [currentPage, setCurrentPage] = useState('schedule');//要記得把schedule改回home
+  const [currentPage, setCurrentPage] = useState('home');
   const [pendingPage, setPendingPage] = useState(null); 
   const [isLoggedIn, setIsLoggedIn] = useState(false);
-  const [currentUser, setCurrentUser] = useState({ id: 'RIRICHI', name: 'Ririchi', role: '0' });
+  const [currentUser, setCurrentUser] = useState(null);
   const [currentMonth, setCurrentMonth] = useState('2026-05');
   const [showPassword, setShowPassword] = useState(false);
-  const [employees, setEmployees] = useState([{ id: 'RIRICHI', name: 'Ririchi', role: '0' }]);
-  const [shifts, setShifts] = useState([{ id: 'D', name: 'D', color: 'bg-blue-100' }]);
+  const [employees, setEmployees] = useState(INITIAL_EMPLOYEES);
+  const [shifts, setShifts] = useState(INITIAL_SHIFTS);
   const [holidays, setHolidays] = useState({ "2026-05-01": "勞動節" });
   const [personDayRules, setPersonDayRules] = useState(INITIAL_PERSON_DAY_RULES);
   const [schedule, setSchedule] = useState({});
@@ -1727,7 +1726,7 @@ const App = () => {
 
   useEffect(() => {const initAuth = async () => { try {if (typeof __initial_auth_token !== 'undefined' && __initial_auth_token) {await signInWithCustomToken(auth, __initial_auth_token);} else {await signInAnonymously(auth);}} catch (err) {console.warn("驗證不匹配:", err);await signInAnonymously(auth);}};initAuth();
 }, []);
-  /* 暫時註解監聽，避免抓到空資料崩潰
+  
     useEffect(() => {const docRef = doc(db, 'artifacts', appId, 'public', 'data', 'roster', 'main');const unsubData = onSnapshot(docRef, (snap) => {
       if (snap.exists()) {const d = snap.data();
         if (d.employees) setEmployees(d.employees);
@@ -1743,7 +1742,7 @@ const App = () => {
 
     return () => unsubData();
   }, [appId]);
-  */
+  
   const daysInMonth = useMemo(() => {
     const [year, month] = currentMonth.split('-').map(Number);
     const date = new Date(year, month, 0); const days = [];
@@ -1985,7 +1984,7 @@ const handleRecordAction = (req, action) => {
             case 'report': return <ManagementReportView currentMonth={currentMonth} employees={employees} schedule={schedule} personDayRules={personDayRules} holidays={holidays} shifts={shifts} />;
             case 'login': {
               const triggerLogin = () => { const id = document.getElementById('uid')?.value.toUpperCase(); const pwd = document.getElementById('upwd')?.value; if (!pwd) { alert("請輸入密碼！"); return; } handleLoginAction(id, pwd); };
-              return (<div className="flex flex-col items-center justify-center min-h-[60vh] p-4"><div className="bg-white p-10 rounded-[2.5rem] shadow-2xl border max-w-sm w-full text-center"><h2 className="text-xl font-black mb-2 text-gray-800">藥劑部 班表系統登入</h2><div className="text-[10px] text-gray-400 font-bold mb-8">第一次輸入的密碼會自動設定為密碼</div><div className="space-y-4"><input className="w-full border-2 p-3 rounded-2xl outline-none font-mono text-center uppercase" placeholder="員編" id="uid" onInput={(e) => e.target.value = e.target.value.toUpperCase()} onKeyDown={(e) => e.key === 'Enter' && triggerLogin()} /><div className="relative"><input className="w-full border-2 p-3 rounded-2xl outline-none text-center" type={showPassword ? "text" : "password"} placeholder="密碼" id="upwd" onKeyDown={(e) => e.key === 'Enter' && triggerLogin()} /><button onClick={()=>setShowPassword(!showPassword)} className="absolute right-4 top-4 text-gray-400">{showPassword ? <Eye size={18}/> : <EyeOff size={18}/>}</button></div><button onClick={triggerLogin} className="w-full bg-blue-600 text-white p-3 rounded-2xl font-black shadow transition-all transform active:scale-95">進入系統</button></div></div><div className="mt-12 text-[11px] text-gray-400 font-bold tracking-wider">© 2026 NTUH Yunlin Pharmacy - V1.7.10</div></div>);
+              return (<div className="flex flex-col items-center justify-center min-h-[60vh] p-4"><div className="bg-white p-10 rounded-[2.5rem] shadow-2xl border max-w-sm w-full text-center"><h2 className="text-xl font-black mb-2 text-gray-800">藥劑部 班表系統登入</h2><div className="text-[10px] text-gray-400 font-bold mb-8">第一次輸入的密碼會自動設定為密碼</div><div className="space-y-4"><input className="w-full border-2 p-3 rounded-2xl outline-none font-mono text-center uppercase" placeholder="員編" id="uid" onInput={(e) => e.target.value = e.target.value.toUpperCase()} onKeyDown={(e) => e.key === 'Enter' && triggerLogin()} /><div className="relative"><input className="w-full border-2 p-3 rounded-2xl outline-none text-center" type={showPassword ? "text" : "password"} placeholder="密碼" id="upwd" onKeyDown={(e) => e.key === 'Enter' && triggerLogin()} /><button onClick={()=>setShowPassword(!showPassword)} className="absolute right-4 top-4 text-gray-400">{showPassword ? <Eye size={18}/> : <EyeOff size={18}/>}</button></div><button onClick={triggerLogin} className="w-full bg-blue-600 text-white p-3 rounded-2xl font-black shadow transition-all transform active:scale-95">進入系統</button></div></div><div className="mt-12 text-[11px] text-gray-400 font-bold tracking-wider">© 2026 NTUH Yunlin Pharmacy - V1.8</div></div>);
             }
             default: return null;
           }
