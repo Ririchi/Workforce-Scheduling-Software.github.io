@@ -201,11 +201,11 @@ const SwapRequestModal = ({ isOpen, onClose, onConfirm, data, setIsModalOpen, ha
 
         <div className="p-6 pt-0 space-y-3">
           <div className="grid grid-cols-2 gap-3">
-            <button onClick={onConfirm} className="py-3 text-sm font-black text-white bg-blue-600 rounded-2xl shadow-lg hover:bg-blue-700 transition-all">送出申請</button>
-            {/* 需求 2 的一部分：若是單日換班，提供多人連鎖按鈕 */}
+            {/* 需求 2 的一部分：若是單日換班，提供多人換班按鈕 */}
             {!isBundle && (
-              <button onClick={() => setIsModalOpen(false)} className="py-3 text-sm font-black text-blue-600 bg-blue-50 rounded-2xl hover:bg-blue-100 transition-all border border-blue-100">＋ 多人連鎖</button>
+              <button onClick={() => setIsModalOpen(false)} className="py-3 text-sm font-black text-blue-600 bg-blue-50 rounded-2xl hover:bg-blue-100 transition-all border border-blue-100">＋ 多人換班</button>
             )}
+            <button onClick={onConfirm} className="py-3 text-sm font-black text-white bg-blue-600 rounded-2xl shadow-lg hover:bg-blue-700 transition-all">送出申請</button>
           </div>
 
           {/* 需求 2：回到上一步 (當選到 3 人以上時出現) */}
@@ -218,7 +218,7 @@ const SwapRequestModal = ({ isOpen, onClose, onConfirm, data, setIsModalOpen, ha
             </button>
           )}
 
-          <button onClick={onClose} className="w-full py-3 text-sm font-bold text-gray-400 bg-gray-50 rounded-2xl hover:bg-gray-100 transition-colors">清空並關閉</button>
+          <button onClick={onClose} className="w-full py-3 text-sm font-bold text-gray-400 bg-gray-100 rounded-2xl hover:bg-gray-100 transition-colors">清空並關閉</button>
         </div>
       </div>
     </div>
@@ -1000,37 +1000,53 @@ const handleImport = (e) => {
           <button type="button" onClick={() => setEmployees([...employees, { id: `SEP-${Date.now()}`, isSeparator: true }])} className="w-full mt-2 py-2 border-2 border-dashed rounded-xl text-[10px] font-black text-gray-400 hover:bg-gray-50 transition-all">插入分組分隔線</button>
         </form>
       </div>
-      <div className="lg:col-span-8 bg-white rounded-3xl shadow border overflow-hidden">
-        <table className="w-full text-sm">
-          <thead className="bg-gray-50 border-b text-[10px] font-black uppercase text-gray-400">
-            <tr><th className="p-4 w-10"></th><th className="p-4 text-left">員編</th><th className="p-4 text-left">姓名</th><th className="p-4 text-left">角色</th><th className="p-4 text-right">操作</th></tr>
+      <div className="lg:col-span-8 bg-white rounded-3xl shadow border flex flex-col h-[650px]"> 
+        <div className="flex-1 overflow-y-auto"> {/* 💡 這是讓內容可以捲動的關鍵 */}
+          <table className="w-full text-sm border-collapse">
+          <thead className="bg-gray-50 border-b text-[10px] font-black uppercase text-gray-400 sticky top-0 z-10">
+            <tr>
+              <th className="p-4 w-10 bg-gray-50"></th>
+              <th className="p-4 text-left bg-gray-50">員編</th>
+              <th className="p-4 text-left bg-gray-50">姓名</th>
+              <th className="p-4 text-left bg-gray-50">角色</th>
+              <th className="p-4 text-right bg-gray-50">操作</th>
+            </tr>
           </thead>
-          <tbody>
-            {employees.map((emp, idx) => (
-              <tr 
-                key={emp.id} 
-                draggable 
-                onDragStart={() => setDraggedIdx(idx)} 
-                onDragOver={e => { e.preventDefault(); setDragOverIdx(idx); }} 
-                onDrop={() => onDrop(idx)} 
-                className={`transition-all border-b last:border-0 group cursor-move ${emp.isSeparator ? 'bg-gray-100 h-[4px]' : 'hover:bg-blue-50'} ${dragOverIdx === idx ? 'border-t-4 border-t-blue-400' : ''}`}
-              >
-                <td className="p-4 text-gray-300 group-hover:text-blue-500"><GripVertical size={16}/></td>
-                {emp.isSeparator ? <td colSpan={3} className="p-4 italic text-[10px] text-gray-400">分組線</td> : (
-                  <>
-                    <td className="p-4 font-mono text-xs">{emp.id}</td>
-                    <td className="p-4 font-bold">{emp.name}</td>
-                    <td className="p-4"><span className={`px-2 py-0.5 rounded-full text-[10px] font-black ${emp.role === '0' ? 'bg-purple-100 text-purple-600' : emp.role === '1' ? 'bg-blue-100 text-blue-600' : 'bg-gray-100 text-gray-500'}`}>{getRoleLabel(emp.role)}</span></td>
-                  </>
-                )}
-                <td className="p-4 text-right">
-                  {!emp.isSeparator && <button onClick={() => { setEditingId(emp.id); setFormData(emp); }} className="text-blue-500 text-xs font-black mr-4">編輯</button>}
-                  <button onClick={() => setDeleteTarget(emp)} className="text-red-400 hover:text-red-600 transition-all"><Trash2 size={16}/></button>
-                </td>
-              </tr>
-            ))}
-          </tbody>
-        </table>
+            <tbody>
+              {employees.map((emp, idx) => (
+                <tr 
+                  key={emp.id} 
+                  draggable 
+                  onDragStart={() => setDraggedIdx(idx)} 
+                  onDragOver={e => { e.preventDefault(); setDragOverIdx(idx); }} 
+                  onDrop={() => onDrop(idx)} 
+                  className={`transition-all border-b last:border-0 group cursor-move ${emp.isSeparator ? 'bg-gray-100 h-[4px]' : 'hover:bg-blue-50'} ${dragOverIdx === idx ? 'border-t-4 border-t-blue-400' : ''}`}
+                >
+                  <td className="p-4 text-gray-300 group-hover:text-blue-500"><GripVertical size={16}/></td>
+                  {emp.isSeparator ? <td colSpan={3} className="p-4 italic text-[10px] text-gray-400">分組線</td> : (
+                    <>
+                      <td className="p-4 font-mono text-xs">{emp.id}</td>
+                      <td className="p-4 font-bold">{emp.name}</td>
+                      <td className="p-4">
+                        <span className={`px-2 py-0.5 rounded-full text-[10px] font-black ${emp.role === '0' ? 'bg-purple-100 text-purple-600' : emp.role === '1' ? 'bg-blue-100 text-blue-600' : 'bg-gray-100 text-gray-500'}`}>
+                          {getRoleLabel(emp.role)}
+                        </span>
+                      </td>
+                    </>
+                  )}
+                  <td className="p-4 text-right">
+                    {!emp.isSeparator && <button onClick={() => { setEditingId(emp.id); setFormData(emp); }} className="text-blue-500 text-xs font-black mr-4">編輯</button>}
+                    <button onClick={() => setDeleteTarget(emp)} className="text-red-400 hover:text-red-600 transition-all"><Trash2 size={16}/></button>
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+        {/* 表格底部固定顯示統計 */}
+        <div className="p-3 bg-gray-50 border-t text-[10px] font-black text-gray-400 text-center rounded-b-3xl">
+          總計：{employees.filter(e => !e.isSeparator).length} 位人員
+        </div>
       </div>
     </div>
   );
