@@ -682,7 +682,7 @@ const handleAdminSettingChange = (type, value) => {
   );
 };
 
-const RecordsView = ({ currentUser, swapRequests, onAction, onApprove, schedule, currentMonth }) => {
+const RecordsView = ({ currentUser, swapRequests, onAction, onApprove, setRejectingReq, schedule, currentMonth }) => {
   const [dateRange, setDateRange] = useState({ 
     start: new Date(Date.now() - 7 * 24 * 60 * 60 * 1000).toISOString().split('T')[0], 
     end: new Date(Date.now() + 21 * 24 * 60 * 60 * 1000).toISOString().split('T')[0] 
@@ -690,8 +690,49 @@ const RecordsView = ({ currentUser, swapRequests, onAction, onApprove, schedule,
   const [confirmModal, setConfirmModal] = useState({ isOpen: false, req: null, action: '' });
   const isAdmin = currentUser?.role === '0';
 
-  const pendingList = useMemo(() => swapRequests.filter(req => req.status !== 'Approved' && req.status !== 'Rejected' && req.status !== 'Deleted' && (isAdmin || req.creatorId === currentUser.id || req.targetId === currentUser.id)).sort((a,b)=>a.timestamp - b.timestamp), [swapRequests, isAdmin, currentUser]);
-  const historyList = useMemo(() => swapRequests.filter(req => (req.status === 'Approved' || req.status === 'Rejected' || req.status === 'Deleted') && req.date >= dateRange.start && req.date <= dateRange.end && (isAdmin || req.creatorId === currentUser.id || req.targetId === currentUser.id)).sort((a,b)=>b.timestamp - a.timestamp), [swapRequests, isAdmin, currentUser, dateRange]);
+  const pendingList = useMemo(() => {
+      return swapRequests.filter(req => {
+        // 判斷是否已結案 (過濾掉已核定、否決或撤回的)
+        const isClosed = req.status === 'Approved' || req.status === 'Rejected' || req.status === 'Deleted';
+        if (isClosed) return false;
+
+        // 判斷我是否為參與者 (包含發起人、被申請人、及參與名單內所有人)
+        const isParticipant = 
+          req.creatorId === currentUser.id || 
+          req.targetId === currentUser.id || 
+          (req.participants && req.participants.some(p => p.id === currentUser.id));
+
+        if (isAdmin) {
+          // 主管看到的待處理：
+          // A. 與自己有關的換班
+          // B. 狀態為 'PendingAdmin' (代表同仁簽完了，輪到主管核定)
+          return isParticipant || req.status === 'PendingAdmin';
+        }
+
+        // 一般同仁看到的待處理：只要跟我有關就顯示
+        return isParticipant;
+      }).sort((a, b) => a.timestamp - b.timestamp);
+    }, [swapRequests, isAdmin, currentUser]);  
+    
+    const historyList = useMemo(() => {
+        return swapRequests.filter(req => {
+          // 判斷是否為結案狀態
+          const isClosed = req.status === 'Approved' || req.status === 'Rejected' || req.status === 'Deleted';
+          if (!isClosed) return false;
+
+          // 判斷日期範圍
+          const isInRange = req.date >= dateRange.start && req.date <= dateRange.end;
+          if (!isInRange) return false;
+
+          // 判斷權限：主管看全部，同仁只看與自己有關的
+          const isParticipant = 
+            req.creatorId === currentUser.id || 
+            req.targetId === currentUser.id || 
+            (req.participants && req.participants.some(p => p.id === currentUser.id));
+
+          return isAdmin || isParticipant;
+        }).sort((a, b) => b.timestamp - a.timestamp);
+      }, [swapRequests, isAdmin, currentUser, dateRange]);
 
   const handleDownloadCSV = () => {
     const approved = swapRequests.filter(r => r.status === 'Approved');
@@ -716,11 +757,28 @@ const RecordsView = ({ currentUser, swapRequests, onAction, onApprove, schedule,
 
   const StatusProgress = ({ req }) => {
     const isRejected = req.status === 'Rejected';
+    
+    // 💡 邏輯修正：定義各階段是否打勾
+    const isStep2Completed = req.status === 'PendingAdmin' || req.status === 'Approved' || (isRejected && !req.adminNote);
+    const isStep3Completed = req.status === 'Approved' || (isRejected && req.adminNote);
+
     const steps = [
       { id: '1', label: '申請人', active: true, color: 'bg-green-500' },
-      { id: '2', label: '同仁核定', active: req.status !== 'PendingTarget', color: (isRejected && !req.adminNote) ? 'bg-red-500' : 'bg-green-500' },
-      { id: '3', label: '組長核定', active: req.status === 'Approved' || (isRejected && req.adminNote), color: (isRejected && req.adminNote) ? 'bg-red-500' : 'bg-green-500' }
+      { 
+        id: '2', 
+        label: '同仁核定', 
+        // 💡 修正：只有當狀態不再是 WaitingParticipants，且不是初始狀態時才打勾
+        active: isStep2Completed, 
+        color: (isRejected && !req.adminNote) ? 'bg-red-500' : 'bg-green-500' 
+      },
+      { 
+        id: '3', 
+        label: '組長核定', 
+        active: isStep3Completed, 
+        color: (isRejected && req.adminNote) ? 'bg-red-500' : 'bg-green-500' 
+      }
     ];
+
     return (
       <div className="flex items-center gap-1 mt-2">
         {steps.map((s, idx) => (
@@ -731,7 +789,9 @@ const RecordsView = ({ currentUser, swapRequests, onAction, onApprove, schedule,
               </div>
               <span className={`text-[8px] mt-1 font-black ${s.active ? 'text-gray-600' : 'text-gray-300'}`}>{s.label}</span>
             </div>
-            {idx < steps.length - 1 && <div className={`h-[1px] w-6 mb-3 ${steps[idx+1].active ? steps[idx+1].color : 'bg-gray-100'}`}></div>}
+            {idx < steps.length - 1 && (
+              <div className={`h-[1px] w-6 mb-3 ${steps[idx+1].active ? steps[idx+1].color : 'bg-gray-100'}`}></div>
+            )}
           </React.Fragment>
         ))}
       </div>
@@ -847,49 +907,59 @@ const RecordsView = ({ currentUser, swapRequests, onAction, onApprove, schedule,
                     <StatusProgress req={req}/>
                     
                     {/* 💡 修改點：這是位於 RecordsView 內部的操作按鈕區塊 */}
-                    <div className="flex gap-2 pt-2 border-t border-dashed border-gray-100">
-                      
-                      {/* 情況 A：參與者核定按鈕 (只要你是在名單內、非發起人、且尚未核定過) */}
-                      {req.status === 'WaitingParticipants' && 
-                      req.participants?.some(p => p.id === currentUser.id) && 
-                      req.creatorId !== currentUser.id &&
-                      req.approvals?.find(a => a.id === currentUser.id)?.status === 'Pending' && (
+                  <div className="flex gap-2 pt-2 border-t border-dashed border-gray-100">
+                    
+                    {/* 情況 A：參與者操作 (同仁簽核) */}
+                    {req.status === 'WaitingParticipants' && 
+                    req.participants?.some(p => p.id === currentUser.id) && 
+                    req.creatorId !== currentUser.id &&
+                    req.approvals?.find(a => a.id === currentUser.id)?.status === 'Pending' && (
+                      <div className="flex gap-2 w-full">
                         <button
-                          onClick={() => onApprove(req.id)} // 👈 關鍵：這裡要改用 onApprove
+                          onClick={() => onApprove(req.id)}
                           className="flex-1 py-2.5 bg-green-500 text-white rounded-xl font-black text-sm shadow-md hover:bg-green-600 transition-all flex items-center justify-center gap-1.5"
                         >
                           <CheckCircle2 size={16} /> 核定換班
                         </button>
-                      )}
-
-                      {/* 情況 B：撤回申請按鈕 (發起人可撤回等待中或核定中的申請) */}
-                      {req.creatorId === currentUser.id && (req.status === 'Pending' || req.status === 'WaitingParticipants') && (
+                        
+                        {/* 💡 新增：同仁也可以否決 (作廢整張單子) */}
                         <button
-                          onClick={() => handleCancelRequest(req.id)}
-                          className="flex-1 py-2.5 bg-gray-100 text-gray-500 rounded-xl font-black text-sm hover:bg-gray-200 transition-all flex items-center justify-center gap-1.5"
+                          onClick={() => triggerAction(req, 'Reject')} 
+                          className="flex-1 py-2.5 bg-rose-50 text-rose-600 border border-rose-100 rounded-xl font-black text-sm hover:bg-rose-100 transition-all flex items-center justify-center gap-1.5"
                         >
-                          <Undo2 size={16} /> 撤回申請
+                          <ShieldAlert size={16} /> 否決
                         </button>
-                      )}
+                      </div>
+                    )}
 
-                      {/* 情況 C：管理員核定按鈕 (只有狀態為 Pending，即全員簽完後，主管才看得到) */}
-                      {isAdmin && req.status === 'Pending' && (
-                        <div className="flex gap-2 w-full">
-                          <button
-                            onClick={() => handleApproveRequest(req)}
-                            className="flex-1 py-2.5 bg-indigo-600 text-white rounded-xl font-black text-sm shadow-md hover:bg-indigo-700 transition-all flex items-center justify-center gap-1.5"
-                          >
-                            <ShieldCheck size={16} /> 主管核定
-                          </button>
-                          <button
-                            onClick={() => setRejectingReq(req)}
-                            className="flex-1 py-2.5 bg-rose-50 text-rose-600 border border-rose-100 rounded-xl font-black text-sm hover:bg-rose-100 transition-all flex items-center justify-center gap-1.5"
-                          >
-                            <ShieldAlert size={16} /> 否決
-                          </button>
-                        </div>
-                      )}
-                    </div>
+                    {/* 情況 B：發起人撤回 */}
+                    {req.creatorId === currentUser.id && (req.status === 'WaitingParticipants' || req.status === 'PendingAdmin') && (
+                      <button
+                        onClick={() => triggerAction(req, 'Delete')}
+                        className="flex-1 py-2.5 bg-gray-100 text-gray-500 rounded-xl font-black text-sm hover:bg-gray-200 transition-all flex items-center justify-center gap-1.5"
+                      >
+                        <Undo2 size={16} /> 撤回申請
+                      </button>
+                    )}
+
+                    {/* 情況 C：組長(主管)核定 (當狀態變為 PendingAdmin 時顯示) */}
+                    {isAdmin && req.status === 'PendingAdmin' && (
+                      <div className="flex gap-2 w-full">
+                        <button
+                          onClick={() => onAction(req, 'Approve')} 
+                          className="flex-1 py-2.5 bg-indigo-600 text-white rounded-xl font-black text-sm shadow-md hover:bg-indigo-700 transition-all flex items-center justify-center gap-1.5"
+                        >
+                          <ShieldCheck size={16} /> 組長核定
+                        </button>
+                        <button
+                          onClick={() => setRejectingReq(req)}
+                          className="flex-1 py-2.5 bg-rose-50 text-rose-600 border border-rose-100 rounded-xl font-black text-sm hover:bg-rose-100 transition-all flex items-center justify-center gap-1.5"
+                        >
+                          <ShieldAlert size={16} /> 否決
+                        </button>
+                      </div>
+                    )}
+                  </div>
                   </div>
 
                   {/* 班別失效警示 */}
@@ -1997,24 +2067,38 @@ const handleSwapBack = () => {
 };
 
 const handleRecordAction = (req, action) => {
-  const unlockDate = (empId, dateToRemove) => {
+  // 💡 修正 1：升級 unlockDate，讓它能同時解鎖名單內的所有人
+  const unlockDate = (participants, dateToRemove) => {
+    // 取得所有人的 ID 名單
+    const participantIds = participants ? participants.map(p => p.id) : [req.creatorId, req.targetId];
+    
     const nextEmployees = employees.map(e => {
-      if (e.id === empId) {
+      if (participantIds.includes(e.id)) {
         const currentDates = e.applyingDates || [];
         return { ...e, applyingDates: currentDates.filter(d => d !== dateToRemove) };
       }
       return e;
     });
     setEmployees(nextEmployees);
+
+    // 💡 同步更新 currentUser (如果目前登入者就在解鎖名單中)
+    if (currentUser && participantIds.includes(currentUser.id)) {
+      setCurrentUser(prev => ({
+        ...prev,
+        applyingDates: (prev.applyingDates || []).filter(d => d !== dateToRemove)
+      }));
+    }
     return nextEmployees;
   };
 
   if (action === 'Approve') {
-    if (req.status === 'PendingTarget') {
+    // 💡 情況 A：同仁全員簽完，轉 PendingAdmin (對齊你原本的邏輯)
+    if (req.status === 'WaitingParticipants') {
       const nextRequests = swapRequests.map(r => r.id === req.id ? { ...r, status: 'PendingAdmin' } : r);
       setSwapRequests(nextRequests);
       saveData({ swapRequests: nextRequests });
     } 
+    // 💡 情況 B：組長核定 Approved
     else if (req.status === 'PendingAdmin') {
       const nextStatus = 'Approved';
       const ns = deepClone(schedule);
@@ -2032,31 +2116,45 @@ const handleRecordAction = (req, action) => {
       });
 
       const nextRequests = swapRequests.map(r => r.id === req.id ? { ...r, status: nextStatus } : r);
-      const nextEmps = unlockDate(req.creatorId, req.date);
+      
+      // 💡 修正 2：傳入 participants 陣列，解鎖所有人
+      const nextEmps = unlockDate(req.participants, req.date);
 
       setSchedule(ns);
       setSwapRequests(nextRequests);
       saveData({ schedule: ns, swapRequests: nextRequests, employees: nextEmps });
     }
   } 
-  else if (action === 'Reject' || action === 'Delete') {
-    const nextRequests = (action === 'Delete') 
-      ? swapRequests.filter(r => r.id !== req.id)
-      : swapRequests.map(r => r.id === req.id ? { ...r, status: 'Rejected' } : r);
+      
+      else if (action === 'Reject' || action === 'Delete') {
+        const nextRequests = (action === 'Delete') 
+          ? swapRequests.filter(r => r.id !== req.id)
+          : swapRequests.map(r => r.id === req.id ? { ...r, status: 'Rejected' } : r);
 
-    const nextEmps = unlockDate(req.creatorId, req.date);
+        // 💡 修正點：確保取得所有相關人員 ID
+        const participantsToUnlock = req.participants 
+          ? req.participants.map(p => p.id) 
+          : [req.creatorId, req.targetId];
+        
+        const targetDate = req.date;
 
-    setSwapRequests(nextRequests);
-    saveData({ swapRequests: nextRequests, employees: nextEmps });
+        const nextEmps = employees.map(e => {
+          if (participantsToUnlock.includes(e.id)) {
+            const currentDates = e.applyingDates || [];
+            return { ...e, applyingDates: currentDates.filter(d => d !== targetDate) };
+          }
+          return e;
+        });
 
-    if (currentUser && req.creatorId === currentUser.id) {
-      setCurrentUser(prev => ({
-        ...prev,
-        applyingDates: (prev.applyingDates || []).filter(d => d !== req.date)
-      }));
-    }
-  }
-}; 
+        setEmployees(nextEmps);
+        setSwapRequests(nextRequests);
+        saveData({ swapRequests: nextRequests, employees: nextEmps });
+
+        // 同步更新目前登入者狀態
+        const updatedMe = nextEmps.find(e => e.id === currentUser.id);
+        if (updatedMe) setCurrentUser(updatedMe);
+      }
+    };
 
 // 💡 在 main 組件內部的 handle 函式區域新增
 const handleParticipantApprove = (reqId) => {
@@ -2075,8 +2173,8 @@ const handleParticipantApprove = (reqId) => {
       return {
         ...req,
         approvals: nextApprovals,
-        // 💡 如果全員簽完，狀態轉為 'Pending' 送交主管
-        status: allOthersApproved ? 'Pending' : 'WaitingParticipants'
+        // 💡 如果全員簽完，狀態轉為 'PendingAdmin' 送交主管
+        status: allOthersApproved ? 'PendingAdmin' : 'WaitingParticipants'
       };
     }
     return req;
@@ -2103,7 +2201,7 @@ const handleParticipantApprove = (reqId) => {
             case 'account': return <AccountManagementView employees={employees} setEmployees={(val) => { setEmployees(val); saveData({ employees: val });}} setDeleteTarget={setDeleteTarget} />;
             case 'shifts': return <ShiftsManagementView shifts={shifts} setShifts={(val) => { setShifts(val); saveData({ shifts: val }); }}  holidays={holidays} setHolidays={(val) => { setHolidays(val); saveData({ holidays: val }); }}  setDeleteShiftTarget={setDeleteShiftTarget} personDayRules={personDayRules}  setPersonDayRules={(val) => { setPersonDayRules(val); saveData({ personDayRules: val }); }} />;
             case 'swap': return <ScheduleTableView currentMonth={currentMonth} employees={employees} schedule={schedule} cellColors={cellColors} daysInMonth={daysInMonth} onCellClick={handleSwapApply} swapRequests={swapRequests} currentPage={currentPage} currentUser={currentUser} swapTarget={swapTarget} handleSwapBack={handleSwapBack} isCycleEnd={isCycleEnd}/>;
-            case 'records': return <RecordsView currentUser={currentUser} swapRequests={swapRequests} onAction={handleRecordAction} onApprove={handleParticipantApprove} schedule={schedule} currentMonth={currentMonth} />;
+            case 'records': return <RecordsView currentUser={currentUser} swapRequests={swapRequests} onAction={handleRecordAction} onApprove={handleParticipantApprove} setRejectingReq={setRejectingReq} schedule={schedule} currentMonth={currentMonth} />;
             case 'leave':  return  <PreLeaveView currentMonth={currentMonth} employees={employees} daysInMonth={daysInMonth} currentUser={currentUser} schedule={schedule} setSchedule={(val) => { setSchedule(val); saveData({ schedule: val }); }} preLeaveData={preLeaveData} setPreLeaveData={(val) => { setPreLeaveData(val); saveData({ preLeaveData: val }); }}   saveData={saveData} />;
             case 'schedule': return <SchedulingView currentMonth={currentMonth} employees={employees} daysInMonth={daysInMonth} schedule={schedule} setSchedule={setSchedule} cellColors={cellColors} setCellColors={setCellColors} shifts={shifts} exportScheduleCSV={exportScheduleCSV} setCurrentPage={setCurrentPage} setIsDirty={setIsDirty} saveData={saveData} /> ;
             case 'report': return <ManagementReportView currentMonth={currentMonth} employees={employees} schedule={schedule} personDayRules={personDayRules} holidays={holidays} shifts={shifts} />;
@@ -2187,7 +2285,51 @@ const handleParticipantApprove = (reqId) => {
         }}
       />
       {/* 以下 Modal 維持不變 */}
-      <Modal isOpen={!!rejectingReq} onClose={()=>setRejectingReq(null)} onConfirm={()=>{ const nextRequests = swapRequests.map(r => r.id === rejectingReq.id ? { ...r, status: 'Rejected', adminNote: rejectNote || "管理員否決" } : r); setSwapRequests(nextRequests); saveData({ swapRequests: nextRequests }); setRejectNote(""); setRejectingReq(null); }} title="否決換班申請" confirmText="確認否決"><textarea className="w-full border-2 rounded-2xl p-3 text-sm outline-none" placeholder="原因..." rows={3} value={rejectNote} onChange={(e) => setRejectNote(e.target.value)} /></Modal>
+      <Modal 
+        isOpen={!!rejectingReq} 
+        onClose={()=>setRejectingReq(null)} 
+        onConfirm={()=>{ 
+          // 1. 更新單據狀態為被主管拒絕 (Rejected)
+          const nextRequests = swapRequests.map(r => r.id === rejectingReq.id ? { ...r, status: 'Rejected', adminNote: rejectNote || "管理員否決" } : r);
+          
+          // 2. 💡 補上解鎖邏輯：找出這張單子的所有人與日期
+          const participantsToUnlock = rejectingReq.participants 
+            ? rejectingReq.participants.map(p => p.id) 
+            : [rejectingReq.creatorId, rejectingReq.targetId];
+          
+          const targetDate = rejectingReq.date;
+
+          // 3. 💡 產出解鎖後的全新 employees 陣列
+          const nextEmps = employees.map(e => {
+            if (participantsToUnlock.includes(e.id)) {
+              const currentDates = e.applyingDates || [];
+              return { ...e, applyingDates: currentDates.filter(d => d !== targetDate) };
+            }
+            return e;
+          });
+
+          // 4. 同步更新所有狀態
+          setSwapRequests(nextRequests);
+          setEmployees(nextEmps); // 🔥 確保管理員點選時也更新全域同仁狀態
+
+          // 5. 同步更新目前登入者狀態（如果管理員自己也在換班名單內）
+          if (currentUser && participantsToUnlock.includes(currentUser.id)) {
+            setCurrentUser(prev => ({
+              ...prev,
+              applyingDates: (prev.applyingDates || []).filter(d => d !== targetDate)
+            }));
+          }
+
+          // 6. 寫入資料庫並關閉視窗
+          saveData({ swapRequests: nextRequests, employees: nextEmps }); // 🔥 這裡一定要把解鎖後的 nextEmps 存進去
+          setRejectNote(""); 
+          setRejectingReq(null); 
+        }} 
+        title="否決換班申請" 
+        confirmText="確認否決"
+      >
+        <textarea className="w-full border-2 rounded-2xl p-3 text-sm outline-none" placeholder="原因..." rows={3} value={rejectNote} onChange={(e) => setRejectNote(e.target.value)} />
+      </Modal>
       <Modal isOpen={!!deleteTarget} onClose={()=>setDeleteTarget(null)} onConfirm={()=>{const next = employees.filter(e=>e.id!==deleteTarget.id); setEmployees(next); saveData({ employees: next }); setDeleteTarget(null)}} title="確定刪除人員？" message="移除該人員將影響本期報表。" />
       <Modal isOpen={!!deleteShiftTarget} onClose={()=>setDeleteShiftTarget(null)} onConfirm={()=>{const next = shifts.filter(s=>s.id!==deleteShiftTarget.id); setShifts(next); saveData({ shifts: next }); setDeleteShiftTarget(null)}} title="確定刪除班別？" message={`移除 ${deleteShiftTarget?.name}。`} />    </div>
   );
