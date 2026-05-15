@@ -417,6 +417,42 @@ return (
   const isAdmin = currentUser?.role === '0';
   const isMonthDrawn = (preLeaveData.drawnMonths || []).includes(currentMonth);
 
+  // 自動抽籤檢查器
+  useEffect(() => {
+    // 沒登入或還沒載入好預假資料就先不執行
+    if (!currentUser || !preLeaveData) return;
+
+    const handleAutoLotteryCheck = async () => {
+      try {
+        const now = Date.now(); // 取得當前時間毫秒數
+        
+        // 完全使用妳組件內部既有的定義：
+        // 1. 抽籤日綁定 preLeaveData.lotteryDay
+        const targetDay = preLeaveData.lotteryDay || 15;
+        
+        // 2. 根據當前選定的月份計算截止時間 (每月 X 號 00:00:00)
+        const [year, month] = currentMonth.split('-');
+        const targetDrawDate = new Date(parseInt(year), parseInt(month) - 1, targetDay, 0, 0, 0);
+        const drawTimeTimestamp = targetDrawDate.getTime();
+
+        // 3. 核心判定：如果「本月尚未抽籤(!isMonthDrawn)」且「目前時間已過設定的 0:00 截止點」
+        if (!isMonthDrawn && now >= drawTimeTimestamp) {
+          console.log(`⏰ 偵測到時間已過截止點 (${targetDrawDate.toLocaleString()})，子系統自動執行預假抽籤...`);
+          
+          // 4. 完美呼叫組件內原本就有的 handleLottery 函數
+          if (typeof handleLottery === 'function') {
+            await handleLottery({ isAuto: true });
+            console.log("🎉 自動抽籤執行成功！");
+          }
+        }
+      } catch (error) {
+        console.error("自動抽籤背景執行失敗：", error);
+      }
+    };
+
+    handleAutoLotteryCheck();
+  }, [currentMonth, preLeaveData, isMonthDrawn, currentUser]); // 精確監聽子組件內的狀態
+
 useEffect(() => {
     if (!schedule[currentMonth]) return;
     let changed = false;
@@ -487,8 +523,18 @@ const handleAdminSettingChange = (type, value) => {
 };
 
 
-  const handleLottery = () => {
+  //支援手動與自動抽籤判斷的 handleLottery
+  const handleLottery = async (e) => {
     if (isMonthDrawn) return;
+
+    // 1️⃣ 💡 檢查這個觸發是不是來自於自動抽籤
+    const isAuto = e && e.isAuto;
+
+    if (!isAuto) {
+      // 如果不是自動觸發（代表是管理員手動按下「立即手動抽籤」按鈕），才跳出確認詢問視窗
+      const confirmDraw = window.confirm("確定要立即手動抽籤嗎？抽籤後將會鎖定本月班表。");
+      if (!confirmDraw) return;
+    }
     const nextSched = deepClone(schedule);
     if (!nextSched[currentMonth]) nextSched[currentMonth] = {};
 
@@ -1974,7 +2020,7 @@ const App = () => {
 
     return () => unsubData();
   }, [appId]);
-  
+    
   const daysInMonth = useMemo(() => {
     const [year, month] = currentMonth.split('-').map(Number);
     const date = new Date(year, month, 0); const days = [];
