@@ -690,6 +690,23 @@ const RecordsView = ({ currentUser, swapRequests, onAction, onApprove, setReject
   const [confirmModal, setConfirmModal] = useState({ isOpen: false, req: null, action: '' });
   const isAdmin = currentUser?.role === '0';
 
+// 💡 補在這邊：安全的時間格式化工具，防止出現 Invalid Date
+  const formatSafeDate = (timestamp) => {
+    if (!timestamp) return "未知時間";
+    // 如果本來就是數字（毫秒數）
+    if (typeof timestamp === 'number') return new Date(timestamp).toLocaleString();
+    // 如果是 Firebase Timestamp 物件
+    if (timestamp && typeof timestamp === 'object' && timestamp.seconds) {
+      return new Date(timestamp.seconds * 1000).toLocaleString();
+    }
+    // 如果是常規字串，先嘗試直接解析
+    const parsed = new Date(timestamp);
+    if (!isNaN(parsed.getTime())) return parsed.toLocaleString();
+    
+    // 萬一字串裡包含以前存進去的 "下午..." 等包含中文字的格式，直接回傳原字串（它本身已經是可讀時間）
+    return String(timestamp);
+  };
+
   const pendingList = useMemo(() => {
       return swapRequests.filter(req => {
         // 判斷是否已結案 (過濾掉已核定、否決或撤回的)
@@ -839,7 +856,7 @@ const RecordsView = ({ currentUser, swapRequests, onAction, onApprove, setReject
                       <span className="font-black text-indigo-600 text-lg">{req.isBundle ? `${req.startDate}~${req.endDate}` : req.date}</span>
                       {req.isBundle && <span className="text-[10px] bg-yellow-100 text-yellow-700 px-2 py-0.5 rounded-lg font-black uppercase">整段</span>}
                     </div>
-                    <span className="text-[10px] text-gray-400 font-bold bg-gray-50 px-2 py-1 rounded-lg">🕒 {new Date(req.timestamp).toLocaleString()}</span>
+                  <span className="text-[10px] text-gray-400 font-bold bg-gray-50 px-2 py-1 rounded-lg">🕒 {formatSafeDate(req.timestamp)}</span>
                   </div>
 
                   {/* 核心修正：多人連鎖明細區 (對應需求 4) */}
@@ -993,7 +1010,7 @@ const RecordsView = ({ currentUser, swapRequests, onAction, onApprove, setReject
                     <tr key={req.id} className="hover:bg-gray-50/50 transition-colors">
                       <td className="p-4">
                         <div className="font-black text-gray-700">{req.isBundle ? `${req.startDate}~${req.endDate}` : req.date}</div>
-                        <div className="text-[9px] text-gray-400">申請: {new Date(req.timestamp).toLocaleDateString()}</div>
+                        <div className="text-[9px] text-gray-400">申請: {formatSafeDate(req.timestamp).split(' ')[0]}</div>
                       </td>
                       <td className="p-4 font-bold text-gray-700">
                         {req.participants ? (
@@ -1016,9 +1033,21 @@ const RecordsView = ({ currentUser, swapRequests, onAction, onApprove, setReject
                         )}
                       </td>
                       <td className="p-4 text-center">
-                        <span className={`px-2.5 py-1 rounded-full text-[10px] font-black shadow-sm ${req.status==='Approved'?'bg-green-100 text-green-600':req.status==='Rejected'?'bg-red-50 text-red-600':'bg-gray-100 text-gray-400'}`}>
-                          {req.status==='Approved'?'已完成':req.status==='Rejected'?'已否決':'已撤回'}
-                        </span>
+                        <div className="flex flex-col items-center gap-1">
+                          <span className={`px-2.5 py-1 rounded-full text-[10px] font-black shadow-sm ${req.status==='Approved'?'bg-green-100 text-green-600':req.status==='Rejected'?'bg-red-50 text-red-600':'bg-gray-100 text-gray-400'}`}>
+                            {req.status==='Approved'?'已完成':req.status==='Rejected'?'已否決':'已撤回'}
+                          </span>
+                          
+                          {/* 💡 新增：若有否決原因，顯示極簡點擊展開查看 */}
+                          {req.status === 'Rejected' && req.adminNote && (
+                            <details className="text-[10px] text-left max-w-[150px] cursor-pointer mt-1">
+                              <summary className="text-gray-400 font-bold hover:text-red-500 transition-colors select-none">查看原因</summary>
+                              <div className="bg-red-50 text-red-700 p-2 rounded-lg mt-1 border border-red-100 font-medium break-words leading-tight">
+                                {req.adminNote}
+                              </div>
+                            </details>
+                          )}
+                        </div>
                       </td>
                     </tr>
                   ))}
@@ -2100,9 +2129,40 @@ const handleRecordAction = (req, action) => {
     } 
     // 💡 情況 B：組長核定 Approved
     else if (req.status === 'PendingAdmin') {
+      const targetMonthKey = req.date ? req.date.substring(0, 7) : currentMonth;
+      
+      // 💡 1. 這是新加入的檢核功能（加在最前面當攔截器）
+      let isAllShiftsValid = true;
+      let errorMsg = "";
+
+      if (req.participants) {
+        req.participants.forEach(p => {
+          // 抓取目前 schedule 中，該月份、該同仁、該日期的最新班別
+          const currentSystemShift = schedule[targetMonthKey]?.[p.name]?.[req.day || req.startDate.split('-')[2]];
+          
+          const normalize = (v) => {
+            const s = (v === null || v === undefined) ? "-" : String(v).trim();
+            return (s === "" || s === "-") ? "-" : s;
+          };
+          const clean = (val) => val.replace(/#|\(國\)/g, '');
+
+          // 比較系統班別是否跟紀錄上的 oldShift 一致
+          if (clean(normalize(currentSystemShift)) !== clean(normalize(p.oldShift))) {
+            isAllShiftsValid = false;
+            errorMsg += `${p.name} 的班別已變更（目前系統：${normalize(currentSystemShift)}，紀錄：${p.oldShift}）\n`;
+          }
+        });
+      }
+
+      // 如果有任何人的班別對不上一致，直接彈出警告並 return 中斷，不往下執行
+      if (!isAllShiftsValid) {
+        alert(`無法核定換班！\n${errorMsg}請組長再次確認最新的班表狀態。`);
+        return; 
+      }
+
+      // 💡 2. 檢核通過！以下完全保留你原本的核心對調與產生新班表程式碼
       const nextStatus = 'Approved';
       const ns = deepClone(schedule);
-      const targetMonthKey = req.date ? req.date.substring(0, 7) : currentMonth;
       
       if (!ns[targetMonthKey]) ns[targetMonthKey] = {};
       
