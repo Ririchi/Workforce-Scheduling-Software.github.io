@@ -228,12 +228,26 @@ const SwapRequestModal = ({ isOpen, onClose, onConfirm, data, setIsModalOpen, ha
 const Header = ({ currentMonth, setCurrentMonth, currentPage, handlePageChange, isLoggedIn, currentUser, handleLogout, exportScheduleCSV, swapRequests }) => {
   const isAdmin = currentUser?.role === '0';
   const hasPending = useMemo(() => {
-    if (!isLoggedIn || !currentUser) return false;
-    return swapRequests.some(req => {
-      if (isAdmin) return req.status === 'PendingAdmin';
-      return (req.targetId === currentUser.id && req.status === 'PendingTarget');
-    });
-  }, [swapRequests, isLoggedIn, currentUser, isAdmin]);
+      if (!isLoggedIn || !currentUser) return false;
+      
+      return swapRequests.some(req => {
+        // 💡 條件 A：做為主管身分（組長）需要核定的紅點
+        // 當單據已經到同仁全員簽完（PendingAdmin），且我是管理員時，亮紅點
+        const adminNotice = isAdmin && req.status === 'PendingAdmin';
+
+        // 💡 條件 B：做為同仁身分（自己參與了換班）需要簽核的紅點
+        // 不管我是不是主管，只要「我」被拉進換班名單內（req.participants）、我不是發起人、
+        // 且單據在 WaitingParticipants 階段、我還沒簽完（Pending），我就應該看到紅點！
+        const participantNotice = 
+          req.status === 'WaitingParticipants' &&
+          req.participants?.some(p => p.id === currentUser.id) &&
+          req.creatorId !== currentUser.id &&
+          req.approvals?.find(a => a.id === currentUser.id)?.status === 'Pending';
+
+        // 💡 只要符合「主管待審核」或「自己需要簽核」任意一個條件，就亮紅點
+        return adminNotice || participantNotice;
+      });
+    }, [swapRequests, isLoggedIn, currentUser, isAdmin]);
 
   return (
     <header className="bg-white border-b-2 border-gray-800 p-2 sm:p-3 sticky top-0 z-[100] shadow-md">
@@ -691,22 +705,46 @@ const RecordsView = ({ currentUser, swapRequests, onAction, onApprove, setReject
   const isAdmin = currentUser?.role === '0';
 
 // 💡 補在這邊：安全的時間格式化工具，防止出現 Invalid Date
-  const formatSafeDate = (timestamp) => {
-    if (!timestamp) return "未知時間";
-    // 如果本來就是數字（毫秒數）
-    if (typeof timestamp === 'number') return new Date(timestamp).toLocaleString();
-    // 如果是 Firebase Timestamp 物件
-    if (timestamp && typeof timestamp === 'object' && timestamp.seconds) {
-      return new Date(timestamp.seconds * 1000).toLocaleString();
+// 💡 終極相容版：徹底掃描物件中所有可能的時間欄位
+  const formatSafeDate = (req) => {
+    if (!req) return "未知時間";
+    
+    // 1. 自動偵測物件中所有可能存放時間的變數名稱（相容各種大小寫與拼法）
+    const ts = req.timestamp || 
+               req.timeStamp || 
+               req.time || 
+               req.createdAt || 
+               req.date; // 萬一時間被存在 date 欄位
+               
+    if (!ts) {
+      // 2. 防呆：如果第一層沒找到，直接看看 req 物件有沒有內建 toDate 屬性 (Firebase 原生)
+      if (typeof req.toDate === 'function') return req.toDate().toLocaleString();
+      return "未知時間";
     }
-    // 如果是常規字串，先嘗試直接解析
-    const parsed = new Date(timestamp);
+
+    // 情況 A：如果是數字 (毫秒數，如 Date.now())
+    if (typeof ts === 'number') return new Date(ts).toLocaleString();
+    
+    // 情況 B：如果是 Firebase Timestamp 物件 (含有 seconds 屬性)
+    if (typeof ts === 'object' && ts.seconds) {
+      return new Date(ts.seconds * 1000).toLocaleString();
+    }
+
+    // 情況 C：如果是 Firestore 原生帶有 toDate 函式的物件
+    if (typeof ts === 'object' && typeof ts.toDate === 'function') {
+      return ts.toDate().toLocaleString();
+    }
+    
+    // 情況 D：如果是常規時間字串 (如 "2026-05-15T14:20:00")
+    const parsed = new Date(ts);
     if (!isNaN(parsed.getTime())) return parsed.toLocaleString();
     
-    // 萬一字串裡包含以前存進去的 "下午..." 等包含中文字的格式，直接回傳原字串（它本身已經是可讀時間）
-    return String(timestamp);
+    // 情況 E：萬一原本存進去的就是已經格式化好的中文字串 (如 "2026/5/15 下午 9:56:23")
+    if (typeof ts === 'string' && ts.trim() !== "") return ts;
+    
+    return "未知時間";
   };
-
+    
   const pendingList = useMemo(() => {
       return swapRequests.filter(req => {
         // 判斷是否已結案 (過濾掉已核定、否決或撤回的)
@@ -856,7 +894,7 @@ const RecordsView = ({ currentUser, swapRequests, onAction, onApprove, setReject
                       <span className="font-black text-indigo-600 text-lg">{req.isBundle ? `${req.startDate}~${req.endDate}` : req.date}</span>
                       {req.isBundle && <span className="text-[10px] bg-yellow-100 text-yellow-700 px-2 py-0.5 rounded-lg font-black uppercase">整段</span>}
                     </div>
-                  <span className="text-[10px] text-gray-400 font-bold bg-gray-50 px-2 py-1 rounded-lg">🕒 {formatSafeDate(req.timestamp)}</span>
+                  <span className="text-[10px] text-gray-400 font-bold bg-gray-50 px-2 py-1 rounded-lg">🕒 {formatSafeDate(req)}</span>
                   </div>
 
                   {/* 核心修正：多人連鎖明細區 (對應需求 4) */}
@@ -924,27 +962,26 @@ const RecordsView = ({ currentUser, swapRequests, onAction, onApprove, setReject
                     <StatusProgress req={req}/>
                     
                     {/* 💡 修改點：這是位於 RecordsView 內部的操作按鈕區塊 */}
-                  <div className="flex gap-2 pt-2 border-t border-dashed border-gray-100">
+                  <div className="flex flex-wrap gap-2 pt-2 border-t border-dashed border-gray-100 w-full">
                     
                     {/* 情況 A：參與者操作 (同仁簽核) */}
                     {req.status === 'WaitingParticipants' && 
                     req.participants?.some(p => p.id === currentUser.id) && 
                     req.creatorId !== currentUser.id &&
                     req.approvals?.find(a => a.id === currentUser.id)?.status === 'Pending' && (
-                      <div className="flex gap-2 w-full">
+                      <div className="flex flex-row flex-wrap gap-2 w-full">
                         <button
                           onClick={() => onApprove(req.id)}
-                          className="flex-1 py-2.5 bg-green-500 text-white rounded-xl font-black text-sm shadow-md hover:bg-green-600 transition-all flex items-center justify-center gap-1.5"
+                          className="flex-1 min-w-[120px] py-2 px-3 bg-green-500 text-white rounded-xl font-black text-xs md:text-sm shadow-md hover:bg-green-600 transition-all flex items-center justify-center gap-1.5 whitespace-nowrap"
                         >
-                          <CheckCircle2 size={16} /> 核定換班
+                          <CheckCircle2 size={14} /> 核定換班
                         </button>
                         
-                        {/* 💡 新增：同仁也可以否決 (作廢整張單子) */}
                         <button
                           onClick={() => triggerAction(req, 'Reject')} 
-                          className="flex-1 py-2.5 bg-rose-50 text-rose-600 border border-rose-100 rounded-xl font-black text-sm hover:bg-rose-100 transition-all flex items-center justify-center gap-1.5"
+                          className="flex-1 min-w-[80px] py-2 px-3 bg-rose-50 text-rose-600 border border-rose-100 rounded-xl font-black text-xs md:text-sm hover:bg-rose-100 transition-all flex items-center justify-center gap-1.5 whitespace-nowrap"
                         >
-                          <ShieldAlert size={16} /> 否決
+                          <ShieldAlert size={14} /> 否決
                         </button>
                       </div>
                     )}
@@ -953,26 +990,26 @@ const RecordsView = ({ currentUser, swapRequests, onAction, onApprove, setReject
                     {req.creatorId === currentUser.id && (req.status === 'WaitingParticipants' || req.status === 'PendingAdmin') && (
                       <button
                         onClick={() => triggerAction(req, 'Delete')}
-                        className="flex-1 py-2.5 bg-gray-100 text-gray-500 rounded-xl font-black text-sm hover:bg-gray-200 transition-all flex items-center justify-center gap-1.5"
+                        className="w-full py-2 px-3 bg-gray-100 text-gray-500 rounded-xl font-black text-xs md:text-sm hover:bg-gray-200 transition-all flex items-center justify-center gap-1.5 whitespace-nowrap"
                       >
-                        <Undo2 size={16} /> 撤回申請
+                        <Undo2 size={14} /> 撤回申請
                       </button>
                     )}
 
-                    {/* 情況 C：組長(主管)核定 (當狀態變為 PendingAdmin 時顯示) */}
+                    {/* 情況 C：管理員(組長)核定 */}
                     {isAdmin && req.status === 'PendingAdmin' && (
-                      <div className="flex gap-2 w-full">
+                      <div className="flex flex-row flex-wrap gap-2 w-full">
                         <button
                           onClick={() => onAction(req, 'Approve')} 
-                          className="flex-1 py-2.5 bg-indigo-600 text-white rounded-xl font-black text-sm shadow-md hover:bg-indigo-700 transition-all flex items-center justify-center gap-1.5"
+                          className="flex-1 min-w-[120px] py-2 px-3 bg-indigo-600 text-white rounded-xl font-black text-xs md:text-sm shadow-md hover:bg-indigo-700 transition-all flex items-center justify-center gap-1.5 whitespace-nowrap"
                         >
-                          <ShieldCheck size={16} /> 組長核定
+                          <ShieldCheck size={14} /> 組長核定
                         </button>
                         <button
                           onClick={() => setRejectingReq(req)}
-                          className="flex-1 py-2.5 bg-rose-50 text-rose-600 border border-rose-100 rounded-xl font-black text-sm hover:bg-rose-100 transition-all flex items-center justify-center gap-1.5"
+                          className="flex-1 min-w-[80px] py-2 px-3 bg-rose-50 text-rose-600 border border-rose-100 rounded-xl font-black text-xs md:text-sm hover:bg-rose-100 transition-all flex items-center justify-center gap-1.5 whitespace-nowrap"
                         >
-                          <ShieldAlert size={16} /> 否決
+                          <ShieldAlert size={14} /> 否決
                         </button>
                       </div>
                     )}
@@ -1010,7 +1047,7 @@ const RecordsView = ({ currentUser, swapRequests, onAction, onApprove, setReject
                     <tr key={req.id} className="hover:bg-gray-50/50 transition-colors">
                       <td className="p-4">
                         <div className="font-black text-gray-700">{req.isBundle ? `${req.startDate}~${req.endDate}` : req.date}</div>
-                        <div className="text-[9px] text-gray-400">申請: {formatSafeDate(req.timestamp).split(' ')[0]}</div>
+                        <div className="text-[9px] text-gray-400">申請: {formatSafeDate(req).includes(' ') ? formatSafeDate(req).split(' ')[0] : formatSafeDate(req)}</div>
                       </td>
                       <td className="p-4 font-bold text-gray-700">
                         {req.participants ? (
@@ -2131,14 +2168,19 @@ const handleRecordAction = (req, action) => {
     else if (req.status === 'PendingAdmin') {
       const targetMonthKey = req.date ? req.date.substring(0, 7) : currentMonth;
       
-      // 💡 1. 這是新加入的檢核功能（加在最前面當攔截器）
+      // 💡 1. 修正：精確抓取「首頁班表(schedule)」的確切日期進行核對
       let isAllShiftsValid = true;
       let errorMsg = "";
 
       if (req.participants) {
         req.participants.forEach(p => {
-          // 抓取目前 schedule 中，該月份、該同仁、該日期的最新班別
-          const currentSystemShift = schedule[targetMonthKey]?.[p.name]?.[req.day || req.startDate.split('-')[2]];
+          // 修正：精確取得該同仁換班的「那一天」(優先使用 p.day，再用 req.day 或 req.startDate)
+          const exactDay = p.day || req.day || (req.startDate ? req.startDate.split('-')[2] : null);
+          
+          if (!exactDay) return;
+
+          // 從首頁的最新班表資料 (schedule) 中抓取當前班別
+          const currentSystemShift = schedule[targetMonthKey]?.[p.name]?.[Number(exactDay)];
           
           const normalize = (v) => {
             const s = (v === null || v === undefined) ? "-" : String(v).trim();
@@ -2146,21 +2188,23 @@ const handleRecordAction = (req, action) => {
           };
           const clean = (val) => val.replace(/#|\(國\)/g, '');
 
-          // 比較系統班別是否跟紀錄上的 oldShift 一致
+          // 比對最新首頁班表與申請時的舊班別
           if (clean(normalize(currentSystemShift)) !== clean(normalize(p.oldShift))) {
             isAllShiftsValid = false;
-            errorMsg += `${p.name} 的班別已變更（目前系統：${normalize(currentSystemShift)}，紀錄：${p.oldShift}）\n`;
+            errorMsg += `【${p.name}】的班別不符（目前首頁：${normalize(currentSystemShift)}，紀錄：${p.oldShift}）\n`;
           }
         });
       }
 
-      // 如果有任何人的班別對不上一致，直接彈出警告並 return 中斷，不往下執行
+      // 班別不符則攔截
       if (!isAllShiftsValid) {
-        alert(`無法核定換班！\n${errorMsg}請組長再次確認最新的班表狀態。`);
+        alert(`無法核定換班！\n\n${errorMsg}\n請組長再次確認「首頁」目前的最新班表。`);
         return; 
       }
 
-      // 💡 2. 檢核通過！以下完全保留你原本的核心對調與產生新班表程式碼
+      // ========================================================
+      // 2. 檢核通過！以下維持您原本的核心對調與產生新班表程式碼
+      // ========================================================
       const nextStatus = 'Approved';
       const ns = deepClone(schedule);
       
