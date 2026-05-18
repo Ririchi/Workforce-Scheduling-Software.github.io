@@ -517,7 +517,7 @@ const getLeaveList = (day) => {
     const blob = new Blob([csv], { type: 'text/csv;charset=utf-8;' });
     const link = document.createElement("a");
     link.href = URL.createObjectURL(blob);
-    link.download = `預假橫式備份_${currentMonth}.csv`;
+    link.download = `抽籤結果_${currentMonth}.csv`;
     link.click();
   };
   
