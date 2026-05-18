@@ -417,7 +417,9 @@ return (
   const isAdmin = currentUser?.role === '0';
   const isMonthDrawn = (preLeaveData.drawnMonths || []).includes(currentMonth);
 
-  // 自動抽籤檢查器
+// ========================================================
+  // 💡 完美修正：對齊「每月 X 號 00:00 抽出下個月預假結果」的月份邏輯
+  // ========================================================
   useEffect(() => {
     // 沒登入或還沒載入好預假資料就先不執行
     if (!currentUser || !preLeaveData) return;
@@ -426,33 +428,38 @@ return (
       try {
         const now = Date.now(); // 取得當前時間毫秒數
         
-        // 完全使用妳組件內部既有的定義：
-        // 1. 抽籤日綁定 preLeaveData.lotteryDay
+        // 1. 抽籤日綁定 preLeaveData.lotteryDay (例如：15)
         const targetDay = preLeaveData.lotteryDay || 15;
         
-        // 2. 根據當前選定的月份計算截止時間 (每月 X 號 00:00:00)
-        const [year, month] = currentMonth.split('-');
-        const targetDrawDate = new Date(parseInt(year), parseInt(month) - 1, targetDay, 0, 0, 0);
-        const drawTimeTimestamp = targetDrawDate.getTime();
+        // 2. 💡 關鍵修正：currentMonth 是同仁當前畫面切換到、準備要抽籤的「目標月份」（例如 "2026-06"）
+        const [yearStr, monthStr] = currentMonth.split('-');
+        const targetYear = parseInt(yearStr);
+        const targetMonthNum = parseInt(monthStr); // 目標月份，例如 6
 
-        // 3. 核心判定：如果「本月尚未抽籤(!isMonthDrawn)」且「目前時間已過設定的 0:00 截止點」
+        // 3. 💡 往前推算「應該要執行抽籤的時間點」
+        // JS Date 的月份是 0~11 (0代表1月)。目標月份減 1 是它的 JS 月份，再減 1 就是「前一個月」
+        // 例如：目標 6 月 (JS 為 5)，計算出來的執行點就會精確落在 5 月的 targetDay 00:00:00
+        const executionDate = new Date(targetYear, targetMonthNum - 2, targetDay, 0, 0, 0);
+        const drawTimeTimestamp = executionDate.getTime();
+
+        // 4. 核心判定：如果「該目標月份尚未抽籤(!isMonthDrawn)」且「目前時間已過設定的執行時間」
         if (!isMonthDrawn && now >= drawTimeTimestamp) {
-          console.log(`⏰ 偵測到時間已過截止點 (${targetDrawDate.toLocaleString()})，子系統自動執行預假抽籤...`);
+          console.log(`⏰ 偵測到時間已過截止點 (${executionDate.toLocaleString()})，系統自動為 ${currentMonth} 月份執行預假抽籤...`);
           
-          // 4. 完美呼叫組件內原本就有的 handleLottery 函數
+          // 5. 完美呼叫組件內原本就有的 handleLottery 函數
           if (typeof handleLottery === 'function') {
             await handleLottery({ isAuto: true });
-            console.log("🎉 自動抽籤執行成功！");
+            console.log(`🎉 ${currentMonth} 月份自動抽籤執行並存檔成功！`);
           }
         }
       } catch (error) {
-        console.error("自動抽籤背景執行失敗：", error);
+        console.error("自動抽籤月份邏輯計算或執行失敗：", error);
       }
     };
 
     handleAutoLotteryCheck();
   }, [currentMonth, preLeaveData, isMonthDrawn, currentUser]); // 精確監聽子組件內的狀態
-
+  
 useEffect(() => {
     if (!schedule[currentMonth]) return;
     let changed = false;
@@ -1407,129 +1414,165 @@ const ShiftsManagementView = ({ shifts, setShifts, holidays, setHolidays, setDel
   };
 
   return (
-    <div className="p-4 max-w-full lg:max-w-7xl mx-auto grid grid-cols-1 lg:grid-cols-2 gap-6 font-sans text-sm">
-      <div className="bg-white p-6 rounded-3xl shadow border flex flex-col">
-        <h2 className="text-lg font-black mb-4 text-gray-800 flex items-center gap-2"><CalendarRange size={20}/> 班別代碼管理</h2>
-        <form className="bg-gray-50 p-4 rounded-2xl border mb-6 space-y-4 shadow-inner" onSubmit={(e) => {
-          e.preventDefault();
-          if (editingId) setShifts(shifts.map(s => s.id === editingId ? { ...formData, id: editingId } : s));
-          else setShifts([...shifts, { ...formData, id: Date.now() }]);
-          setEditingId(null); setFormData({ name: '', code: '', isRegular: 'N', regularDays: [] });
-        }}>
-          <div className="grid grid-cols-3 gap-2">
-            <input className="border p-2 rounded-xl text-sm outline-none font-bold" placeholder="縮寫" value={formData.name} onChange={e => setFormData({ ...formData, name: e.target.value })} />
-            <input className="border p-2 rounded-xl text-sm outline-none font-mono" placeholder="代碼" value={formData.code} onChange={e => setFormData({ ...formData, code: e.target.value })} />
-            <select className="border p-2 rounded-xl text-sm bg-white font-bold" value={formData.isRegular} onChange={e => setFormData({ ...formData, isRegular: e.target.value })}>
-              <option value="Y">常態班</option><option value="N">非常態</option>
-            </select>
-          </div>
-          {formData.isRegular === 'Y' && (
-            <div className="flex flex-wrap gap-1.5 p-2 bg-white rounded-xl border border-dashed">
-              {[...WEEKDAYS_MAP, "國", "月"].map(day => (
-                <button key={day} type="button" onClick={() => toggleDay(day)} className={`px-2 py-1 rounded-lg text-[10px] font-black transition-all ${formData.regularDays.includes(day) ? 'bg-blue-600 text-white shadow-sm' : 'bg-gray-100 text-gray-400 hover:bg-gray-200'}`}>{day}</button>
-              ))}
-            </div>
-          )}
-          <div className="grid grid-cols-2 gap-2">
-            <button className={`py-2 rounded-xl text-white font-bold shadow transition-all ${editingId ? 'bg-orange-500' : 'bg-blue-600 hover:bg-blue-700'}`}>{editingId ? '更新班別' : '新增班別'}</button>
-            <div className="flex gap-1">
-              <button type="button" onClick={() => shiftImportRef.current.click()} className="flex-1 bg-gray-100 text-gray-600 py-2 rounded-xl font-bold flex items-center justify-center gap-1 hover:bg-gray-200"><Upload size={14}/> 匯入</button>
-              <button type="button" onClick={handleExportShifts} className="flex-1 bg-gray-100 text-gray-600 py-2 rounded-xl font-bold flex items-center justify-center gap-1 hover:bg-gray-200"><Download size={14}/> 匯出</button>
-              <input type="file" ref={shiftImportRef} className="hidden" accept=".csv" onChange={handleImportShifts} />
-            </div>
-          </div>
-        </form>
-        <div className="max-h-96 overflow-auto rounded-xl border border-gray-100">
-          <table className="w-full text-xs text-left">
-            <thead className="bg-gray-50 border-b sticky top-0 z-10 font-black text-gray-400 uppercase tracking-tighter">
-              <tr><th className="p-3">縮寫</th><th className="p-3">代碼</th><th className="p-3">常態規則</th><th className="p-3 text-right">操作</th></tr>
-            </thead>
-            <tbody className="divide-y">
-              {shifts.map(s => !s.isSeparator && (
-                <tr key={s.id} className="hover:bg-gray-50/50 transition-colors">
-                  <td className="p-3 font-black text-gray-700">{s.name}</td><td className="p-3 font-mono text-gray-400">{s.code}</td>
-                  <td className="p-3"><span className="text-[10px] bg-gray-100 px-2 py-0.5 rounded-full font-bold text-gray-500">{s.isRegular === 'Y' ? s.regularDays.join(',') : '無'}</span></td>
-                  <td className="p-3 text-right"><button onClick={() => { setEditingId(s.id); setFormData(s); }} className="text-blue-500 mr-2 text-xs font-black">編輯</button><button onClick={() => setDeleteShiftTarget(s)} className="text-red-300 hover:text-red-500"><Trash2 size={14} /></button></td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
-        </div>
-      </div>
-
-      <div className="space-y-6">
-        <div className="bg-white p-6 rounded-3xl shadow border h-fit">
-          <h2 className="text-lg font-black mb-4 text-pink-600 flex items-center gap-2"><CalendarIcon size={18}/> 國定假日管理</h2>
-          <div className="flex gap-2 mb-6">
-            <input type="date" className="flex-grow border-2 p-2 rounded-xl text-sm outline-none focus:border-pink-300" id="h_date" />
-            <input type="text" className="flex-grow border-2 p-2 rounded-xl text-sm outline-none font-bold" placeholder="假日備註" id="h_note" />
-            <button onClick={() => { const d = document.getElementById('h_date').value, n = document.getElementById('h_note').value; if (d && n) setHolidays({ ...holidays, [d]: n }); }} className="bg-pink-600 text-white px-4 py-2 rounded-xl font-bold shadow hover:bg-pink-700 active:scale-95 transition-all">新增</button>
-          </div>
-          <div className="max-h-64 overflow-auto rounded-xl border border-pink-100">
-            <table className="w-full text-xs text-left"><thead className="bg-pink-50 border-b text-[10px] text-pink-700 font-black uppercase tracking-tighter"><tr><th className="p-3">日期</th><th className="p-3">備註</th><th className="p-3 text-right">操作</th></tr></thead>
-              <tbody className="divide-y divide-pink-50">{Object.keys(holidays).sort().map(date => (<tr key={date} className="hover:bg-pink-50/30 transition-colors"><td className="p-3 font-mono text-gray-500">{date}</td><td className="p-3 font-black text-gray-700">{holidays[date]}</td><td className="p-3 text-right"><button onClick={() => { const next = { ...holidays }; delete next[date]; setHolidays(next); }} className="text-red-300 hover:text-red-600 transition-all"><Trash2 size={14}/></button></td></tr>))}
-                {Object.keys(holidays).length === 0 && <tr><td colSpan="3" className="p-10 text-center text-gray-300 font-bold italic">尚無假日設定</td></tr>}
-              </tbody>
-            </table>
-          </div>
-        </div>
-
-        <div className="bg-white p-6 rounded-3xl shadow border h-fit relative">
-          <div className="flex justify-between items-center mb-4">
-            <h2 className="text-lg font-black text-teal-600 flex items-center gap-2"><TrendingUp size={18}/> 人日數設定區塊</h2>
-            <div className="flex gap-1">
-              <button onClick={() => ruleImportRef.current.click()} className="text-[10px] bg-gray-100 text-gray-600 px-2 py-1 rounded font-bold hover:bg-gray-200 transition-colors flex items-center gap-1"><Upload size={10}/> 匯入規則</button>
-              <button onClick={handleExportRules} className="text-[10px] bg-gray-100 text-gray-600 px-2 py-1 rounded font-bold hover:bg-gray-200 transition-colors flex items-center gap-1"><Download size={10}/> 匯出規則</button>
-              <input type="file" ref={ruleImportRef} className="hidden" accept=".csv" onChange={handleImportRules} />
-            </div>
-          </div>
-          <form className="bg-gray-50 p-4 rounded-2xl border mb-6 space-y-4 shadow-inner" onSubmit={handleRuleSubmit}>
+      // 💡 調整最外層容器：加入自適應最大寬度與精緻的外距排版
+      <div className="p-4 max-w-full lg:max-w-7xl mx-auto grid grid-cols-1 lg:grid-cols-2 gap-6 font-sans text-sm items-start">
+        
+        {/* 區塊 1：班別代碼管理 (左側獨立區塊) */}
+        <div className="bg-white p-5 md:p-6 rounded-3xl shadow border flex flex-col h-auto min-h-[400px] max-h-[85vh]">
+          <h2 className="text-lg font-black mb-4 text-gray-800 flex items-center gap-2">
+            <CalendarRange size={20}/> 班別代碼管理
+          </h2>
+          
+          <form className="bg-gray-50 p-4 rounded-2xl border mb-5 space-y-4 shadow-inner" onSubmit={(e) => {
+            e.preventDefault();
+            if (editingId) setShifts(shifts.map(s => s.id === editingId ? { ...formData, id: editingId } : s));
+            else setShifts([...shifts, { ...formData, id: Date.now() }]);
+            setEditingId(null); setFormData({ name: '', code: '', isRegular: 'N', regularDays: [] });
+          }}>
             <div className="grid grid-cols-3 gap-2">
-              <input className="border p-2 rounded-xl text-sm font-bold outline-none" placeholder="對照關鍵字/班別" value={ruleFormData.pattern} onChange={e => setRuleFormData({ ...ruleFormData, pattern: e.target.value })} />
-              <select className="border p-2 rounded-xl text-sm bg-white font-bold" value={ruleFormData.value} onChange={e => setRuleFormData({ ...ruleFormData, value: e.target.value })}>
-                <option value="0">0 人日</option>
-                <option value="0.5">0.5 人日</option>
-                <option value="1">1.0 人日</option>
-              </select>
-              <select className="border p-2 rounded-xl text-sm bg-white font-bold" value={ruleFormData.mode} onChange={e => setRuleFormData({ ...ruleFormData, mode: e.target.value })}>
-                <option value="exact">完全相同</option>
-                <option value="suffix">後綴包含</option>
+              <input className="border p-2 rounded-xl text-sm outline-none font-bold" placeholder="縮寫" value={formData.name} onChange={e => setFormData({ ...formData, name: e.target.value })} />
+              <input className="border p-2 rounded-xl text-sm outline-none font-mono" placeholder="代碼" value={formData.code} onChange={e => setFormData({ ...formData, code: e.target.value })} />
+              <select className="border p-2 rounded-xl text-sm bg-white font-bold" value={formData.isRegular} onChange={e => setFormData({ ...formData, isRegular: e.target.value })}>
+                <option value="Y">常態班</option><option value="N">非常態</option>
               </select>
             </div>
-            <button className={`w-full py-2 rounded-xl text-white font-bold shadow transition-all ${editingRuleId ? 'bg-orange-500' : 'bg-teal-600 hover:bg-teal-700'}`}>{editingRuleId ? '規則更新' : '新增對照規則'}</button>
+            {formData.isRegular === 'Y' && (
+              <div className="flex flex-wrap gap-1.5 p-2 bg-white rounded-xl border border-dashed">
+                {[...WEEKDAYS_MAP, "國", "月"].map(day => (
+                  <button key={day} type="button" onClick={() => toggleDay(day)} className={`px-2 py-1 rounded-lg text-[10px] font-black transition-all ${formData.regularDays.includes(day) ? 'bg-blue-600 text-white shadow-sm' : 'bg-gray-100 text-gray-400 hover:bg-gray-200'}`}>{day}</button>
+                ))}
+              </div>
+            )}
+            <div className="grid grid-cols-2 gap-2">
+              <button className={`py-2 rounded-xl text-white font-bold shadow transition-all ${editingId ? 'bg-orange-500' : 'bg-blue-600 hover:bg-blue-700'}`}>{editingId ? '更新班別' : '新增班別'}</button>
+              <div className="flex gap-1">
+                <button type="button" onClick={() => shiftImportRef.current.click()} className="flex-1 bg-gray-100 text-gray-600 py-2 rounded-xl font-bold flex items-center justify-center gap-1 hover:bg-gray-200"><Upload size={14}/> 匯入</button>
+                <button type="button" onClick={handleExportShifts} className="flex-1 bg-gray-100 text-gray-600 py-2 rounded-xl font-bold flex items-center justify-center gap-1 hover:bg-gray-200"><Download size={14}/> 匯出</button>
+                <input type="file" ref={shiftImportRef} className="hidden" accept=".csv" onChange={handleImportShifts} />
+              </div>
+            </div>
           </form>
-          <div className="max-h-64 overflow-auto rounded-xl border border-teal-100">
-            <table className="w-full text-xs text-left">
-              <thead className="bg-teal-50 border-b text-[10px] text-teal-700 font-black uppercase tracking-tighter">
-                <tr><th className="p-3">模式</th><th className="p-3">對照關鍵字</th><th className="p-3">對應值</th><th className="p-3 text-right">操作</th></tr>
+
+          {/* 💡 修正點：自適應滾動表格高度，隨內容多寡自動長高，最多不超過視窗的 45%，不會沈到底部 */}
+          <div className="flex-1 overflow-y-auto min-h-[150px] max-h-[45vh] rounded-xl border border-gray-100">
+            <table className="w-full text-xs text-left border-collapse">
+              <thead className="bg-gray-50 border-b sticky top-0 z-10 font-black text-gray-400 uppercase tracking-tighter shadow-sm">
+                <tr><th className="p-3 bg-gray-50">縮寫</th><th className="p-3 bg-gray-50">代碼</th><th className="p-3 bg-gray-50">常態規則</th><th className="p-3 bg-gray-50 text-right">操作</th></tr>
               </thead>
-              <tbody className="divide-y divide-teal-50">
-                {personDayRules.map(rule => (
-                  <tr key={rule.id} className="hover:bg-teal-50/30 transition-colors">
-                    <td className="p-3 text-[10px] text-gray-400">{rule.mode === 'exact' ? '完全相同' : '後綴包含'}</td>
-                    <td className="p-3 font-black text-gray-700">{rule.pattern}</td>
-                    <td className="p-3 font-mono text-teal-600 font-black">{rule.value}</td>
-                    <td className="p-3 text-right">
-                      <button onClick={() => { setEditingRuleId(rule.id); setRuleFormData(rule); }} className="text-blue-500 mr-2 text-xs font-black">編輯</button>
-                      <button onClick={() => setDeleteRuleTarget(rule)} className="text-red-300 hover:text-red-600 transition-all"><Trash2 size={14}/></button>
-                    </td>
+              <tbody className="divide-y">
+                {shifts.map(s => !s.isSeparator && (
+                  <tr key={s.id} className="hover:bg-gray-50/50 transition-colors">
+                    <td className="p-3 font-black text-gray-700">{s.name}</td><td className="p-3 font-mono text-gray-400">{s.code}</td>
+                    <td className="p-3"><span className="text-[10px] bg-gray-100 px-2 py-0.5 rounded-full font-bold text-gray-500">{s.isRegular === 'Y' ? s.regularDays.join(',') : '無'}</span></td>
+                    <td className="p-3 text-right"><button onClick={() => { setEditingId(s.id); setFormData(s); }} className="text-blue-500 mr-2 text-xs font-black">編輯</button><button onClick={() => setDeleteShiftTarget(s)} className="text-red-300 hover:text-red-500"><Trash2 size={14} /></button></td>
                   </tr>
                 ))}
               </tbody>
             </table>
           </div>
-          <Modal 
-            isOpen={!!deleteRuleTarget} 
-            onClose={() => setDeleteRuleTarget(null)} 
-            onConfirm={() => { setPersonDayRules(personDayRules.filter(r => r.id !== deleteRuleTarget.id)); setDeleteRuleTarget(null); }} 
-            title="確定刪除班別？" 
-            message={`確定刪除班別？移除 ${deleteRuleTarget?.pattern} 將影響人日數計算。`} 
-          />
         </div>
+
+        {/* 右側欄位：國定假日 + 人日數 (右側垂直堆疊區塊) */}
+        <div className="space-y-6 w-full flex flex-col justify-start">
+          
+          {/* 區塊 2：國定假日管理 */}
+          <div className="bg-white p-5 md:p-6 rounded-3xl shadow border h-auto flex flex-col max-h-[45vh]">
+            <h2 className="text-lg font-black mb-4 text-pink-600 flex items-center gap-2">
+              <CalendarIcon size={18}/> 國定假日管理
+            </h2>
+            <div className="flex gap-2 mb-4">
+              <input type="date" className="flex-grow border-2 p-2 rounded-xl text-sm outline-none focus:border-pink-300 bg-white" id="h_date" />
+              <input type="text" className="flex-grow border-2 p-2 rounded-xl text-sm outline-none font-bold" placeholder="假日備註" id="h_note" />
+              <button onClick={() => { const d = document.getElementById('h_date').value, n = document.getElementById('h_note').value; if (d && n) setHolidays({ ...holidays, [d]: n }); }} className="bg-pink-600 text-white px-4 py-2 rounded-xl font-bold shadow hover:bg-pink-700 active:scale-95 transition-all whitespace-nowrap">新增</button>
+            </div>
+            
+            {/* 💡 修正點：改為自適應高度，可滑動 */}
+            <div className="flex-1 overflow-y-auto min-h-[100px] rounded-xl border border-pink-100">
+              <table className="w-full text-xs text-left border-collapse">
+                <thead className="bg-pink-50 border-b sticky top-0 z-10 text-[10px] text-pink-700 font-black uppercase tracking-tighter shadow-sm">
+                  <tr><th className="p-3 bg-pink-50">日期</th><th className="p-3 bg-pink-50">備註</th><th className="p-3 bg-pink-50 text-right">操作</th></tr>
+                </thead>
+                <tbody className="divide-y divide-pink-50">
+                  {Object.keys(holidays).sort().map(date => (
+                    <tr key={date} className="hover:bg-pink-50/30 transition-colors">
+                      <td className="p-3 font-mono text-gray-500">{date}</td>
+                      <td className="p-3 font-black text-gray-700">{holidays[date]}</td>
+                      <td className="p-3 text-right">
+                        <button onClick={() => { const next = { ...holidays }; delete next[date]; setHolidays(next); }} className="text-red-300 hover:text-red-600 transition-all">
+                          <Trash2 size={14}/>
+                        </button>
+                      </td>
+                    </tr>
+                  ))}
+                  {Object.keys(holidays).length === 0 && (
+                    <tr><td colSpan="3" className="p-10 text-center text-gray-300 font-bold italic bg-white">尚無假日設定</td></tr>
+                  )}
+                </tbody>
+              </table>
+            </div>
+          </div>
+
+          {/* 區塊 3：人日數設定區塊 */}
+          <div className="bg-white p-5 md:p-6 rounded-3xl shadow border h-auto flex flex-col max-h-[50vh] relative">
+            <div className="flex flex-wrap justify-between items-center gap-2 mb-4">
+              <h2 className="text-lg font-black text-teal-600 flex items-center gap-2"><TrendingUp size={18}/> 人日數設定區塊</h2>
+              <div className="flex gap-1">
+                <button onClick={() => ruleImportRef.current.click()} className="text-[10px] bg-gray-100 text-gray-600 px-2 py-1 rounded font-bold hover:bg-gray-200 transition-colors flex items-center gap-1"><Upload size={10}/> 匯入規則</button>
+                <button onClick={handleExportRules} className="text-[10px] bg-gray-100 text-gray-600 px-2 py-1 rounded font-bold hover:bg-gray-200 transition-colors flex items-center gap-1"><Download size={10}/> 匯出規則</button>
+                <input type="file" ref={ruleImportRef} className="hidden" accept=".csv" onChange={handleImportRules} />
+              </div>
+            </div>
+            
+            <form className="bg-gray-50 p-4 rounded-2xl border mb-4 space-y-4 shadow-inner" onSubmit={handleRuleSubmit}>
+              <div className="grid grid-cols-3 gap-2">
+                <input className="border p-2 rounded-xl text-sm font-bold outline-none" placeholder="對照關鍵字/班別" value={ruleFormData.pattern} onChange={e => setRuleFormData({ ...ruleFormData, pattern: e.target.value })} />
+                <select className="border p-2 rounded-xl text-sm bg-white font-bold" value={ruleFormData.value} onChange={e => setRuleFormData({ ...ruleFormData, value: e.target.value })}>
+                  <option value="0">0 人日</option>
+                  <option value="0.5">0.5 人日</option>
+                  <option value="1">1.0 人日</option>
+                </select>
+                <select className="border p-2 rounded-xl text-sm bg-white font-bold" value={ruleFormData.mode} onChange={e => setRuleFormData({ ...ruleFormData, mode: e.target.value })}>
+                  <option value="exact">完全相同</option>
+                  <option value="suffix">後綴包含</option>
+                </select>
+              </div>
+              <button className={`w-full py-2 rounded-xl text-white font-bold shadow transition-all ${editingRuleId ? 'bg-orange-500' : 'bg-teal-600 hover:bg-teal-700'}`}>{editingRuleId ? '規則更新' : '新增對照規則'}</button>
+            </form>
+            
+            {/* 💡 修正點：改為自適應高度，可滑動 */}
+            <div className="flex-1 overflow-y-auto min-h-[100px] rounded-xl border border-teal-100">
+              <table className="w-full text-xs text-left border-collapse">
+                <thead className="bg-teal-50 border-b sticky top-0 z-10 text-[10px] text-teal-700 font-black uppercase tracking-tighter shadow-sm">
+                  <tr><th className="p-3 bg-teal-50">模式</th><th className="p-3 bg-teal-50">對照關鍵字</th><th className="p-3 bg-teal-50">對應值</th><th className="p-3 bg-teal-50 text-right">操作</th></tr>
+                </thead>
+                <tbody className="divide-y divide-teal-50">
+                  {personDayRules.map(rule => (
+                    <tr key={rule.id} className="hover:bg-teal-50/30 transition-colors">
+                      <td className="p-3 text-[10px] text-gray-400">{rule.mode === 'exact' ? '完全相同' : '後綴包含'}</td>
+                      <td className="p-3 font-black text-gray-700">{rule.pattern}</td>
+                      <td className="p-3 font-mono text-teal-600 font-black">{rule.value}</td>
+                      <td className="p-3 text-right">
+                        <button onClick={() => { setEditingRuleId(rule.id); setRuleFormData(rule); }} className="text-blue-500 mr-2 text-xs font-black">編輯</button>
+                        <button onClick={() => setDeleteRuleTarget(rule)} className="text-red-300 hover:text-red-600 transition-all"><Trash2 size={14}/></button>
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+            <Modal 
+              isOpen={!!deleteRuleTarget} 
+              onClose={() => setDeleteRuleTarget(null)} 
+              onConfirm={() => { setPersonDayRules(personDayRules.filter(r => r.id !== deleteRuleTarget.id)); setDeleteRuleTarget(null); }} 
+              title="確定刪除班別？" 
+              message={`確定刪除班別？移除 ${deleteRuleTarget?.pattern} 將影響人日數計算。`} 
+            />
+          </div>
+        </div>
+
       </div>
-    </div>
   );
-};
+  };
 
 const ManagementReportView = ({ currentMonth, employees, schedule, personDayRules, holidays, shifts }) => {
   const [reportType, setReportType] = useState('personDays'); 
