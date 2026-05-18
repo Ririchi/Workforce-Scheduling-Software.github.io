@@ -459,7 +459,7 @@ return (
 
     handleAutoLotteryCheck();
   }, [currentMonth, preLeaveData, isMonthDrawn, currentUser]); // 精確監聽子組件內的狀態
-  
+
 useEffect(() => {
     if (!schedule[currentMonth]) return;
     let changed = false;
@@ -565,7 +565,7 @@ const handleAdminSettingChange = (type, value) => {
     saveData({ schedule: nextSched, preLeaveData: nextPreLeave });
     
     setTimeout(() => {
-      alert(`${currentMonth} 抽籤完成！結果已同步至雲端，請手動下載備份。`);
+      alert(`${currentMonth} 抽籤完成！結果已同步至班表。`);
     }, 100);
   };
 
@@ -656,7 +656,14 @@ const handleAdminSettingChange = (type, value) => {
                       <div className="flex flex-col items-center justify-center min-h-[40px]">
                         {isFixed ? <span className="text-gray-500 font-bold opacity-60 text-xs">{sVal}</span> :
                          isWinner ? <span className="text-green-800 font-black text-[13px] bg-green-50 px-1 rounded">休</span> :
-                         isApplied ? <span className="text-orange-700 font-black text-[11px]">預假</span> : null}
+                         /* 💡 修正後：只有在『已完成抽籤(isMonthDrawn)』且『沒抽中』時才顯示『預假(未中)』；抽籤前一律顯示原本乾淨的『預假』 */
+                         isApplied ? (
+                           isMonthDrawn ? (
+                             <span className="text-orange-600/70 font-bold text-[10px] bg-orange-50/60 px-1 rounded border border-dashed border-orange-200">預假(未中)</span>
+                           ) : (
+                             <span className="text-orange-700 font-black text-[11px]">預假</span>
+                           )
+                         ) : null}
                       </div>
                     </td>
                   );
@@ -666,6 +673,7 @@ const handleAdminSettingChange = (type, value) => {
           </tbody>
           <tfoot className="bg-white border-t-2 shadow-[0_-2px_5px_rgba(0,0,0,0.05)]">
             <tr className="bg-white border-b">
+              {/* 💡 修正後：完全拿掉僅供對照提示，100% 回歸妳原本最乾淨的「預假名單」標題 */}
               <td className="sticky left-0 z-40 bg-white border p-1 font-bold text-gray-400 text-[10px]">預假名單</td>
               {daysInMonth.map(d => {
                 const list = getLeaveList(d.day);
@@ -675,7 +683,12 @@ const handleAdminSettingChange = (type, value) => {
                       {list.map((name, i) => {
                         const isWinner = schedule[currentMonth]?.[name]?.[d.day] === "休";
                         return (
-                          <div key={i} className={`text-[9px] font-black text-center leading-none truncate border rounded py-1 shadow-sm ${isWinner ? 'bg-green-700 text-white border-green-800' : 'bg-white text-blue-500 border-blue-100'}`}>
+                          /* 💡 修正後：抽籤前，大家的名字都是原本美麗的藍字白底。抽籤後，沒中的人才會優雅地變成灰字刪除線，對照超直覺！ */
+                          <div key={i} className={`text-[9px] font-black text-center leading-none truncate border rounded py-1 shadow-sm ${
+                            isWinner 
+                              ? 'bg-green-700 text-white border-green-800' 
+                              : (isMonthDrawn ? 'bg-white text-gray-400 border-gray-200 line-through decoration-gray-300' : 'bg-white text-blue-500 border-blue-100')
+                          }`}>
                             {name}
                           </div>
                         );
@@ -741,7 +754,7 @@ const handleAdminSettingChange = (type, value) => {
           )}
 
           <button onClick={handleExportPreLeave} className="flex items-center gap-2 px-4 py-2 bg-green-600 text-white rounded-xl text-xs font-bold hover:bg-green-600 shadow transition-all">
-            <Download size={14}/> 橫式 CSV 備份
+            <Download size={14}/> 抽籤結果 CSV 
           </button>
         </div>
       </div>
