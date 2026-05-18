@@ -530,11 +530,11 @@ const handleAdminSettingChange = (type, value) => {
 };
 
 
-  //支援手動與自動抽籤判斷的 handleLottery
+// 💡 修正後：安全防白屏、支援手動與自動抽籤的 handleLottery
   const handleLottery = async (e) => {
     if (isMonthDrawn) return;
 
-    // 1️⃣ 💡 檢查這個觸發是不是來自於自動抽籤
+    // 1️⃣ 檢查這個觸發是不是來自於自動抽籤
     const isAuto = e && e.isAuto;
 
     if (!isAuto) {
@@ -542,6 +542,7 @@ const handleAdminSettingChange = (type, value) => {
       const confirmDraw = window.confirm("確定要立即手動抽籤嗎？抽籤後將會鎖定本月班表。");
       if (!confirmDraw) return;
     }
+    
     const nextSched = deepClone(schedule);
     if (!nextSched[currentMonth]) nextSched[currentMonth] = {};
 
@@ -562,11 +563,16 @@ const handleAdminSettingChange = (type, value) => {
 
     setSchedule(nextSched);
     setPreLeaveData(nextPreLeave);
-    saveData({ schedule: nextSched, preLeaveData: nextPreLeave });
     
-    setTimeout(() => {
-      alert(`${currentMonth} 抽籤完成！結果已同步至班表。`);
-    }, 100);
+    // 💡 加上 await 確保安全存檔完畢
+    await saveData({ schedule: nextSched, preLeaveData: nextPreLeave });
+    
+    // 2️⃣ 🔥 關鍵修正點：只有在「手動按下按鈕(!isAuto)」時，才允許執行彈窗提示！
+    if (!isAuto) {
+      setTimeout(() => {
+        alert(`${currentMonth} 手動抽籤完成！結果已同步至班表。`);
+      }, 100);
+    }
   };
 
   return (
