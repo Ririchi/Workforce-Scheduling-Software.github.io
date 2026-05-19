@@ -1830,56 +1830,76 @@ const SchedulingView = ({ currentMonth, employees, daysInMonth, schedule, setSch
   }, [currentMonth, employees, daysInMonth]); // 🔥 修正點：移除了 schedule
   
   const handleImportCSV = (e) => {
-    const file = e.target.files[0];
-    if (!file) return;
-    const reader = new FileReader();
-    reader.onload = (ev) => {
-      const rows = ev.target.result.split(/\r?\n/).map(r => r.split(',').map(c => c.trim().replace(/^"|"$/g, '')));
-      
-      let fileMonth = null;
-      for (const r of rows) { const line = r.join(","); if (line.includes("年") && line.includes("月")) { fileMonth = parseROCTitle(line); if (fileMonth) break; } }
-      if (fileMonth !== currentMonth) { alert("CSV 標題月份與當前編輯月份不符。"); fileRef.current.value = ''; return; }
-      
-      const nextPreview = deepClone(editSched);
-      const idPattern = /^[A-Z]\d+$/; 
-      
-      // 💡 1️⃣ 宣告紀錄幽靈人員的變數
-      let missingEmployeesLog = "";
-      let hasGhostEmployee = false;
-
-      rows.forEach(rowCells => {
-        rowCells.forEach((cell, cellIdx) => {
-          if (idPattern.test(cell)) {
-            const systemEmp = employees.find(e => e.id === cell);
-            
-            if (systemEmp && nextPreview[systemEmp.name]) {
-              // 正常同仁：照常解析並載入班表
-              for (let d = 1; d <= daysInMonth.length; d++) {
-                const shiftVal = rowCells[cellIdx + 1 + d];
-                if (shiftVal !== undefined) nextPreview[systemEmp.name][d] = shiftVal || (getIsNightClinic(systemEmp) ? "" : "-");
-              }
-            } else if (!systemEmp) {
-              // 💡 2️⃣ 偵測到幽靈人口：記錄下來，但「不 return 阻斷」，讓迴圈繼續跑其他人
-              hasGhostEmployee = true;
-              const ghostName = rowCells[cellIdx + 1] || "未知同仁";
-              // 避免重複記錄同一個人
-              if (!missingEmployeesLog.includes(cell)) {
-                missingEmployeesLog += `員編 ${cell}  ${ghostName}\n`;
-              }
-            }
+    try {
+      const file = e.target.files[0];
+      if (!file) return;
+      const reader = new FileReader();
+      reader.onload = (ev) => {
+        try {
+          const rows = ev.target.result.split(/\r?\n/).map(r => r.split(',').map(c => c.trim().replace(/^"|"$/g, '')));
+          
+          let fileMonth = null;
+          for (const r of rows) { 
+            const line = r.join(","); 
+            if (line.includes("年") && line.includes("月")) { 
+              fileMonth = parseROCTitle(line); 
+              if (fileMonth) break; 
+            } 
           }
-        });
-      });
+          
+          if (fileMonth !== currentMonth) { 
+            alert("CSV 標題月份與當前編輯月份不符。"); 
+            fileRef.current.value = ''; 
+            return; 
+          }
+          
+          const nextPreview = deepClone(editSched || {});
+          const idPattern = /^[A-Z]\d+$/; 
+          
+          let missingEmployeesLog = "";
+          let hasGhostEmployee = false;
+          // 建立一個 Set 防止重複記錄同一個幽靈員編
+          const seenGhosts = new Set();
 
-      // 💡 3️⃣ 核心修正：資料處理完後，如果有幽靈同仁，只跳彈窗提醒，檔案依然成功匯入！
-      if (hasGhostEmployee) {
-        alert(`⚠️ 提示：班表已成功匯入！\n\n但偵測到以下人員不在系統名單內（已自動略過其班表）：\n\n${missingEmployeesLog}\n請先於「帳號管理」設定人員資料，再新增班別。`);
-      }
+          rows.forEach(rowCells => {
+            rowCells.forEach((cell, cellIdx) => {
+              if (idPattern.test(cell)) {
+                // 確保 employees 陣列存在才進行尋找
+                const systemEmp = (employees || []).find(e => e.id === cell);
+                
+                if (systemEmp && nextPreview[systemEmp.name]) {
+                  for (let d = 1; d <= daysInMonth.length; d++) {
+                    const shiftVal = rowCells[cellIdx + 1 + d];
+                    if (shiftVal !== undefined) nextPreview[systemEmp.name][d] = shiftVal || (getIsNightClinic(systemEmp) ? "" : "-");
+                  }
+                } else if (!systemEmp) {
+                  hasGhostEmployee = true;
+                  if (!seenGhosts.has(cell)) {
+                    seenGhosts.add(cell);
+                    const ghostName = rowCells[cellIdx + 1] || "未知同仁";
+                    missingEmployeesLog += `員編 ${cell}  ${ghostName}\n`;
+                  }
+                }
+              }
+            });
+          });
 
-      setIgnoredCells(new Set()); 
-      setImportPreview(nextPreview);
-    };
-    reader.readAsText(file); e.target.value = '';
+          if (hasGhostEmployee) {
+            alert(`⚠️ 班表已成功匯入預覽區！\n\n但偵測到以下人員不在系統名單內（已自動略過其班表）：\n\n${missingEmployeesLog}\n若需排入上述人員，請先於「帳號管理」新增資料。`);
+          }
+
+          setIgnoredCells(new Set()); 
+          setImportPreview(nextPreview);
+        } catch (innerError) {
+          console.error("解析 CSV 內部錯誤：", innerError);
+          alert("CSV 檔案格式解析失敗，請檢查內容是否正確。");
+        }
+      };
+      reader.readAsText(file); 
+    } catch (outerError) {
+      console.error("上傳檔案錯誤：", outerError);
+    }
+    e.target.value = '';
   };
 
   const confirmApplyImport = () => {
