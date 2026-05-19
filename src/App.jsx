@@ -517,7 +517,7 @@ const getLeaveList = (day) => {
     const blob = new Blob([csv], { type: 'text/csv;charset=utf-8;' });
     const link = document.createElement("a");
     link.href = URL.createObjectURL(blob);
-    link.download = `抽籤結果_${currentMonth}.csv`;
+    link.download = `預假橫式備份_${currentMonth}.csv`;
     link.click();
   };
   
@@ -1827,33 +1827,57 @@ const SchedulingView = ({ currentMonth, employees, daysInMonth, schedule, setSch
       });
     });
     setEditSched(newSched); setIsDirty(false);
-  }, [currentMonth, employees, daysInMonth, schedule]);
-
+  }, [currentMonth, employees, daysInMonth]); // 🔥 修正點：移除了 schedule
+  
   const handleImportCSV = (e) => {
     const file = e.target.files[0];
     if (!file) return;
     const reader = new FileReader();
     reader.onload = (ev) => {
       const rows = ev.target.result.split(/\r?\n/).map(r => r.split(',').map(c => c.trim().replace(/^"|"$/g, '')));
+      
       let fileMonth = null;
       for (const r of rows) { const line = r.join(","); if (line.includes("年") && line.includes("月")) { fileMonth = parseROCTitle(line); if (fileMonth) break; } }
       if (fileMonth !== currentMonth) { alert("CSV 標題月份與當前編輯月份不符。"); fileRef.current.value = ''; return; }
+      
       const nextPreview = deepClone(editSched);
       const idPattern = /^[A-Z]\d+$/; 
+      
+      // 💡 1️⃣ 宣告紀錄幽靈人員的變數
+      let missingEmployeesLog = "";
+      let hasGhostEmployee = false;
+
       rows.forEach(rowCells => {
         rowCells.forEach((cell, cellIdx) => {
           if (idPattern.test(cell)) {
             const systemEmp = employees.find(e => e.id === cell);
+            
             if (systemEmp && nextPreview[systemEmp.name]) {
+              // 正常同仁：照常解析並載入班表
               for (let d = 1; d <= daysInMonth.length; d++) {
                 const shiftVal = rowCells[cellIdx + 1 + d];
                 if (shiftVal !== undefined) nextPreview[systemEmp.name][d] = shiftVal || (getIsNightClinic(systemEmp) ? "" : "-");
+              }
+            } else if (!systemEmp) {
+              // 💡 2️⃣ 偵測到幽靈人口：記錄下來，但「不 return 阻斷」，讓迴圈繼續跑其他人
+              hasGhostEmployee = true;
+              const ghostName = rowCells[cellIdx + 1] || "未知同仁";
+              // 避免重複記錄同一個人
+              if (!missingEmployeesLog.includes(cell)) {
+                missingEmployeesLog += `員編 ${cell}  ${ghostName}\n`;
               }
             }
           }
         });
       });
-      setIgnoredCells(new Set()); setImportPreview(nextPreview);
+
+      // 💡 3️⃣ 核心修正：資料處理完後，如果有幽靈同仁，只跳彈窗提醒，檔案依然成功匯入！
+      if (hasGhostEmployee) {
+        alert(`⚠️ 提示：班表已成功匯入！\n\n但偵測到以下人員不在系統名單內（已自動略過其班表）：\n\n${missingEmployeesLog}\n請先於「帳號管理」設定人員資料，再新增班別。`);
+      }
+
+      setIgnoredCells(new Set()); 
+      setImportPreview(nextPreview);
     };
     reader.readAsText(file); e.target.value = '';
   };
@@ -1990,8 +2014,21 @@ const SchedulingView = ({ currentMonth, employees, daysInMonth, schedule, setSch
                           if (importPreview && isConflict) { const n = new Set(ignoredCells); if (n.has(`${emp.name}-${d.day}`)) n.delete(`${emp.name}-${d.day}`); else n.add(`${emp.name}-${d.day}`); setIgnoredCells(n);
                           } else if (!importPreview) { const nc = deepClone(cellColors); if (!nc[currentMonth]) nc[currentMonth] = {}; if (!nc[currentMonth][emp.name]) nc[currentMonth][emp.name] = {}; nc[currentMonth][emp.name][d.day] = activeColor; setCellColors(nc);saveData({ cellColors: nc }); }
                         }}>
-                        <input type="text" value={displayVal} disabled={!!importPreview} className={`w-full h-full text-center bg-transparent focus:bg-white outline-none font-bold font-mono cursor-text ${importPreview ? 'pointer-events-none opacity-80' : (displayVal === "-" ? 'text-gray-300' : 'text-gray-800')}`}
-                          onChange={(e) => { if (!importPreview) { setEditSched(prev => ({ ...prev, [emp.name]: { ...prev[emp.name], [d.day]: e.target.value } })); setIsDirty(true); } }} />
+                        <input 
+                          type="text" 
+                          value={displayVal} 
+                          disabled={!!importPreview} 
+                          
+                          /* 💡 修正點：加上 !isNC 判定。如果是夜診人員(isNC為true)，!isNC就會是false，直接跳過後方的反紅檢核，字體永遠維持常態黑 */
+                          className={`w-full h-full text-center bg-transparent focus:bg-white outline-none font-bold font-mono cursor-text ${
+                            importPreview ? 'pointer-events-none opacity-80' : ''
+                          } ${
+                            (!isNC && displayVal !== "" && !["-", "#", "例", "休", "公假"].includes(displayVal) && !shifts.some(s => s.name === displayVal))
+                              ? 'text-red-500 font-black' 
+                              : (displayVal === "-" ? 'text-gray-300' : 'text-gray-800')
+                          }`}
+                          onChange={(e) => { if (!importPreview) { setEditSched(prev => ({ ...prev, [emp.name]: { ...prev[emp.name], [d.day]: e.target.value } })); setIsDirty(true); } }} 
+                        />
                       </td>
                     );
                   })}
@@ -1999,8 +2036,8 @@ const SchedulingView = ({ currentMonth, employees, daysInMonth, schedule, setSch
               );
             })}
           </tbody>
-<tfoot className="bg-gray-50 border-t-2 border-gray-300">
-  <tr>
+          <tfoot className="bg-gray-50 border-t-2 border-gray-300">
+        <tr>
     {/* 修正：移除 "sticky left-0" */}
     <td className="bg-gray-100 border p-1 text-[9px] font-black text-gray-400 text-center border-r-2">
       漏排提醒
