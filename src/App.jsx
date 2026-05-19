@@ -1810,6 +1810,11 @@ const SchedulingView = ({ currentMonth, employees, daysInMonth, schedule, setSch
 
   // 功能 1：隔離全域監聽洗檔問題（移除 schedule 依賴，確保輸入不消失）
   useEffect(() => {
+    // 檢查 editSched 是否已經有當前同仁的排班資料，如果有，代表正在編輯中，直接攔截不執行初始化！
+    if (editSched && Object.keys(editSched).length > 0) {
+      return; 
+    }
+
     const curMonthSched = schedule[currentMonth] || {};
     const newSched = {};
     employees.forEach(e => {
@@ -1827,8 +1832,9 @@ const SchedulingView = ({ currentMonth, employees, daysInMonth, schedule, setSch
         } 
       });
     });
-    setEditSched(newSched); setIsDirty(false);
-  }, [currentMonth, employees, daysInMonth]);
+    setEditSched(newSched); 
+    setIsDirty(false);
+  }, [currentMonth, employees, daysInMonth, editSched]);
 
   // 功能 2：上傳 CSV 幽靈人員只提示、不阻擋（語法完美包覆版）
   const handleImportCSV = (e) => {
@@ -1844,7 +1850,7 @@ const SchedulingView = ({ currentMonth, employees, daysInMonth, schedule, setSch
           if (fileMonth !== currentMonth) { alert("CSV 標題月份與當前編輯月份不符。"); fileRef.current.value = ''; return; }
           
           const nextPreview = deepClone(editSched || {});
-          const idPattern = /^[A-Z]\d+$/; 
+          const idPattern = /^Y\d{5}$/;
           
           let missingEmployeesLog = "";
           let hasGhostEmployee = false;
