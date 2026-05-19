@@ -1808,6 +1808,7 @@ const SchedulingView = ({ currentMonth, employees, daysInMonth, schedule, setSch
   const [ignoredCells, setIgnoredCells] = useState(new Set()); 
   const fileRef = useRef(null);
 
+  // 功能 1：隔離全域監聽洗檔問題（移除 schedule 依賴，確保輸入不消失）
   useEffect(() => {
     const curMonthSched = schedule[currentMonth] || {};
     const newSched = {};
@@ -1829,7 +1830,7 @@ const SchedulingView = ({ currentMonth, employees, daysInMonth, schedule, setSch
     setEditSched(newSched); setIsDirty(false);
   }, [currentMonth, employees, daysInMonth]);
 
-  // 💡 步驟 2 修正點：抓到幽靈同仁時只警示、不阻擋，且完美補回大括號避免 404 白屏！
+  // 功能 2：上傳 CSV 幽靈人員只提示、不阻擋（語法完美包覆版）
   const handleImportCSV = (e) => {
     try {
       const file = e.target.files[0];
@@ -1840,12 +1841,7 @@ const SchedulingView = ({ currentMonth, employees, daysInMonth, schedule, setSch
           const rows = ev.target.result.split(/\r?\n/).map(r => r.split(',').map(c => c.trim().replace(/^"|"$/g, '')));
           let fileMonth = null;
           for (const r of rows) { const line = r.join(","); if (line.includes("年") && line.includes("月")) { fileMonth = parseROCTitle(line); if (fileMonth) break; } }
-          
-          if (fileMonth !== currentMonth) { 
-            alert("CSV 標題月份與當前編輯月份不符。"); 
-            fileRef.current.value = ''; 
-            return; 
-          }
+          if (fileMonth !== currentMonth) { alert("CSV 標題月份與當前編輯月份不符。"); fileRef.current.value = ''; return; }
           
           const nextPreview = deepClone(editSched || {});
           const idPattern = /^[A-Z]\d+$/; 
@@ -1858,7 +1854,6 @@ const SchedulingView = ({ currentMonth, employees, daysInMonth, schedule, setSch
             rowCells.forEach((cell, cellIdx) => {
               if (idPattern.test(cell)) {
                 const systemEmp = (employees || []).find(e => e.id === cell);
-                
                 if (systemEmp && nextPreview[systemEmp.name]) {
                   for (let d = 1; d <= daysInMonth.length; d++) {
                     const shiftVal = rowCells[cellIdx + 1 + d];
@@ -1905,7 +1900,8 @@ const SchedulingView = ({ currentMonth, employees, daysInMonth, schedule, setSch
   };
 
   const isSatisfied = (cellValue, targetShiftName) => {
-    if (!cellValue || cellValue === "-" || cellValue === "#" || cellValue === "例") return false;
+    // 💡 修正點：將 orient 修正回標準的 || 符號
+    if (!cellValue || cellValue === "-" || cellValue === "#" || cellValue === "例" || cellValue === "休") return false;
     const regex = new RegExp(`(^|[/()#])${targetShiftName}($|[/()#])`);
     return regex.test(String(cellValue).trim());
   };
@@ -1916,10 +1912,10 @@ const SchedulingView = ({ currentMonth, employees, daysInMonth, schedule, setSch
     Object.values(editSched).forEach(empSched => {
       Object.values(empSched).forEach(v => { if (v && !["-", "#", "例", ""].includes(v)) allScheduledThisMonth.add(String(v)); });
     });
-    const monthlyRules = shifts.filter(s => s.isRegular === 'Y' && s.regularDays.includes("月"));
+    const monthlyRules = (shifts || []).filter(s => s.isRegular === 'Y' && s.regularDays.includes("月"));
     daysInMonth.forEach(d => {
       const scheduledOnDay = Object.values(editSched).map(u => u?.[d.day]);
-      const required = shifts.filter(s => s.isRegular === 'Y' && !s.regularDays.includes("月") && (d.holiday ? s.regularDays.includes("國") : s.regularDays.includes(d.dayOfWeek)));
+      const required = (shifts || []).filter(s => s.isRegular === 'Y' && !s.regularDays.includes("月") && (d.holiday ? s.regularDays.includes("國") : s.regularDays.includes(d.dayOfWeek)));
       let missing = required.filter(r => !scheduledOnDay.some(val => isSatisfied(val, r.name))).map(r => r.name);
       if (d.day === 1) {
         const missingMonthly = monthlyRules.filter(r => !Array.from(allScheduledThisMonth).some(v => isSatisfied(v, r.name))).map(r => r.name);
@@ -1978,28 +1974,24 @@ const SchedulingView = ({ currentMonth, employees, daysInMonth, schedule, setSch
       </div>
       <div className="flex-grow overflow-auto relative p-4 select-none">
         <table className="w-full text-[11px] text-center border-separate border-spacing-0 table-fixed bg-white shadow-xl min-w-[1000px]">
-
-      <thead>
-        <tr className="bg-gray-50 border-b text-[10px]">
-          <th className="sticky left-0 top-0 z-[100] bg-gray-100 p-2 w-20 font-black border-b-2 border-r-2 border-gray-200">姓名
-          </th>
-          {daysInMonth.map(d => {
-            const cycleEnd = isCycleEnd(d.fullDate);
-            let bgClass = "bg-gray-50";
-            if (d.rawDay === 0 || d.holiday) bgClass = "bg-[#FFB3D9]";
-            else if (d.rawDay === 6) bgClass = "bg-[#FFB366]";
-            return (
-              <th 
-                key={d.day} 
-                className={`sticky top-0 z-[90] p-1 w-12 font-bold border-b-2 border-r border-gray-200 ${bgClass} ${cycleEnd ? 'border-r-4 border-r-gray-400' : ''}`}>
-                <div className="text-[10px] opacity-50">{d.dayOfWeek}</div>
-                <div className="text-sm">{d.day}</div>
-                <div className="text-[9px] text-red-600 truncate h-3 leading-none font-normal">{String(d.holiday || "")}</div>
-              </th>
-            );
-          })}
-        </tr>
-      </thead>
+          <thead>
+            <tr className="bg-gray-50 border-b text-[10px]">
+              <th className="sticky left-0 top-0 z-[100] bg-gray-100 p-2 w-20 font-black border-b-2 border-r-2 border-gray-200">姓名</th>
+              {daysInMonth.map(d => {
+                const cycleEnd = isCycleEnd(d.fullDate);
+                let bgClass = "bg-gray-50";
+                if (d.rawDay === 0 || d.holiday) bgClass = "bg-[#FFB3D9]";
+                else if (d.rawDay === 6) bgClass = "bg-[#FFB366]";
+                return (
+                  <th key={d.day} className={`sticky top-0 z-[90] p-1 w-12 font-bold border-b-2 border-r border-gray-200 ${bgClass} ${cycleEnd ? 'border-r-4 border-r-gray-400' : ''}`}>
+                    <div className="text-[10px] opacity-50">{d.dayOfWeek}</div>
+                    <div className="text-sm">{d.day}</div>
+                    <div className="text-[9px] text-red-600 truncate h-3 leading-none font-normal">{String(d.holiday || "")}</div>
+                  </th>
+                );
+              })}
+            </tr>
+          </thead>
           <tbody>
             {employees.map((emp) => {
               if (emp.isSeparator) return <tr key={emp.id} className="bg-gray-200 h-[1.5px]"><td colSpan={daysInMonth.length + 1}></td></tr>;
@@ -2026,16 +2018,15 @@ const SchedulingView = ({ currentMonth, employees, daysInMonth, schedule, setSch
                           if (importPreview && isConflict) { const n = new Set(ignoredCells); if (n.has(`${emp.name}-${d.day}`)) n.delete(`${emp.name}-${d.day}`); else n.add(`${emp.name}-${d.day}`); setIgnoredCells(n);
                           } else if (!importPreview) { const nc = deepClone(cellColors); if (!nc[currentMonth]) nc[currentMonth] = {}; if (!nc[currentMonth][emp.name]) nc[currentMonth][emp.name] = {}; nc[currentMonth][emp.name][d.day] = activeColor; setCellColors(nc);saveData({ cellColors: nc }); }
                         }}>
+                        {/* 功能 3：純字體反紅檢核邏輯（完美包覆、排除夜診三列與預設常態班別符號） */}
                         <input 
                           type="text" 
                           value={displayVal} 
                           disabled={!!importPreview} 
-                          
-                          /* 💡 修正點：加上 !isNC 判定。如果是夜診人員(isNC為true)，!isNC就會是false，直接跳過後方的反紅檢核，字體永遠維持常態黑 */
                           className={`w-full h-full text-center bg-transparent focus:bg-white outline-none font-bold font-mono cursor-text ${
                             importPreview ? 'pointer-events-none opacity-80' : ''
                           } ${
-                            (!isNC && displayVal !== "" && !["-", "#", "例", "休", "公假"].includes(displayVal) && !shifts.some(s => s.name === displayVal))
+                            (!isNC && displayVal !== "" && !["-", "#", "例", "休", "公假"].includes(displayVal) && !(shifts || []).some(s => s.name === displayVal))
                               ? 'text-red-500 font-black' 
                               : (displayVal === "-" ? 'text-gray-300' : 'text-gray-800')
                           }`}
@@ -2049,29 +2040,26 @@ const SchedulingView = ({ currentMonth, employees, daysInMonth, schedule, setSch
             })}
           </tbody>
           <tfoot className="bg-gray-50 border-t-2 border-gray-300">
-        <tr>
-    {/* 修正：移除 "sticky left-0" */}
-    <td className="bg-gray-100 border p-1 text-[9px] font-black text-gray-400 text-center border-r-2">
-      漏排提醒
-    </td>
-    {daysInMonth.map(d => { 
-      const missing = getMissingData()[d.day] || [];
-      return (
-        <td key={d.day} className={`aborder p-0.5 align-top min-h-12 bg-orange-50 ${isCycleEnd(d.fullDate) ? 'border-r-4 border-r-gray-400' : ''}`}>
-          {missing.length > 0 && (
-            <div className="flex flex-col gap-0.5">
-              {missing.map(m => (
-                <div key={m} className="bg-white border border-orange-200 text-orange-600 font-bold text-[8px] rounded p-0.5 shadow-sm">
-                  {m}
-                </div>
-              ))}
-            </div>
-          )}
-        </td>
-      );
-    })}
-  </tr>
-</tfoot>
+            <tr>
+              <td className="bg-gray-100 border p-1 text-[9px] font-black text-gray-400 text-center border-r-2">漏排提醒</td>
+              {daysInMonth.map(d => { 
+                const missing = getMissingData()[d.day] || [];
+                return (
+                  <td key={d.day} className={`aborder p-0.5 align-top min-h-12 bg-orange-50 ${isCycleEnd(d.fullDate) ? 'border-r-4 border-r-gray-400' : ''}`}>
+                    {missing.length > 0 && (
+                      <div className="flex flex-col gap-0.5">
+                        {missing.map(m => (
+                          <div key={m} className="bg-white border border-orange-200 text-orange-600 font-bold text-[8px] rounded p-0.5 shadow-sm">
+                            {m}
+                          </div>
+                        ))}
+                      </div>
+                    )}
+                  </td>
+                );
+              })}
+            </tr>
+          </tfoot>
         </table>
       </div>
     </div>
