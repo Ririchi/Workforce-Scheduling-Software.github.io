@@ -1827,8 +1827,9 @@ const SchedulingView = ({ currentMonth, employees, daysInMonth, schedule, setSch
       });
     });
     setEditSched(newSched); setIsDirty(false);
-  }, [currentMonth, employees, daysInMonth]); // 🔥 修正點：移除了 schedule
-  
+  }, [currentMonth, employees, daysInMonth]);
+
+  // 💡 步驟 2 修正點：抓到幽靈同仁時只警示、不阻擋，且完美補回大括號避免 404 白屏！
   const handleImportCSV = (e) => {
     try {
       const file = e.target.files[0];
@@ -1837,15 +1838,8 @@ const SchedulingView = ({ currentMonth, employees, daysInMonth, schedule, setSch
       reader.onload = (ev) => {
         try {
           const rows = ev.target.result.split(/\r?\n/).map(r => r.split(',').map(c => c.trim().replace(/^"|"$/g, '')));
-          
           let fileMonth = null;
-          for (const r of rows) { 
-            const line = r.join(","); 
-            if (line.includes("年") && line.includes("月")) { 
-              fileMonth = parseROCTitle(line); 
-              if (fileMonth) break; 
-            } 
-          }
+          for (const r of rows) { const line = r.join(","); if (line.includes("年") && line.includes("月")) { fileMonth = parseROCTitle(line); if (fileMonth) break; } }
           
           if (fileMonth !== currentMonth) { 
             alert("CSV 標題月份與當前編輯月份不符。"); 
@@ -1858,13 +1852,11 @@ const SchedulingView = ({ currentMonth, employees, daysInMonth, schedule, setSch
           
           let missingEmployeesLog = "";
           let hasGhostEmployee = false;
-          // 建立一個 Set 防止重複記錄同一個幽靈員編
           const seenGhosts = new Set();
 
           rows.forEach(rowCells => {
             rowCells.forEach((cell, cellIdx) => {
               if (idPattern.test(cell)) {
-                // 確保 employees 陣列存在才進行尋找
                 const systemEmp = (employees || []).find(e => e.id === cell);
                 
                 if (systemEmp && nextPreview[systemEmp.name]) {
@@ -1885,7 +1877,7 @@ const SchedulingView = ({ currentMonth, employees, daysInMonth, schedule, setSch
           });
 
           if (hasGhostEmployee) {
-            alert(`⚠️ 班表已成功匯入預覽區！\n\n但偵測到以下人員不在系統名單內（已自動略過其班表）：\n\n${missingEmployeesLog}\n若需排入上述人員，請先於「帳號管理」新增資料。`);
+            alert(`⚠️ 提示：班表已成功匯入預覽區！\n\n但偵測到以下人員不在系統名單內（已自動略過其班表）：\n\n${missingEmployeesLog}\n若需排入上述人員，請記得於「帳號管理」補新增資料。`);
           }
 
           setIgnoredCells(new Set()); 
