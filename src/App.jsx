@@ -1708,13 +1708,23 @@ const ManagementReportView = ({ currentMonth, employees, schedule, personDayRule
   const checkLaborCompliance = (emp, days) => {
     if (!isFourWeekMode) return true;
     const blocks = [days.slice(0, 14), days.slice(14, 28)];
+    
     for (const block of blocks) {
       const codes = block.map(d => calculateCellValue(emp, d).display);
-      const holidayCount = block.filter(d => !!d.holiday).length;
+      // const holidayCount = block.filter(d => !!d.holiday).length; // 依照原本邏輯保留
+      
       const count0 = codes.filter(c => c === "0").length;
       const countMinus3 = codes.filter(c => c === "-3").length;
-      if (emp.labor === 'N') { if (count0 !== 4 || countMinus3 !== 4) return false; }
-      else if (emp.labor === 'Y') { if (count0 !== 8) return false; }
+      
+      // 💡 新的檢核規則
+      if (emp.labor === 'N') { 
+        // 非勞基法人員：每14天內，"0" 必須剛好 4 天，且 "-3" 必須剛好 4 天
+        if (count0 !== 4 || countMinus3 !== 4) return false; 
+      } 
+      else if (emp.labor === 'Y') { 
+        // 勞基法人員：每14天內，"0" 必須剛好 8 天
+        if (count0 !== 8) return false; 
+      }
     }
     return true;
   };
