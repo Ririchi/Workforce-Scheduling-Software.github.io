@@ -1713,8 +1713,8 @@ const ManagementReportView = ({ currentMonth, employees, schedule, personDayRule
       const holidayCount = block.filter(d => !!d.holiday).length;
       const count0 = codes.filter(c => c === "0").length;
       const countMinus3 = codes.filter(c => c === "-3").length;
-      if (emp.labor === 'N') { if (count0 !== 2 || countMinus3 !== 2) return false; }
-      else if (emp.labor === 'Y') { if (count0 !== 4) return false; }
+      if (emp.labor === 'N') { if (count0 !== 4 || countMinus3 !== 4) return false; }
+      else if (emp.labor === 'Y') { if (count0 !== 8) return false; }
     }
     return true;
   };
