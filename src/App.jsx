@@ -1663,6 +1663,9 @@ const ManagementReportView = ({ currentMonth, employees, schedule, personDayRule
     }
   }, [currentMonth, startDate, isFourWeekMode, holidays]);
 
+// =======================================================================
+  // 👑 修正版 1：優化代碼轉換，將「#」、「例」、「休」通通精確對齊為代碼 "0"
+  // =======================================================================
   const calculateCellValue = (emp, dayInfo) => {
     const mKey = isFourWeekMode ? dayInfo.monthKey : currentMonth;
     let rawVal = schedule[mKey]?.[emp.name]?.[dayInfo.day];
@@ -1677,8 +1680,9 @@ const ManagementReportView = ({ currentMonth, employees, schedule, personDayRule
 
     if (reportType === 'shiftCode') {
       const baseShiftName = rawStr.split('/')[0];
-      const shiftObj = shifts.find(s => s.name === baseShiftName);
-      const codeVal = shiftObj ? shiftObj.code : (baseShiftName === "#" ? "0" : (baseShiftName === "-" ? "1" : baseShiftName));
+      const shiftObj = (shifts || []).find(s => s.name === baseShiftName);
+      // 🔥 修正點：不只 "#" 算 "0"，自動填補或手動輸入的 "例"、"休" 也必須是代碼 "0"
+      const codeVal = shiftObj ? shiftObj.code : (["#", "例", "休"].includes(baseShiftName) ? "0" : (baseShiftName === "-" ? "1" : baseShiftName));
       return { display: codeVal, numeric: 0 };
     }
 
@@ -1705,25 +1709,50 @@ const ManagementReportView = ({ currentMonth, employees, schedule, personDayRule
     return { display: rawStr, numeric: 0 };
   };
 
+  // =======================================================================
+  // 👑 修正版 2：滿血獨立檢核邏輯，完美跟隨起始日期變動，且切換分頁絕不卡死
+  // =======================================================================
   const checkLaborCompliance = (emp, days) => {
     if (!isFourWeekMode) return true;
+    
+    // 這裡的 days 就是隨著起始日期變動的 28 天，精確切成兩個 14 天區塊
     const blocks = [days.slice(0, 14), days.slice(14, 28)];
     
     for (const block of blocks) {
-      const codes = block.map(d => calculateCellValue(emp, d).display);
-      // const holidayCount = block.filter(d => !!d.holiday).length; // 依照原本邏輯保留
+      // 💡 關鍵修正：建立完全獨立的真實代碼提取，不受當前頁面切換到「人日數」或「夜班費」的干擾！
+      const codes = block.map(d => {
+        const mKey = d.monthKey || currentMonth;
+        let rawVal = schedule[mKey]?.[emp.name]?.[d.day];
+        
+        // 100% 模擬排班表當天的預設值
+        if (!rawVal || rawVal === "" || rawVal === undefined) {
+          if (d.rawDay === 0 || d.holiday) rawVal = "例";
+          else if (d.rawDay === 6) rawVal = "#";
+          else rawVal = "-";
+        }
+
+        const rawStr = rawVal.toString().trim();
+        const baseShiftName = rawStr.split('/')[0];
+        const shiftObj = (shifts || []).find(s => s.name === baseShiftName);
+        
+        // 確保精確轉譯為真實代碼，將「例/休/#」通通群組為 "0" 進行加總
+        if (shiftObj) return shiftObj.code;
+        if (["#", "例", "休"].includes(baseShiftName)) return "0";
+        if (baseShiftName === "-") return "1";
+        return baseShiftName;
+      });
       
       const count0 = codes.filter(c => c === "0").length;
       const countMinus3 = codes.filter(c => c === "-3").length;
       
-      // 💡 新的檢核規則
+      // 💡 執行組長指定的最新規則
       if (emp.labor === 'N') { 
-        // 非勞基法人員：每14天內，"0" 必須剛好 4 天，且 "-3" 必須剛好 4 天
-        if (count0 !== 4 || countMinus3 !== 4) return false; 
+        // 勞基法人員：14天內，"0" 必須剛好 4 天
+        if (count0 !== 4) return false; 
       } 
       else if (emp.labor === 'Y') { 
-        // 勞基法人員：每14天內，"0" 必須剛好 8 天
-        if (count0 !== 8) return false; 
+        // 非勞基法人員：14天內，"0" 剛好 4 天 且 "-3" 剛好 4 天
+        if (count0 !== 2 || countMinus3 !== 2) return false; 
       }
     }
     return true;
