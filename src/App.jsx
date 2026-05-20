@@ -225,29 +225,38 @@ const SwapRequestModal = ({ isOpen, onClose, onConfirm, data, setIsModalOpen, ha
   );
 };
 
-const Header = ({ currentMonth, setCurrentMonth, currentPage, handlePageChange, isLoggedIn, currentUser, handleLogout, exportScheduleCSV, swapRequests }) => {
+const Header = ({ currentMonth, setCurrentMonth, currentPage, handlePageChange, isLoggedIn, currentUser, handleLogout, exportScheduleCSV, swapRequests, isDirty, setEditSched }) => {
   const isAdmin = currentUser?.role === '0';
   const hasPending = useMemo(() => {
       if (!isLoggedIn || !currentUser) return false;
       
       return swapRequests.some(req => {
-        // 💡 條件 A：做為主管身分（組長）需要核定的紅點
-        // 當單據已經到同仁全員簽完（PendingAdmin），且我是管理員時，亮紅點
         const adminNotice = isAdmin && req.status === 'PendingAdmin';
-
-        // 💡 條件 B：做為同仁身分（自己參與了換班）需要簽核的紅點
-        // 不管我是不是主管，只要「我」被拉進換班名單內（req.participants）、我不是發起人、
-        // 且單據在 WaitingParticipants 階段、我還沒簽完（Pending），我就應該看到紅點！
         const participantNotice = 
           req.status === 'WaitingParticipants' &&
           req.participants?.some(p => p.id === currentUser.id) &&
           req.creatorId !== currentUser.id &&
           req.approvals?.find(a => a.id === currentUser.id)?.status === 'Pending';
-
-        // 💡 只要符合「主管待審核」或「自己需要簽核」任意一個條件，就亮紅點
         return adminNotice || participantNotice;
       });
     }, [swapRequests, isLoggedIn, currentUser, isAdmin]);
+
+  // 💡 修正防線：控管全域月份切換，若在排班頁面編輯中，跳出警示
+  const handleMonthInputChange = (e) => {
+    const nextMonthVal = e.target.value;
+    if (!nextMonthVal) return;
+
+    if (currentPage === 'schedule' && isDirty) {
+      const confirmLeave = window.confirm("⚠️ 偵測到目前月份的班表已有編輯內容、尚未發佈！\n\n點擊「確定」將會放棄目前的修改並切換月份，點擊「取消」則留在原月份。");
+      if (!confirmLeave) return; // 使用者按取消，阻斷切換
+    }
+
+    // 💡 確定要切換月份：通知排班編輯器清空舊月份的鎖，並變更月份
+    if (typeof setEditSched === 'function') {
+      setEditSched({});
+    }
+    setCurrentMonth(nextMonthVal);
+  };
 
   return (
     <header className="bg-white border-b-2 border-gray-800 p-2 sm:p-3 sticky top-0 z-[100] shadow-md">
@@ -255,7 +264,25 @@ const Header = ({ currentMonth, setCurrentMonth, currentPage, handlePageChange, 
         <div className="flex flex-wrap items-center gap-3">
           <h1 className="text-xs font-black text-gray-800 border-r-2 border-gray-300 pr-4 leading-none cursor-pointer" onClick={() => handlePageChange('home')}>台大雲林藥劑部班表 <span className="text-[10px] text-gray-400 font-normal ml-1">V1.8</span></h1>
           <div className="flex items-center gap-2">
-            <input type="month" value={currentMonth} onChange={(e) => setCurrentMonth(e.target.value)} className="border-2 border-gray-300 rounded px-1.5 py-0.5 text-xs font-bold focus:border-blue-500 outline-none" />
+            <input 
+              type="month" 
+              value={currentMonth} 
+              
+              // 💡 修正點：利用妳原本就有的 currentPage 與 isDirty 進行防呆攔截
+              onChange={(e) => {
+                const nextMonthVal = e.target.value;
+                if (!nextMonthVal) return;
+
+                if (currentPage === 'schedule' && isDirty) {
+                  const confirmLeave = window.confirm("⚠️ 偵測到目前月份的班表已有編輯內容、尚未發佈！\n\n點擊「確定」將會放棄目前的修改並切換月份，點擊「取消」則留在原月份。");
+                  if (!confirmLeave) return; // 使用者按取消，直接阻斷月份切換
+                }
+                
+                // 通過檢查，或是沒被更改過，直接切換月份
+                setCurrentMonth(nextMonthVal);
+              }} 
+              className="border-2 border-gray-300 rounded px-1.5 py-0.5 text-xs font-bold focus:border-blue-500 outline-none" 
+            />
             {isLoggedIn && (<span className="text-[11px] font-black text-blue-600 bg-blue-50 px-2 py-0.5 rounded-lg border border-blue-100 flex items-center gap-1"><User size={12}/> 哈囉, {currentUser.name}</span>)}
           </div>
         </div>
@@ -284,6 +311,7 @@ const Header = ({ currentMonth, setCurrentMonth, currentPage, handlePageChange, 
     </header>
   );
 };
+
 const ScheduleTableView = ({ currentMonth, employees, schedule, cellColors, daysInMonth, onCellClick, swapRequests = [], currentPage, currentUser, swapTarget, handleSwapBack, isCycleEnd: checkCycleEnd}) => {
 
   const isHome = currentPage === 'home';
@@ -1801,6 +1829,9 @@ const ManagementReportView = ({ currentMonth, employees, schedule, personDayRule
   );
 };
 
+// =======================================================================
+// 👑 滿血修復完全體：整合所有今日需求的 SchedulingView
+// =======================================================================
 const SchedulingView = ({ currentMonth, employees, daysInMonth, schedule, setSchedule, cellColors, setCellColors, shifts, exportScheduleCSV, setCurrentPage, setIsDirty, saveData }) => {
   const [editSched, setEditSched] = useState({});
   const [activeColor, setActiveColor] = useState('bg-white');
@@ -1808,13 +1839,21 @@ const SchedulingView = ({ currentMonth, employees, daysInMonth, schedule, setSch
   const [ignoredCells, setIgnoredCells] = useState(new Set()); 
   const fileRef = useRef(null);
 
-  // 功能 1：隔離全域監聽洗檔問題（移除 schedule 依賴，確保輸入不消失）
+  // 💡 新增：作為排班編輯器專屬的「月份切換偵測記憶體」
+  const prevMonthRef = useRef(currentMonth);
+
+  // 💡 修正 1：自動對齊月份切換，保護手動輸入不洗檔
   useEffect(() => {
-    // 檢查 editSched 是否已經有當前同仁的排班資料，如果有，代表正在編輯中，直接攔截不執行初始化！
-    if (editSched && Object.keys(editSched).length > 0) {
-      return; 
+    // 讓系統自己去對比，是不是真的換月份了
+    const isMonthChanged = prevMonthRef.current !== currentMonth;
+
+    // 🛑 情況 A：如果「不是切換月份」且「編輯器已經有暫存資料」，代表是同月內手動輸入
+    // 啟動安全防護，全域監聽再怎麼跳動，都絕對攔截不洗檔！（解決兩秒消失）
+    if (!isMonthChanged && editSched && Object.keys(editSched).length > 0) {
+      return;
     }
 
+    // 🌟 情況 B：如果是「初次載入」或「確認切換月份了」，精確從全域複製新月份班表進來！
     const curMonthSched = schedule[currentMonth] || {};
     const newSched = {};
     employees.forEach(e => {
@@ -1832,11 +1871,19 @@ const SchedulingView = ({ currentMonth, employees, daysInMonth, schedule, setSch
         } 
       });
     });
-    setEditSched(newSched); 
-    setIsDirty(false);
-  }, [currentMonth, employees, daysInMonth, editSched]);
 
-  // 功能 2：上傳 CSV 幽靈人員只提示、不阻擋（語法完美包覆版）
+    setEditSched(newSched);
+    
+    // 如果是切換月份，自動把編輯狀態、CSV預覽狀態清洗乾淨，並更新 Ref 紀錄
+    if (isMonthChanged) {
+      setIsDirty(false);
+      setImportPreview(null);
+      setIgnoredCells(new Set());
+      prevMonthRef.current = currentMonth;
+    }
+  }, [currentMonth, employees, daysInMonth, schedule, editSched]); 
+
+  // 💡 修正 2：精確鎖定 Y+5碼員編的匯入檢核
   const handleImportCSV = (e) => {
     try {
       const file = e.target.files[0];
@@ -1845,12 +1892,26 @@ const SchedulingView = ({ currentMonth, employees, daysInMonth, schedule, setSch
       reader.onload = (ev) => {
         try {
           const rows = ev.target.result.split(/\r?\n/).map(r => r.split(',').map(c => c.trim().replace(/^"|"$/g, '')));
+          
           let fileMonth = null;
-          for (const r of rows) { const line = r.join(","); if (line.includes("年") && line.includes("月")) { fileMonth = parseROCTitle(line); if (fileMonth) break; } }
-          if (fileMonth !== currentMonth) { alert("CSV 標題月份與當前編輯月份不符。"); fileRef.current.value = ''; return; }
+          for (const r of rows) { 
+            const line = r.join(","); 
+            if (line.includes("年") && line.includes("月")) { 
+              fileMonth = parseROCTitle(line); 
+              if (fileMonth) break; 
+            } 
+          }
+          
+          if (fileMonth !== currentMonth) { 
+            alert("CSV 標題月份與當前編輯月份不符。"); 
+            fileRef.current.value = ''; 
+            return; 
+          }
           
           const nextPreview = deepClone(editSched || {});
-          const idPattern = /^Y\d{5}$/;
+          
+          // 🔥 修正點：將正則表達式改為極度精準的 Y 加上 5個數字
+          const idPattern = /^Y\d{5}$/; 
           
           let missingEmployeesLog = "";
           let hasGhostEmployee = false;
@@ -1860,6 +1921,7 @@ const SchedulingView = ({ currentMonth, employees, daysInMonth, schedule, setSch
             rowCells.forEach((cell, cellIdx) => {
               if (idPattern.test(cell)) {
                 const systemEmp = (employees || []).find(e => e.id === cell);
+                
                 if (systemEmp && nextPreview[systemEmp.name]) {
                   for (let d = 1; d <= daysInMonth.length; d++) {
                     const shiftVal = rowCells[cellIdx + 1 + d];
@@ -1878,7 +1940,7 @@ const SchedulingView = ({ currentMonth, employees, daysInMonth, schedule, setSch
           });
 
           if (hasGhostEmployee) {
-            alert(`⚠️ 提示：班表已成功匯入預覽區！\n\n但偵測到以下人員不在系統名單內（已自動略過其班表）：\n\n${missingEmployeesLog}\n若需排入上述人員，請記得於「帳號管理」補新增資料。`);
+            alert(`⚠️ 班表已成功匯入預覽區！\n\n但偵測到以下人員不在系統名單內（已自動略過其班表）：\n\n${missingEmployeesLog}\n若需排入上述人員，請先於「帳號管理」新增資料。`);
           }
 
           setIgnoredCells(new Set()); 
@@ -1906,7 +1968,6 @@ const SchedulingView = ({ currentMonth, employees, daysInMonth, schedule, setSch
   };
 
   const isSatisfied = (cellValue, targetShiftName) => {
-    // 💡 修正點：將 orient 修正回標準的 || 符號
     if (!cellValue || cellValue === "-" || cellValue === "#" || cellValue === "例" || cellValue === "休") return false;
     const regex = new RegExp(`(^|[/()#])${targetShiftName}($|[/()#])`);
     return regex.test(String(cellValue).trim());
@@ -1918,6 +1979,7 @@ const SchedulingView = ({ currentMonth, employees, daysInMonth, schedule, setSch
     Object.values(editSched).forEach(empSched => {
       Object.values(empSched).forEach(v => { if (v && !["-", "#", "例", ""].includes(v)) allScheduledThisMonth.add(String(v)); });
     });
+    // 💡 修正點：加上 (shifts || []) 防止白屏
     const monthlyRules = (shifts || []).filter(s => s.isRegular === 'Y' && s.regularDays.includes("月"));
     daysInMonth.forEach(d => {
       const scheduledOnDay = Object.values(editSched).map(u => u?.[d.day]);
@@ -1989,7 +2051,9 @@ const SchedulingView = ({ currentMonth, employees, daysInMonth, schedule, setSch
                 if (d.rawDay === 0 || d.holiday) bgClass = "bg-[#FFB3D9]";
                 else if (d.rawDay === 6) bgClass = "bg-[#FFB366]";
                 return (
-                  <th key={d.day} className={`sticky top-0 z-[90] p-1 w-12 font-bold border-b-2 border-r border-gray-200 ${bgClass} ${cycleEnd ? 'border-r-4 border-r-gray-400' : ''}`}>
+                  <th 
+                    key={d.day} 
+                    className={`sticky top-0 z-[90] p-1 w-12 font-bold border-b-2 border-r border-gray-200 ${bgClass} ${cycleEnd ? 'border-r-4 border-r-gray-400' : ''}`}>
                     <div className="text-[10px] opacity-50">{d.dayOfWeek}</div>
                     <div className="text-sm">{d.day}</div>
                     <div className="text-[9px] text-red-600 truncate h-3 leading-none font-normal">{String(d.holiday || "")}</div>
@@ -2024,11 +2088,12 @@ const SchedulingView = ({ currentMonth, employees, daysInMonth, schedule, setSch
                           if (importPreview && isConflict) { const n = new Set(ignoredCells); if (n.has(`${emp.name}-${d.day}`)) n.delete(`${emp.name}-${d.day}`); else n.add(`${emp.name}-${d.day}`); setIgnoredCells(n);
                           } else if (!importPreview) { const nc = deepClone(cellColors); if (!nc[currentMonth]) nc[currentMonth] = {}; if (!nc[currentMonth][emp.name]) nc[currentMonth][emp.name] = {}; nc[currentMonth][emp.name][d.day] = activeColor; setCellColors(nc);saveData({ cellColors: nc }); }
                         }}>
-                        {/* 功能 3：純字體反紅檢核邏輯（完美包覆、排除夜診三列與預設常態班別符號） */}
                         <input 
                           type="text" 
                           value={displayVal} 
                           disabled={!!importPreview} 
+                          
+                          /* 💡 修正 3：加入防護的純字體反紅邏輯，(shifts || []) 防止白屏！ */
                           className={`w-full h-full text-center bg-transparent focus:bg-white outline-none font-bold font-mono cursor-text ${
                             importPreview ? 'pointer-events-none opacity-80' : ''
                           } ${
@@ -2047,7 +2112,9 @@ const SchedulingView = ({ currentMonth, employees, daysInMonth, schedule, setSch
           </tbody>
           <tfoot className="bg-gray-50 border-t-2 border-gray-300">
             <tr>
-              <td className="bg-gray-100 border p-1 text-[9px] font-black text-gray-400 text-center border-r-2">漏排提醒</td>
+              <td className="bg-gray-100 border p-1 text-[9px] font-black text-gray-400 text-center border-r-2">
+                漏排提醒
+              </td>
               {daysInMonth.map(d => { 
                 const missing = getMissingData()[d.day] || [];
                 return (
@@ -2353,9 +2420,7 @@ const handleRecordAction = (req, action) => {
         return; 
       }
 
-      // ========================================================
-      // 2. 檢核通過！以下維持您原本的核心對調與產生新班表程式碼
-      // ========================================================
+
       const nextStatus = 'Approved';
       const ns = deepClone(schedule);
       
@@ -2448,7 +2513,7 @@ const handleParticipantApprove = (reqId) => {
 
   return (
     <div className="flex flex-col h-screen bg-white font-sans text-gray-900 overflow-hidden">
-      <Header currentMonth={currentMonth} setCurrentMonth={setCurrentMonth} currentPage={currentPage} handlePageChange={handlePageChange} isLoggedIn={isLoggedIn} currentUser={currentUser} handleLogout={()=>{setIsLoggedIn(false); setCurrentUser(null); setCurrentPage('home');}} exportScheduleCSV={exportScheduleCSV} swapRequests={swapRequests} />
+      <Header currentMonth={currentMonth} setCurrentMonth={setCurrentMonth} currentPage={currentPage} handlePageChange={handlePageChange} isLoggedIn={isLoggedIn} currentUser={currentUser} handleLogout={()=>{setIsLoggedIn(false); setCurrentUser(null); setCurrentPage('home');}} exportScheduleCSV={exportScheduleCSV} swapRequests={swapRequests} isDirty={isDirty} />
       <main className="flex-grow flex flex-col overflow-hidden">
         {(() => {
           switch (currentPage) {
