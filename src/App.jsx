@@ -316,23 +316,20 @@ const ScheduleTableView = ({ currentMonth, employees, schedule, cellColors, days
 
   const isHome = currentPage === 'home';
   const isSwap = currentPage === 'swap';
-  
-// 計算提示條是否存在，若存在則標頭要往下壓 (提示條高度約為 44px)
   const headerTop = onCellClick ? 'top-[44px]' : 'top-0';
-
   const hasSupportData = useMemo(() => {
     const supportRow = schedule[currentMonth]?.["夜診支援"] || {};
     return Object.values(supportRow).some(v => v && v !== "-" && v !== "#" && v !== "例" && v !== "");
   }, [schedule, currentMonth]);
 
-return (
+  return (
     <div className="flex-grow flex flex-col h-full bg-gray-50 font-sans overflow-hidden">
       {onCellClick && (
         <div className="flex-none bg-[#2A85A1] text-white py-2.5 px-4 text-center font-black text-sm shadow-md z-[110]">
           <Info size={16} className="inline mr-2 mb-0.5" />
           換班系統：點選欲換人員班別即可申請換班 </div>)}
 
-      {/* 修改 3: 這裡才是真正會捲動的容器 */}
+      {/*這裡才是真正會捲動的容器 */}
       <div className="flex-grow overflow-auto relative">
         <table className="w-full text-[12px] text-center border-separate border-spacing-0 table-fixed min-w-[1600px] lg:min-w-[1800px]">
           <thead>
@@ -488,7 +485,7 @@ return (
     handleAutoLotteryCheck();
   }, [currentMonth, preLeaveData, isMonthDrawn, currentUser]); // 精確監聽子組件內的狀態
 
-useEffect(() => {
+  useEffect(() => {
     if (!schedule[currentMonth]) return;
     let changed = false;
     const next = deepClone(preLeaveData);
@@ -509,7 +506,7 @@ useEffect(() => {
     }
   }, [currentMonth, schedule]);
 
- const handleToggle = (empName, day) => {
+  const handleToggle = (empName, day) => {
     if (isMonthDrawn) return;
     const sVal = schedule[currentMonth]?.[empName]?.[day];
     if (['休', '公假', '例'].includes(sVal)) return; 
@@ -523,7 +520,7 @@ useEffect(() => {
     saveData({ preLeaveData: next }); 
   };
 
-const getLeaveList = (day) => {
+  const getLeaveList = (day) => {
     return employees
       .filter(e => !e.isSeparator && !getIsNightClinic(e) && e.role !== '2' && e.role !== '3' &&  preLeaveData.apps?.[currentMonth]?.[e.name]?.[day] === "預假") 
       .map(e => e.name);
@@ -549,16 +546,16 @@ const getLeaveList = (day) => {
     link.click();
   };
   
-const handleAdminSettingChange = (type, value) => {
+  const handleAdminSettingChange = (type, value) => {
   if (!isAdmin) return;
   const next = deepClone(preLeaveData);
   if (type === 'holiday') next.weekendLimit = value;
   else if (type === 'weekday') next.weekdayLimit = value;
   else if (type === 'lotteryDay') next.lotteryDay = value; setPreLeaveData(next);saveData({ preLeaveData: next }); 
-};
+  };
 
 
-// 💡 修正後：安全防白屏、支援手動與自動抽籤的 handleLottery
+  // 💡 修正後：安全防白屏、支援手動與自動抽籤的 handleLottery
   const handleLottery = async (e) => {
     if (isMonthDrawn) return;
 
@@ -1868,17 +1865,14 @@ const ManagementReportView = ({ currentMonth, employees, schedule, personDayRule
   );
 };
 
-// =======================================================================
-// 👑 滿血修復完全體：整合所有今日需求的 SchedulingView
-// =======================================================================
-const SchedulingView = ({ currentMonth, employees, daysInMonth, schedule, setSchedule, cellColors, setCellColors, shifts, exportScheduleCSV, setCurrentPage, setIsDirty, saveData }) => {
+const SchedulingView = ({ currentMonth, employees, daysInMonth, schedule, setSchedule, cellColors, setCellColors, shifts, exportScheduleCSV, setCurrentPage, setIsDirty, saveData, preLeaveData, setPreLeaveData, isAdmin, isMonthDrawn }) => {
   const [editSched, setEditSched] = useState({});
   const [activeColor, setActiveColor] = useState('bg-white');
   const [importPreview, setImportPreview] = useState(null);
   const [ignoredCells, setIgnoredCells] = useState(new Set()); 
   const fileRef = useRef(null);
-
-  // 💡 新增：作為排班編輯器專屬的「月份切換偵測記憶體」
+  const [showLaborWarning, setShowLaborWarning] = useState(false);
+  const [cycleStartDate, setCycleStartDate] = useState(`${currentMonth}-01`); // 預設使用當月1號作為四周週期起點
   const prevMonthRef = useRef(currentMonth);
 
   // 💡 修正 1：自動對齊月份切換，保護手動輸入不洗檔
@@ -2045,6 +2039,107 @@ const SchedulingView = ({ currentMonth, employees, daysInMonth, schedule, setSch
     alert("班表發佈完成！");
   };
 
+  // 💡 勞基法即時檢核器 (跨月拼接 + 完美對齊報表邏輯)
+  const laborAnalysis = useMemo(() => {
+    if (!showLaborWarning || !cycleStartDate) return { codes: {}, details: {} };
+
+    const analysis = { codes: {}, details: {} };
+    const startObj = new Date(cycleStartDate);
+    const dayMs = 24 * 60 * 60 * 1000;
+
+    employees.forEach(emp => {
+      if (emp.isSeparator) return;
+      analysis.codes[emp.name] = {};
+      const fourWeeksCodes = [];
+
+      // 產生 28 天的完整跨月代碼陣列
+      for (let i = 0; i < 28; i++) {
+        const targetDate = new Date(startObj.getTime() + i * dayMs);
+        const yKey = targetDate.getFullYear();
+        const mKey = String(targetDate.getMonth() + 1).padStart(2, '0');
+        const dKey = String(targetDate.getDate());
+        const targetMonthStr = `${yKey}-${mKey}`;
+
+        // 當月抓編輯中的 editSched，非當月抓已儲存的 schedule
+        let rawVal = "-";
+        if (targetMonthStr === currentMonth) {
+          rawVal = editSched[emp.name]?.[dKey] || "-";
+        } else {
+          rawVal = schedule[targetMonthStr]?.[emp.name]?.[dKey] || "-";
+        }
+
+        let code = "";
+        if (rawVal === "例") code = "-3";
+        else if (["休", "#", "公"].includes(rawVal)) code = "0";
+        else if (rawVal === "國") code = "-2";
+        else {
+          const shiftObj = shifts?.find(s => s.name === rawVal);
+          if (shiftObj) code = shiftObj.code;
+        }
+
+        fourWeeksCodes.push(code);
+
+        // 如果是當月，存入 codes 供格子右下角顯示
+        if (targetMonthStr === currentMonth) {
+          analysis.codes[emp.name][dKey] = code;
+        }
+      }
+
+      // 統計例與休 (0 與 -2 皆視為休)
+      let firstBiweekLi = 0, firstBiweekXiu = 0;
+      let secondBiweekLi = 0, secondBiweekXiu = 0;
+
+      for (let i = 0; i < 14; i++) {
+        if (fourWeeksCodes[i] === "-3") firstBiweekLi++;
+        else if (fourWeeksCodes[i] === "0" || fourWeeksCodes[i] === "-2") firstBiweekXiu++;
+      }
+      for (let i = 14; i < 28; i++) {
+        if (fourWeeksCodes[i] === "-3") secondBiweekLi++;
+        else if (fourWeeksCodes[i] === "0" || fourWeeksCodes[i] === "-2") secondBiweekXiu++;
+      }
+
+      // 判斷是否違規
+      const isLabor = emp.labor === 'Y';
+      let w1Violation = false, w2Violation = false;
+
+      if (isLabor) {
+        if (firstBiweekLi < 2 || firstBiweekXiu < 2) w1Violation = true;
+        if (secondBiweekLi < 2 || secondBiweekXiu < 2) w2Violation = true;
+      } else {
+        if ((firstBiweekLi + firstBiweekXiu) < 4) w1Violation = true;
+        if ((secondBiweekLi + secondBiweekXiu) < 4) w2Violation = true;
+      }
+
+      analysis.details[emp.name] = {
+        hasViolation: w1Violation || w2Violation,
+        isLabor, w1Violation, w2Violation,
+        firstBiweekLi, firstBiweekXiu,
+        secondBiweekLi, secondBiweekXiu
+      };
+    });
+
+    // 補齊本月其餘日期
+    employees.forEach(emp => {
+      if (emp.isSeparator || !analysis.codes[emp.name]) return;
+      daysInMonth.forEach(d => {
+        if (analysis.codes[emp.name][d.day] === undefined) {
+          const val = editSched[emp.name]?.[d.day] || "-";
+          let code = "";
+          if (val === "例") code = "-3";
+          else if (["休", "#", "公假", "特休"].includes(val)) code = "0";
+          else if (val === "國") code = "-2";
+          else {
+            const shiftObj = shifts?.find(s => s.name === val);
+            if (shiftObj) code = shiftObj.code;
+          }
+          analysis.codes[emp.name][d.day] = code;
+        }
+      });
+    });
+
+    return analysis;
+  }, [showLaborWarning, cycleStartDate, editSched, schedule, currentMonth, employees, daysInMonth, shifts]);
+
   return (
     <div className="flex-grow flex flex-col h-full bg-gray-100 overflow-hidden font-sans">
       <div className="flex-none bg-white border-b p-2 flex justify-between items-center shadow-sm z-20">
@@ -2069,6 +2164,31 @@ const SchedulingView = ({ currentMonth, employees, daysInMonth, schedule, setSch
              </div>
           )}
         </div>
+        <div className="flex items-center gap-3 ml-auto border-l-2 border-gray-200 pl-4">
+          {/* 開啟時顯示起始日期選擇 */}
+          {showLaborWarning && (
+            <input 
+              type="date" 
+              value={cycleStartDate} 
+              onChange={(e) => setCycleStartDate(e.target.value)} 
+              className="border border-blue-300 rounded-lg px-2 py-1 text-xs font-bold outline-none text-blue-700 bg-blue-50"
+              title="設定四周變形工時起始日"
+            />
+          )}
+          
+          <label className="flex items-center gap-2 text-sm font-bold bg-slate-50 hover:bg-slate-100 px-3 py-1.5 rounded-xl border border-slate-200 cursor-pointer transition-colors shadow-sm">
+            <div className="relative inline-block w-8 h-4 rounded-full bg-gray-300">
+              <input 
+                type="checkbox" 
+                className="peer opacity-0 w-0 h-0"
+                checked={showLaborWarning} 
+                onChange={(e) => setShowLaborWarning(e.target.checked)}
+              />
+              <span className="absolute cursor-pointer top-0 left-0 right-0 bottom-0 bg-gray-300 rounded-full transition-all peer-checked:bg-blue-500 before:content-[''] before:absolute before:h-3 before:w-3 before:left-0.5 before:bottom-0.5 before:bg-white before:rounded-full before:transition-all peer-checked:before:translate-x-4"></span>
+            </div>
+            <span className={showLaborWarning ? 'text-blue-700' : 'text-gray-500'}>勞基法即時檢核</span>
+          </label>
+        </div>
         <div className="flex gap-2">
           {!importPreview && (
             <>
@@ -2079,23 +2199,49 @@ const SchedulingView = ({ currentMonth, employees, daysInMonth, schedule, setSch
           <input type="file" ref={fileRef} className="hidden" accept=".csv" onChange={handleImportCSV} />
         </div>
       </div>
-      <div className="flex-grow overflow-auto relative p-4 select-none">
-        <table className="w-full text-[11px] text-center border-separate border-spacing-0 table-fixed bg-white shadow-xl min-w-[1000px]">
+      <div className="overflow-x-auto w-full border rounded-lg shadow-sm">
+        <table className="w-full text-[12px] text-center border-separate border-spacing-0 table-fixed min-w-[1600px] lg:min-w-[1800px]">
           <thead>
-            <tr className="bg-gray-50 border-b text-[10px]">
-              <th className="sticky left-0 top-0 z-[100] bg-gray-100 p-2 w-20 font-black border-b-2 border-r-2 border-gray-200">姓名</th>
+            <tr>
+              <th className="sticky left-0 top-0 z-[100] bg-gray-100 p-3 w-16 font-black text-[11px] shadow-[2px_2px_5px_rgba(0,0,0,0.1)] border-b-2 border-r-2 border-gray-300">姓名</th>
               {daysInMonth.map(d => {
                 const cycleEnd = isCycleEnd(d.fullDate);
-                let bgClass = "bg-gray-50";
+                let bgClass = "bg-gray-100";
                 if (d.rawDay === 0 || d.holiday) bgClass = "bg-[#FFB3D9]";
                 else if (d.rawDay === 6) bgClass = "bg-[#FFB366]";
                 return (
-                  <th 
-                    key={d.day} 
-                    className={`sticky top-0 z-[90] p-1 w-12 font-bold border-b-2 border-r border-gray-200 ${bgClass} ${cycleEnd ? 'border-r-4 border-r-gray-400' : ''}`}>
-                    <div className="text-[10px] opacity-50">{d.dayOfWeek}</div>
-                    <div className="text-sm">{d.day}</div>
-                    <div className="text-[9px] text-red-600 truncate h-3 leading-none font-normal">{String(d.holiday || "")}</div>
+                  <th key={d.day} 
+                    className={`sticky top-0 z-[90] p-1 w-12 font-bold border-b-2 border-r border-gray-300 ${bgClass} ${cycleEnd ? 'border-r-4 border-r-gray-400' : ''}`} >
+                    <div className="text-[10px] opacity-60">{d.dayOfWeek}</div>
+                    <div className="text-base">{d.day}</div>
+                    <div className="text-[9px] text-red-600 truncate h-4 leading-none font-normal">{String(d.holiday || "")}</div>
+                  </th>);})}</tr>
+            <tr className="sticky top-[65px] z-[60] bg-[#F3E5F5] border-b shadow-sm">
+              <th className="sticky left-0 top-[65px] z-[70] bg-[#F3E5F5] border p-2 font-normal text-purple-600 text-[11px] w-[80px] min-w-[80px] shadow-[2px_0_5px_rgba(0,0,0,0.05)]"> 備註 </th>
+              {daysInMonth.map(d => {
+                const cycleEnd = isCycleEnd(d.fullDate);
+                
+                // 💡 修正：取消 isMonthDrawn 的限制。只要是管理員 (!isAdmin 為 false)，就永遠可以編輯備註！
+                const isDisabled = !isAdmin; 
+                
+                return (
+                  <th key={`note-${d.day}`} className={`border p-0.5 align-middle w-[55px] min-w-[55px] ${cycleEnd ? 'border-r-4 border-r-gray-400' : ''}`}>
+                    <textarea 
+                      rows={1}
+                      value={preLeaveData?.remarks?.[currentMonth]?.[d.day] || ""} 
+                      disabled={isDisabled}
+                      onChange={e => { 
+                        const next = deepClone(preLeaveData); 
+                        if(!next.remarks) next.remarks = {};
+                        if(!next.remarks[currentMonth]) next.remarks[currentMonth] = {}; 
+                        next.remarks[currentMonth][d.day] = e.target.value;   
+                        setPreLeaveData(next);
+                        saveData({ preLeaveData: next }); 
+                      }}
+                      // 💡 樣式同步更新：當 isDisabled 時才顯示游標禁止 (cursor-not-allowed)
+                      className={`w-full h-full bg-transparent text-[11px] font-bold text-purple-600 text-center outline-none resize-none overflow-hidden block ${isDisabled ? 'cursor-not-allowed opacity-70' : 'cursor-text'}`}
+                      style={{ fieldSizing: 'content', minHeight: '1.5em' }}
+                    />
                   </th>
                 );
               })}
@@ -2104,12 +2250,40 @@ const SchedulingView = ({ currentMonth, employees, daysInMonth, schedule, setSch
           <tbody>
             {employees.map((emp) => {
               if (emp.isSeparator) return <tr key={emp.id} className="bg-gray-200 h-[1.5px]"><td colSpan={daysInMonth.length + 1}></td></tr>;
+              
               const isNC = getIsNightClinic(emp);
+              const detail = laborAnalysis.details?.[emp.name];
+              const isViolated = showLaborWarning && detail?.hasViolation;
+              
               return (
                 <tr key={emp.id} className="hover:bg-blue-50 border-b group transition-colors">
-                  <td className="sticky left-0 z-10 bg-white border-r border-gray-200 p-2 font-black group-hover:bg-blue-50 shadow-[2px_0_5px_rgba(0,0,0,0.05)]">
-                    {emp.name}
+                  <td className={`sticky left-0 z-[50] bg-white border p-2 shadow-[2px_0_5px_rgba(0,0,0,0.1)] align-middle w-[80px] min-w-[80px]
+                    ${isViolated ? 'bg-red-50 border-r-4 border-r-red-500' : 'group-hover:bg-blue-50'}
+                  `}>
+                    <div className="flex flex-col items-center justify-center gap-1 w-full text-center">
+                      <span className={`font-black text-[13px] w-full truncate ${isViolated ? 'text-red-800' : 'text-gray-800'}`}>
+                        {emp.name}
+                      </span>
+                      
+                      {isViolated && (
+                        <div className="text-red-600 font-bold text-[10px] leading-tight">
+                          {detail.isLabor ? (
+                            <>
+                              {detail.w1Violation && <div>前半:<br/>{detail.firstBiweekLi}例 {detail.firstBiweekXiu}休</div>}
+                              {detail.w2Violation && <div className="mt-1">後半:<br/>{detail.secondBiweekLi}例 {detail.secondBiweekXiu}休</div>}
+                            </>
+                          ) : (
+                            <>
+                              {detail.w1Violation && <div>前半:<br/>{detail.firstBiweekLi}例 {detail.firstBiweekXiu}休</div>}
+                              {detail.w2Violation && <div className="mt-1">後半:<br/>{detail.secondBiweekLi}例 {detail.secondBiweekXiu}休</div>}
+                            </>
+                          )}
+                        </div>
+                      )}
+                    </div>
                   </td>
+
+                  {/* 排班格子 */}
                   {daysInMonth.map((d) => {
                     const originalVal = editSched[emp.name]?.[d.day] || (isNC ? "" : "-");
                     const previewVal = importPreview ? importPreview[emp.name]?.[d.day] : null;
@@ -2117,31 +2291,61 @@ const SchedulingView = ({ currentMonth, employees, daysInMonth, schedule, setSch
                     const isIgnored = ignoredCells.has(`${emp.name}-${d.day}`);
                     const displayVal = (importPreview && !isIgnored) ? previewVal : originalVal;
                     const customColor = cellColors[currentMonth]?.[emp.name]?.[d.day];
+                    
                     let bgClass = "bg-white"; 
                     if (customColor && customColor !== "bg-white") bgClass = customColor; 
                     else if (d.rawDay === 0 || !!d.holiday) bgClass = "bg-[#FFB3D9]"; 
                     else if (d.rawDay === 6) bgClass = "bg-[#FFB366]";
+
+                    const conflictClass = (importPreview && isConflict && !isIgnored) ? 'bg-blue-100 ring-inset ring-2 ring-blue-400 z-20' : '';
+                    const isLocalEnd = isCycleEnd(d.fullDate);
+                    const borderClass = isLocalEnd ? 'border-r-4 border-r-gray-400 z-30' : 'border-r';
+
                     return (
-                      <td key={d.day} className={`border p-0 ${isNC ? 'h-[32px]' : 'h-10'} relative ${bgClass} ${isCycleEnd(d.fullDate) ? 'border-r-4 border-r-gray-400' : ''} ${isConflict ? 'ring-2 ring-blue-500 ring-inset bg-blue-50' : ''}`}
+                      <td 
+                        key={d.day} 
+                        className={`relative border-y border-l p-0 align-middle ${bgClass} ${conflictClass} ${borderClass}`}
                         onClick={() => {
-                          if (importPreview && isConflict) { const n = new Set(ignoredCells); if (n.has(`${emp.name}-${d.day}`)) n.delete(`${emp.name}-${d.day}`); else n.add(`${emp.name}-${d.day}`); setIgnoredCells(n);
-                          } else if (!importPreview) { const nc = deepClone(cellColors); if (!nc[currentMonth]) nc[currentMonth] = {}; if (!nc[currentMonth][emp.name]) nc[currentMonth][emp.name] = {}; nc[currentMonth][emp.name][d.day] = activeColor; setCellColors(nc);saveData({ cellColors: nc }); }
-                        }}>
+                          if (importPreview && isConflict) { 
+                            const n = new Set(ignoredCells); 
+                            if (n.has(`${emp.name}-${d.day}`)) n.delete(`${emp.name}-${d.day}`); 
+                            else n.add(`${emp.name}-${d.day}`); 
+                            setIgnoredCells(n);
+                          } else if (!importPreview) { 
+                            const nc = deepClone(cellColors); 
+                            if (!nc[currentMonth]) nc[currentMonth] = {}; 
+                            if (!nc[currentMonth][emp.name]) nc[currentMonth][emp.name] = {}; 
+                            nc[currentMonth][emp.name][d.day] = activeColor; 
+                            setCellColors(nc);
+                            saveData({ cellColors: nc }); 
+                          }
+                        }}
+                      >
                         <input 
                           type="text" 
                           value={displayVal} 
                           disabled={!!importPreview} 
-                          
-                          /* 💡 修正 3：加入防護的純字體反紅邏輯，(shifts || []) 防止白屏！ */
-                          className={`w-full h-full text-center bg-transparent focus:bg-white outline-none font-bold font-mono cursor-text ${
+                          className={`w-full h-full text-center bg-transparent focus:bg-white outline-none font-normal font-mono cursor-text relative z-10 whitespace-nowrap ${
                             importPreview ? 'pointer-events-none opacity-80' : ''
                           } ${
-                            (!isNC && displayVal !== "" && !["-", "#", "例", "休", "公假"].includes(displayVal) && !(shifts || []).some(s => s.name === displayVal))
+                            (!isNC && displayVal !== "" && !["-", "#", "例", "休", "公", "國"].includes(displayVal) && !(shifts || []).some(s => s.name === displayVal))
                               ? 'text-red-500 font-black' 
                               : (displayVal === "-" ? 'text-gray-300' : 'text-gray-800')
                           }`}
-                          onChange={(e) => { if (!importPreview) { setEditSched(prev => ({ ...prev, [emp.name]: { ...prev[emp.name], [d.day]: e.target.value } })); setIsDirty(true); } }} 
+                          onChange={(e) => { 
+                            if (!importPreview) { 
+                              setEditSched(prev => ({ ...prev, [emp.name]: { ...prev[emp.name], [d.day]: e.target.value } })); 
+                              setIsDirty(true); 
+                            } 
+                          }} 
                         />
+                        
+                        {/* 隱約顯示的勞基法代碼 */}
+                        {showLaborWarning && laborAnalysis.codes[emp.name]?.[d.day] && (
+                          <span className="absolute bottom-0 right-0.5 text-[8px] font-black z-0 opacity-40 select-none pointer-events-none text-gray-500">
+                            {laborAnalysis.codes[emp.name][d.day]}
+                          </span>
+                        )}
                       </td>
                     );
                   })}
@@ -2151,7 +2355,7 @@ const SchedulingView = ({ currentMonth, employees, daysInMonth, schedule, setSch
           </tbody>
           <tfoot className="bg-gray-50 border-t-2 border-gray-300">
             <tr>
-              <td className="bg-gray-100 border p-1 text-[9px] font-black text-gray-400 text-center border-r-2">
+              <td className="sticky left-0 z-20 bg-gray-100 border p-1 text-[9px] font-black text-gray-400 text-center border-r-2">
                 漏排提醒
               </td>
               {daysInMonth.map(d => { 
@@ -2561,8 +2765,8 @@ const handleParticipantApprove = (reqId) => {
             case 'shifts': return <ShiftsManagementView shifts={shifts} setShifts={(val) => { setShifts(val); saveData({ shifts: val }); }}  holidays={holidays} setHolidays={(val) => { setHolidays(val); saveData({ holidays: val }); }}  setDeleteShiftTarget={setDeleteShiftTarget} personDayRules={personDayRules}  setPersonDayRules={(val) => { setPersonDayRules(val); saveData({ personDayRules: val }); }} />;
             case 'swap': return <ScheduleTableView currentMonth={currentMonth} employees={employees} schedule={schedule} cellColors={cellColors} daysInMonth={daysInMonth} onCellClick={handleSwapApply} swapRequests={swapRequests} currentPage={currentPage} currentUser={currentUser} swapTarget={swapTarget} handleSwapBack={handleSwapBack} isCycleEnd={isCycleEnd}/>;
             case 'records': return <RecordsView currentUser={currentUser} swapRequests={swapRequests} onAction={handleRecordAction} onApprove={handleParticipantApprove} setRejectingReq={setRejectingReq} schedule={schedule} currentMonth={currentMonth} />;
-            case 'leave':  return  <PreLeaveView currentMonth={currentMonth} employees={employees} daysInMonth={daysInMonth} currentUser={currentUser} schedule={schedule} setSchedule={(val) => { setSchedule(val); saveData({ schedule: val }); }} preLeaveData={preLeaveData} setPreLeaveData={(val) => { setPreLeaveData(val); saveData({ preLeaveData: val }); }}   saveData={saveData} />;
-            case 'schedule': return <SchedulingView currentMonth={currentMonth} employees={employees} daysInMonth={daysInMonth} schedule={schedule} setSchedule={setSchedule} cellColors={cellColors} setCellColors={setCellColors} shifts={shifts} exportScheduleCSV={exportScheduleCSV} setCurrentPage={setCurrentPage} setIsDirty={setIsDirty} saveData={saveData} /> ;
+            case 'leave':  return  <PreLeaveView currentMonth={currentMonth} employees={employees} daysInMonth={daysInMonth} currentUser={currentUser} schedule={schedule} setSchedule={(val) => { setSchedule(val); saveData({ schedule: val }); }} preLeaveData={preLeaveData} setPreLeaveData={(val) => { setPreLeaveData(val); saveData({ preLeaveData: val }); }} saveData={saveData} />;
+            case 'schedule': return <SchedulingView currentMonth={currentMonth} employees={employees} daysInMonth={daysInMonth} schedule={schedule} setSchedule={setSchedule} cellColors={cellColors} setCellColors={setCellColors} shifts={shifts} exportScheduleCSV={exportScheduleCSV} setCurrentPage={setCurrentPage} setIsDirty={setIsDirty} saveData={saveData} preLeaveData={preLeaveData}  setPreLeaveData={setPreLeaveData}  isAdmin={currentUser?.role === '0'}/> ;
             case 'report': return <ManagementReportView currentMonth={currentMonth} employees={employees} schedule={schedule} personDayRules={personDayRules} holidays={holidays} shifts={shifts} />;
             case 'login': {
               const triggerLogin = () => { const id = document.getElementById('uid')?.value.toUpperCase(); const pwd = document.getElementById('upwd')?.value; if (!pwd) { alert("請輸入密碼！"); return; } handleLoginAction(id, pwd); };
