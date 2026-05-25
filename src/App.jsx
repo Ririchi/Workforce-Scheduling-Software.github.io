@@ -2548,14 +2548,53 @@ const handleSwapApply = (targetEmp, dayInfo) => {
       isBundle = true;
       const sat = new Date(targetDate);
       if (dOfW === 6) {} else if (dOfW === 0) sat.setDate(targetDate.getDate() - 1); else sat.setDate(targetDate.getDate() - (dOfW + 1));
-      const thu = new Date(sat); thu.setDate(sat.getDate() + 5);
+      
+      // 💡 修改點：P 班延長為連續 14 天 (前 6 天 P 班 + 後 8 天休)
+      const nextFri = new Date(sat); nextFri.setDate(sat.getDate() + 13);
       startDate = `${currentMonth}-${String(sat.getDate()).padStart(2, '0')}`;
-      endDate = `${currentMonth}-${String(thu.getDate()).padStart(2, '0')}`;
-      daysToSwap = []; for (let i = 0; i < 6; i++) { const d = new Date(sat); d.setDate(sat.getDate() + i); daysToSwap.push(d.getDate());  }
-        }
-      }
+      endDate = `${currentMonth}-${String(nextFri.getDate()).padStart(2, '0')}`;
+      daysToSwap = []; for (let i = 0; i < 14; i++) { const d = new Date(sat); d.setDate(sat.getDate() + i); daysToSwap.push(d.getDate());  }
+    }
+  }
 
-  if (type === 'A1A2') { /* ... */ } else if (type === 'A3') { /* ... */ } else if (type === 'P') { /* ... */ }
+  // 💡 新增：整段換班與單日換班的嚴格檢核
+  if (isBundle) {
+    // 抓取區間內每一天的班別
+    const creatorRange = daysToSwap.map(d => normalize(schedule[currentMonth]?.[currentUser.name]?.[d]));
+    const targetRange = daysToSwap.map(d => normalize(schedule[currentMonth]?.[targetEmp.name]?.[d]));
+
+    const isValidRange = (range, expectedType) => {
+      if (expectedType === 'A1A2' || expectedType === 'A3') {
+        // A類 與 A3類：區間內必須全是該群組的班別，或 "-"
+        return range.every(shift => getShiftType(shift) === expectedType || shift === "-");
+      } else if (expectedType === 'P') {
+        // P 類：切分為前 6 天與後 8 天
+        const first6 = range.slice(0, 6);
+        const last8 = range.slice(6, 14);
+        
+        // 前 6 天必須是 P 或 "-"
+        const isFirst6Valid = first6.every(shift => getShiftType(shift) === 'P' || shift === "-");
+        // 後 8 天必須「不是」任何正班 (即 getShiftType 回傳 null，代表 "-" 或休假)
+        const isLast8Valid = last8.every(shift => getShiftType(shift) === null);
+        
+        return isFirst6Valid && isLast8Valid;
+      }
+      return false;
+    };
+
+    if (!isValidRange(creatorRange, type) || !isValidRange(targetRange, type)) {
+      alert(`整段換班檢核失敗：區間內含有不符合【${type}】群組規則的班別。\n(若為 P 班，請確認後 8 天是否均為休假)`);
+      return; // 檢核失敗，阻擋申請
+    }
+  } else {
+    // 單日換班時，若雙方都不是 "-"，則必須是相同群組才能單換
+    if (myShift !== "-" && targetShift !== "-") {
+      if (getShiftType(myShift) !== getShiftType(targetShift)) {
+        alert("單日換班檢核失敗：雙方班別不屬於同一群組，無法互換。");
+        return;
+      }
+    }
+  }
 
   // 設置初始的兩位參與者
   setSwapTarget({
