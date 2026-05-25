@@ -425,46 +425,65 @@ const ScheduleTableView = ({ currentMonth, employees, schedule, cellColors, days
                     const displayPart = (parts[1] && !isNaN(parts[1])) ? (parts[0] || "-") : val;
                     const leaveMsg = (parts[1] && !isNaN(parts[1])) ? `假:${parts[1]}h` : null;
 
+                    // 💡 步驟一：還原乾淨的外殼，邊框就不會再被吃掉了
                     return (
-                        <td key={d.day} 
-                          className={`border p-0 ${isNC ? 'h-[32px]' : 'h-10'} ${bgClass} ${
-                            onCellClick && !isNC ? 'cursor-pointer hover:bg-blue-50 shadow-inner' : 'cursor-default'
-                          } transition-all relative ${cycleEnd ? 'border-r-4 border-r-gray-400' : ''} ${
-                            /* 💡 視覺優化邏輯開始 */
-                            (() => {
-                              // 情況 1：如果你在「首頁」(home)，一律不顯示申請中的藍色底
-                              if (currentPage === 'home') return '';
-
-                              // 情況 2：如果你在「換班頁面」(swap)
-                              if (currentPage === 'swap') {
-                                // A. 正在點選中的格子 (原本的邏輯)
-                                const isSelecting = swapTarget && swapTarget.date === d.fullDate && swapTarget.participants?.some(p => p.id === emp.id);
-                                
-                                // B. 已送出申請的格子：只有當「我」是這筆換班的參與者時，我才看得到這格變藍
-                                const isMyApplyingDate = emp.applyingDates?.includes(d.fullDate) && (
-                                  swapRequests.some(req => 
-                                    (req.status === 'WaitingParticipants' || req.status === 'PendingAdmin') &&
-                                    req.date === d.fullDate &&
-                                    req.participants.some(p => p.id === currentUser.id) // 關鍵：只有參與者才看得到藍色
-                                  )
-                                );
-
-                                if (isSelecting || isMyApplyingDate) {
-                                  return 'bg-blue-50 ring-2 ring-inset ring-blue-400 z-10';
-                                }
-                              }
-                              return '';
-                            })()
-                            /* 💡 視覺優化邏輯結束 */
-                          }`} 
-                          onClick={() => onCellClick && !isNC && onCellClick(emp, d)}
-                        >
+                      <td key={d.day} 
+                        className={`border p-0 ${isNC ? 'h-[32px]' : 'h-10'} ${bgClass} ${
+                          onCellClick && !isNC ? 'cursor-pointer hover:bg-blue-50 shadow-inner' : 'cursor-default'
+                        } transition-all relative ${cycleEnd ? 'border-r-4 border-r-gray-400' : ''}`} 
+                        onClick={() => onCellClick && !isNC && onCellClick(emp, d)}
+                      >
                         <div className={`flex flex-col items-center justify-center h-full relative`}>
+                          
+                          {/* 💡 步驟二：從這裡開始貼上我們「額外疊上去」的高亮層 */}
+                          {(() => {
+                            if (currentPage !== 'swap') return null;
+
+                            // A. 正在點選中的格子
+                            let isSelecting = false;
+                            if (swapTarget && swapTarget.participants?.some(p => p.id === emp.id)) {
+                              if (swapTarget.isBundle && swapTarget.daysToSwap) {
+                                const monthPrefix = swapTarget.date.substring(0, 7);
+                                const bundleDates = swapTarget.daysToSwap.map(day => `${monthPrefix}-${String(day).padStart(2, '0')}`);
+                                isSelecting = bundleDates.includes(d.fullDate);
+                              } else {
+                                isSelecting = swapTarget.date === d.fullDate;
+                              }
+                            }
+                            
+                            // B. 已送出申請的格子
+                            const isMyApplyingDate = emp.applyingDates?.includes(d.fullDate) && (
+                              swapRequests.some(req => {
+                                const isValidStatus = req.status === 'WaitingParticipants' || req.status === 'PendingAdmin';
+                                const isParticipant = req.participants?.some(p => p.id === currentUser.id);
+                                if (!isValidStatus || !isParticipant) return false;
+
+                                if (req.isBundle && req.daysToSwap) {
+                                  const monthPrefix = (req.date || d.fullDate).substring(0, 7);
+                                  const bundleDates = req.daysToSwap.map(day => `${monthPrefix}-${String(day).padStart(2, '0')}`);
+                                  return bundleDates.includes(d.fullDate);
+                                } else {
+                                  return req.date === d.fullDate;
+                                }
+                              })
+                            );
+
+                            // 如果符合條件，就單獨在格子內部「疊上一層」絕對定位的外框，絕不影響 td 本身的邊框
+                            if (isSelecting || isMyApplyingDate) {
+                              return <div className="absolute inset-0 bg-blue-50/60 border-2 border-blue-400 pointer-events-none z-0" />;
+                            }
+                            return null;
+                          })()}
+                          {/* 💡 高亮層結束 */}
+
+                          {/* 以下維持您原本格子的內文文字與小圓點（確保它們在 z-10 顯示在藍底上方） */}
                           {isPendingSwap && (
                             <div className="absolute -top-3 -right-0.5 w-2 h-2 bg-blue-600 rounded-full animate-pulse shadow-sm z-10" title="換班申請中"></div>
                           )}
-                          <span className={`${isSwap ? 'font-normal' : (isHome ? 'font-medium' : 'font-black')} ${isPendingSwap ? 'text-blue-900 scale-105 drop-shadow-sm' : (displayPart === "-" ? 'text-gray-300' : 'text-gray-800')} text-[13px] transition-all`}>{displayPart}</span>
-                          {leaveMsg && <span className="text-[9px] text-red-600 font-black bg-red-50 rounded px-1.5 mt-1 leading-none shadow-sm">{leaveMsg}</span>}
+                          <span className={`z-10 ${isSwap ? 'font-normal' : (isHome ? 'font-medium' : 'font-black')} ${isPendingSwap ? 'text-blue-900 scale-105 drop-shadow-sm' : (displayPart === "-" ? 'text-gray-300' : 'text-gray-800')} text-[13px] transition-all`}>
+                            {displayPart}
+                          </span>
+                          {leaveMsg && <span className="text-[9px] text-red-600 font-black bg-red-50 rounded px-1.5 mt-1 leading-none shadow-sm z-10">{leaveMsg}</span>}
                         </div>
                       </td>
                     );
@@ -2638,6 +2657,20 @@ const handleSwapApply = (targetEmp, dayInfo) => {
         alert("單日換班檢核失敗：雙方班別不屬於同一群組，無法互換。");
         return;
       }
+    }
+  }
+
+  if (isBundle && daysToSwap.length > 0) {
+    const monthPrefix = dayInfo.fullDate.substring(0, 7); // 抓取 "YYYY-MM"
+    const bundleDates = daysToSwap.map(d => `${monthPrefix}-${String(d).padStart(2, '0')}`);
+    
+    // 檢查申請人與被申請人的鎖定清單中，是否包含這段區間的任何一天
+    const isCreatorLocked = bundleDates.some(d => currentUser.applyingDates?.includes(d));
+    const isTargetLocked = bundleDates.some(d => targetEmp.applyingDates?.includes(d));
+    
+    if (isCreatorLocked || isTargetLocked) {
+      alert(`無法換班：這段整段換班的區間內，您或對方已經有其他的換班申請正在流程中了！\n（整段區間若與他人申請重疊，將被禁止換班）`);
+      return; // 攔截！不顯示換班視窗
     }
   }
 
