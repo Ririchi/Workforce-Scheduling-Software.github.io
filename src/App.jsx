@@ -156,7 +156,7 @@ const Modal = ({ isOpen, onClose, onConfirm, title, message, confirmText = "確�
   );
 };
 
-const SwapRequestModal = ({ isOpen, onClose, onConfirm, data, setIsModalOpen, handleSwapBack }) => {
+const SwapRequestModal = ({ isOpen, onClose, onConfirm, data, setIsModalOpen, handleSwapBack, schedule, currentMonth }) => {
   if (!isOpen || !data) return null;
   const isBundle = data.isBundle;
 
@@ -176,27 +176,71 @@ const SwapRequestModal = ({ isOpen, onClose, onConfirm, data, setIsModalOpen, ha
           </div>
 
           {/* 需求 1：呈現更換班別內容 A -> B */}
-          <div className="space-y-2">
-            <label className="text-[10px] font-black text-gray-400 uppercase tracking-widest pl-1">換班連鎖路徑</label>
-            <div className="space-y-2">
-              {data.participants.map((p, idx) => {
-                // 找出下一個人，也就是我換完後要上的班別來源
-                const nextPerson = data.participants[(idx + 1) % data.participants.length];
-                return (
-                  <div key={idx} className="flex justify-between items-center bg-blue-50/50 p-3 rounded-2xl border border-blue-100/50">
-                    <span className="font-black text-gray-700 text-sm">{p.name}</span>
-                    <div className="flex items-center gap-2">
-                      <span className="text-gray-400 text-[11px] font-bold">({p.oldShift})</span>
-                      <ArrowLeftRight size={10} className="text-blue-400" />
-                      <span className="text-blue-700 font-black text-sm bg-white px-2 py-0.5 rounded-lg shadow-sm">
-                        ({nextPerson.oldShift})
-                      </span>
-                    </div>
-                  </div>
-                );
-              })}
+          {isBundle && schedule && currentMonth ? (
+            <div className="space-y-2 max-h-[45vh] overflow-y-auto pr-1">
+              <label className="text-[10px] font-black text-gray-400 uppercase tracking-widest pl-1">每日換班對照明細 (顯示換班後的結果)</label>
+              <div className="rounded-xl border border-gray-200 overflow-hidden shadow-sm">
+                <table className="w-full text-center text-xs bg-white">
+                  <thead className="bg-gray-100 text-gray-600 border-b border-gray-200 sticky top-0 z-10">
+                    <tr>
+                      <th className="py-2 px-1 font-bold">日期</th>
+                      {data.participants.map(p => (
+                        <th key={p.id} className="py-2 px-1 font-bold">{p.name}</th>
+                      ))}
+                    </tr>
+                  </thead>
+                  <tbody className="divide-y divide-gray-100">
+                    {data.daysToSwap.map((day) => (
+                      <tr key={day} className="hover:bg-blue-50/50 transition-colors">
+                        <td className="py-2 font-black text-gray-500 bg-gray-50/50 border-r border-gray-100 w-12">{day}日</td>
+                        {data.participants.map((p, idx) => {
+                          // 抓取當前這天的原始班別
+                          const shift = schedule[currentMonth]?.[p.name]?.[day] || "-";
+                          // 抓取換班後會獲得的新班別
+                          const nextPerson = data.participants[(idx + 1) % data.participants.length];
+                          const nextShift = schedule[currentMonth]?.[nextPerson.name]?.[day] || "-";
+
+                          return (
+                            <td key={p.id} className="py-1.5 px-1">
+                              <div className="flex flex-col items-center justify-center">
+                                {/* 原本的班別，打上刪除線表示即將換出 */}
+                                <span className="text-gray-400 line-through text-[9px] mb-0.5">{shift}</span>
+                                {/* 換進來的新班別，高亮顯示 */}
+                                <span className={`px-2 py-0.5 rounded font-black text-[11px] ${nextShift === '-' ? 'bg-gray-100 text-gray-400' : 'bg-blue-100 text-blue-700 shadow-sm border border-blue-200'}`}>
+                                  {nextShift}
+                                </span>
+                              </div>
+                            </td>
+                          );
+                        })}
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
             </div>
-          </div>
+          ) : (
+            <div className="space-y-2">
+              <label className="text-[10px] font-black text-gray-400 uppercase tracking-widest pl-1">換班連鎖路徑</label>
+              <div className="space-y-2">
+                {data.participants.map((p, idx) => {
+                  const nextPerson = data.participants[(idx + 1) % data.participants.length];
+                  return (
+                    <div key={idx} className="flex justify-between items-center bg-blue-50/50 p-3 rounded-2xl border border-blue-100/50">
+                      <span className="font-black text-gray-700 text-sm">{p.name}</span>
+                      <div className="flex items-center gap-2">
+                        <span className="text-gray-400 text-[11px] font-bold">({p.oldShift})</span>
+                        <ArrowLeftRight size={10} className="text-blue-400" />
+                        <span className="text-blue-700 font-black text-sm bg-white px-2 py-0.5 rounded-lg shadow-sm">
+                          ({nextPerson.oldShift})
+                        </span>
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
+            </div>
+          )}
         </div>
 
         <div className="p-6 pt-0 space-y-3">
@@ -2826,6 +2870,8 @@ const handleParticipantApprove = (reqId) => {
         // 1. 狀態與基礎資料 (確保 isOpen 只出現一次)
         isOpen={isModalOpen && !!swapTarget}  
         data={swapTarget} 
+        schedule={schedule} 
+        currentMonth={currentMonth}
 
         // 2. 視窗控制權限 (確保 setIsModalOpen 只出現一次)
         setIsModalOpen={setIsModalOpen}
