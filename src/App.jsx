@@ -2931,12 +2931,21 @@ const handleParticipantApprove = (reqId) => {
             ...swapRequests
           ];
 
-          // (更新 employees 邏輯維持你剛改好的部分，確保藍底還在)
+          // 💡 1. 產生需要上鎖的完整日期陣列 (單日或整段)
+          let datesToLock = [targetDateStr];
+          if (swapTarget.isBundle && swapTarget.daysToSwap) {
+            const monthPrefix = targetDateStr.substring(0, 7); // 取得 "YYYY-MM"
+            datesToLock = swapTarget.daysToSwap.map(d => `${monthPrefix}-${String(d).padStart(2, '0')}`);
+          }
+
+          // 💡 2. 將整組陣列寫入同仁狀態中上鎖
           const allParticipantIds = swapTarget.participants.map(p => p.id);
           const nextEmps = employees.map(e => {
             if (allParticipantIds.includes(e.id)) {
               const dates = Array.isArray(e.applyingDates) ? e.applyingDates : [];
-              if (!dates.includes(targetDateStr)) return { ...e, applyingDates: [...dates, targetDateStr] };
+              // 合併原本的鎖與新的鎖，並去除重複
+              const newDates = Array.from(new Set([...dates, ...datesToLock]));
+              return { ...e, applyingDates: newDates };
             }
             return e;
           });
@@ -2964,13 +2973,20 @@ const handleParticipantApprove = (reqId) => {
             ? rejectingReq.participants.map(p => p.id) 
             : [rejectingReq.creatorId, rejectingReq.targetId];
           
-          const targetDate = rejectingReq.date;
+          // 💡 3. 產生需要解鎖的完整日期陣列
+          let datesToUnlock = [];
+          if (rejectingReq.isBundle && rejectingReq.daysToSwap && rejectingReq.date) {
+            const monthPrefix = rejectingReq.date.substring(0, 7);
+            datesToUnlock = rejectingReq.daysToSwap.map(d => `${monthPrefix}-${String(d).padStart(2, '0')}`);
+          } else if (rejectingReq.date) {
+            datesToUnlock = [rejectingReq.date];
+          }
 
-          // 3. 💡 產出解鎖後的全新 employees 陣列
+          // 💡 4. 產出解鎖後的全新 employees 陣列 (將 datesToUnlock 裡面的日子通通解鎖)
           const nextEmps = employees.map(e => {
             if (participantsToUnlock.includes(e.id)) {
               const currentDates = e.applyingDates || [];
-              return { ...e, applyingDates: currentDates.filter(d => d !== targetDate) };
+              return { ...e, applyingDates: currentDates.filter(d => !datesToUnlock.includes(d)) };
             }
             return e;
           });
@@ -2983,10 +2999,9 @@ const handleParticipantApprove = (reqId) => {
           if (currentUser && participantsToUnlock.includes(currentUser.id)) {
             setCurrentUser(prev => ({
               ...prev,
-              applyingDates: (prev.applyingDates || []).filter(d => d !== targetDate)
+              applyingDates: (prev.applyingDates || []).filter(d => !datesToUnlock.includes(d))
             }));
           }
-
           // 6. 寫入資料庫並關閉視窗
           saveData({ swapRequests: nextRequests, employees: nextEmps }); // 🔥 這裡一定要把解鎖後的 nextEmps 存進去
           setRejectNote(""); 
