@@ -2556,6 +2556,7 @@ const handleSwapApply = (targetEmp, dayInfo) => {
       daysToSwap = []; for (let i = 0; i < 14; i++) { const d = new Date(sat); d.setDate(sat.getDate() + i); daysToSwap.push(d.getDate());  }
     }
   }
+  
 
   // 💡 新增：整段換班與單日換班的嚴格檢核
   if (isBundle) {
@@ -2708,11 +2709,16 @@ const handleRecordAction = (req, action) => {
       
       if (!ns[targetMonthKey]) ns[targetMonthKey] = {};
       
-      (req.isBundle ? req.daysToSwap : [req.day]).forEach(d => {
-        const cS = ns[targetMonthKey][req.creatorName]?.[d] || "-";
-        const tS = ns[targetMonthKey][req.targetName]?.[d] || "-";
+      // 💡 修改點：增強防呆，確保如果 daysToSwap 遺失時不會報錯崩潰
+      const daysArray = (req.isBundle && req.daysToSwap) ? req.daysToSwap : [req.day];
+
+      daysArray.forEach(d => {
         if (!ns[targetMonthKey][req.creatorName]) ns[targetMonthKey][req.creatorName] = {};
         if (!ns[targetMonthKey][req.targetName]) ns[targetMonthKey][req.targetName] = {};
+
+        const cS = ns[targetMonthKey][req.creatorName][d] || "-";
+        const tS = ns[targetMonthKey][req.targetName][d] || "-";
+
         ns[targetMonthKey][req.creatorName][d] = tS;
         ns[targetMonthKey][req.targetName][d] = cS;
       });
