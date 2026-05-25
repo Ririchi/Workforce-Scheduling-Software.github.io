@@ -2754,17 +2754,30 @@ const handleRecordAction = (req, action) => {
       if (!ns[targetMonthKey]) ns[targetMonthKey] = {};
       
       // 💡 修改點：增強防呆，確保如果 daysToSwap 遺失時不會報錯崩潰
-      const daysArray = (req.isBundle && req.daysToSwap) ? req.daysToSwap : [req.day];
+      let daysArray = [];
+      if (req.isBundle && req.daysToSwap) {
+        daysArray = req.daysToSwap;
+      } else {
+        // 如果是單日換班，自動從 date 欄位 (如 "2026-05-12") 切割出 12
+        const exactDay = req.day || (req.date ? Number(req.date.split('-')[2]) : null);
+        if (exactDay) daysArray = [exactDay];
+      }
 
+      // 2. 針對每一天，進行班別交換
       daysArray.forEach(d => {
-        if (!ns[targetMonthKey][req.creatorName]) ns[targetMonthKey][req.creatorName] = {};
-        if (!ns[targetMonthKey][req.targetName]) ns[targetMonthKey][req.targetName] = {};
+        if (!req.participants || req.participants.length < 2) return;
 
-        const cS = ns[targetMonthKey][req.creatorName][d] || "-";
-        const tS = ns[targetMonthKey][req.targetName][d] || "-";
+        // 步驟 A：先把名單上大家「原本這天」的班別都備份起來
+        const originalShifts = req.participants.map(p => {
+          if (!ns[targetMonthKey][p.name]) ns[targetMonthKey][p.name] = {};
+          return ns[targetMonthKey][p.name][d] || "-";
+        });
 
-        ns[targetMonthKey][req.creatorName][d] = tS;
-        ns[targetMonthKey][req.targetName][d] = cS;
+        // 步驟 B：大風吹！把班別交接給下一個人（A拿B的，B拿C的，C拿A的）
+        req.participants.forEach((p, idx) => {
+          const nextIdx = (idx + 1) % req.participants.length;
+          ns[targetMonthKey][p.name][d] = originalShifts[nextIdx];
+        });
       });
 
       const nextRequests = swapRequests.map(r => r.id === req.id ? { ...r, status: nextStatus } : r);
