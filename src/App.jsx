@@ -1990,18 +1990,27 @@ const SchedulingView = ({ currentMonth, employees, daysInMonth, schedule, setSch
           const rows = ev.target.result.split(/\r?\n/).map(r => r.split(',').map(c => c.trim().replace(/^"|"$/g, '')));
           
           let fileMonth = null;
-          for (const r of rows) { 
-            const line = r.join(","); 
-            if (line.includes("年") && line.includes("月")) { 
-              fileMonth = parseROCTitle(line); 
-              if (fileMonth) break; 
-            } 
+          
+          // 1. 抓取 CSV 前 5 行，組合成一個大字串
+          const topRowsText = rows.slice(0, 5).map(r => r.join(",")).join(" ");
+          
+          // 2. 使用正則表達式，全域尋找「115年3月」、「115 年 03 月份」之類的格式
+          const match = topRowsText.match(/(1\d{2})\s*年\s*(\d{1,2})\s*月/);
+          
+          if (match) {
+            const rocYear = parseInt(match[1], 10); // 抓出民國年 (例如 115)
+            const month = parseInt(match[2], 10);   // 抓出月份 (例如 3)
+            const westYear = rocYear + 1911;        // 轉換為西元年 (例如 2026)
+            
+            // 3. 組合成系統標準的 YYYY-MM 格式
+            fileMonth = `${westYear}-${String(month).padStart(2, '0')}`;
           }
           
-          if (fileMonth !== currentMonth) { 
-            alert("CSV 標題月份與當前編輯月份不符。"); 
-            fileRef.current.value = ''; 
-            return; 
+          // 4. 進行比對
+          if (!fileMonth || fileMonth !== currentMonth) {
+            alert(`上傳的班表月份 (${fileMonth || '未偵測到'}) 與當前系統月份 (${currentMonth}) 不符！\n請確認 CSV 檔案最上方是否有類似「115年3月」的文字。`);
+            fileRef.current.value = '';
+            return;
           }
           
           const nextPreview = deepClone(editSched || {});
@@ -2716,23 +2725,22 @@ const unlockDate = (participants, req) => {
       let isAllShiftsValid = true;
       let errorMsg = "";
 
-      if (req.participants) {
+      // 💡 升級：只有「單日換班」才需要進行舊班別字串比對。
+      // 整段換班包含多天不同班別，且主管核定視窗已顯示最新逐日對照，故安全跳過單一字串檢核。
+      if (req.participants && !req.isBundle) {
         req.participants.forEach(p => {
-          // 修正：精確取得該同仁換班的「那一天」(優先使用 p.day，再用 req.day 或 req.startDate)
           const exactDay = p.day || req.day || (req.startDate ? req.startDate.split('-')[2] : null);
-          
+
           if (!exactDay) return;
 
-          // 從首頁的最新班表資料 (schedule) 中抓取當前班別
           const currentSystemShift = schedule[targetMonthKey]?.[p.name]?.[Number(exactDay)];
-          
+
           const normalize = (v) => {
             const s = (v === null || v === undefined) ? "-" : String(v).trim();
             return (s === "" || s === "-") ? "-" : s;
           };
           const clean = (val) => val.replace(/#|\(國\)/g, '');
 
-          // 比對最新首頁班表與申請時的舊班別
           if (clean(normalize(currentSystemShift)) !== clean(normalize(p.oldShift))) {
             isAllShiftsValid = false;
             errorMsg += `【${p.name}】的班別不符（目前首頁：${normalize(currentSystemShift)}，紀錄：${p.oldShift}）\n`;
