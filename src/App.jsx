@@ -352,6 +352,18 @@ const Header = ({ currentMonth, setCurrentMonth, currentPage, handlePageChange, 
           </div>
         </div>
       </div>
+      <button
+          onClick={() => {
+            const nextEmps = employees.map(e => ({ ...e, applyingDates: [] }));
+            setEmployees(nextEmps);
+            if (currentUser) setCurrentUser({ ...currentUser, applyingDates: [] });
+            saveData({ employees: nextEmps });
+            alert("✅ 系統中所有卡住的日期鎖已全面解除！請重新測試。");
+          }}
+          className="bg-red-500 text-white px-3 py-1 rounded-lg text-sm font-bold shadow-md hover:bg-red-600 transition-all z-50 ml-4"
+        >
+          🚨 緊急強制解鎖
+        </button>
     </header>
   );
 };
