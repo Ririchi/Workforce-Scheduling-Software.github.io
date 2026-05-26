@@ -2681,7 +2681,7 @@ const handleSwapBack = () => {
 
 const handleRecordAction = (req, action) => {
   // 💡 修正 1：升級 unlockDate，讓它能同時解鎖名單內的所有人
-const unlockDate = (participants, req) => {
+  const unlockDate = (participants, req) => {
     const participantIds = participants ? participants.map(p => p.id) : [req.creatorId, req.targetId];
     
     // 計算需要解鎖的日期陣列 (預設至少解鎖單日)
@@ -2711,7 +2711,7 @@ const unlockDate = (participants, req) => {
   };
 
   if (action === 'Approve') {
-    // 💡 情況 A：同仁全員簽完，轉 PendingAdmin (對齊你原本的邏輯)
+    // 💡 情況 A：同仁全員簽完，轉 PendingAdmin
     if (req.status === 'WaitingParticipants') {
       const nextRequests = swapRequests.map(r => r.id === req.id ? { ...r, status: 'PendingAdmin' } : r);
       setSwapRequests(nextRequests);
@@ -2721,20 +2721,16 @@ const unlockDate = (participants, req) => {
     else if (req.status === 'PendingAdmin') {
       const targetMonthKey = req.date ? req.date.substring(0, 7) : currentMonth;
       
-      // 💡 1. 修正：精確抓取「首頁班表(schedule)」的確切日期進行核對
       let isAllShiftsValid = true;
       let errorMsg = "";
 
-      // 💡 升級：只有「單日換班」才需要進行舊班別字串比對。
-      // 整段換班包含多天不同班別，且主管核定視窗已顯示最新逐日對照，故安全跳過單一字串檢核。
+      // 💡 升級：只有「單日換班」才需要進行舊班別字串比對，整段換班跳過。
       if (req.participants && !req.isBundle) {
         req.participants.forEach(p => {
           const exactDay = p.day || req.day || (req.startDate ? req.startDate.split('-')[2] : null);
-
           if (!exactDay) return;
 
           const currentSystemShift = schedule[targetMonthKey]?.[p.name]?.[Number(exactDay)];
-
           const normalize = (v) => {
             const s = (v === null || v === undefined) ? "-" : String(v).trim();
             return (s === "" || s === "-") ? "-" : s;
@@ -2748,24 +2744,19 @@ const unlockDate = (participants, req) => {
         });
       }
 
-      // 班別不符則攔截
       if (!isAllShiftsValid) {
         alert(`無法核定換班！\n\n${errorMsg}\n請組長再次確認「首頁」目前的最新班表。`);
         return; 
       }
 
-
       const nextStatus = 'Approved';
       const ns = deepClone(schedule);
-      
       if (!ns[targetMonthKey]) ns[targetMonthKey] = {};
       
-      // 💡 修改點：增強防呆，確保如果 daysToSwap 遺失時不會報錯崩潰
       let daysArray = [];
       if (req.isBundle && req.daysToSwap) {
         daysArray = req.daysToSwap;
       } else {
-        // 如果是單日換班，自動從 date 欄位 (如 "2026-05-12") 切割出 12
         const exactDay = req.day || (req.date ? Number(req.date.split('-')[2]) : null);
         if (exactDay) daysArray = [exactDay];
       }
@@ -2774,13 +2765,11 @@ const unlockDate = (participants, req) => {
       daysArray.forEach(d => {
         if (!req.participants || req.participants.length < 2) return;
 
-        // 步驟 A：先把名單上大家「原本這天」的班別都備份起來
         const originalShifts = req.participants.map(p => {
           if (!ns[targetMonthKey][p.name]) ns[targetMonthKey][p.name] = {};
           return ns[targetMonthKey][p.name][d] || "-";
         });
 
-        // 步驟 B：大風吹！把班別交接給下一個人（A拿B的，B拿C的，C拿A的）
         req.participants.forEach((p, idx) => {
           const nextIdx = (idx + 1) % req.participants.length;
           ns[targetMonthKey][p.name][d] = originalShifts[nextIdx];
@@ -2789,44 +2778,26 @@ const unlockDate = (participants, req) => {
 
       const nextRequests = swapRequests.map(r => r.id === req.id ? { ...r, status: nextStatus } : r);
       
-      // 💡 修正 2：傳入 participants 陣列，解鎖所有人
-      const nextEmps = unlockDate(req.participants, req.date);
+      // 💡 修正點 1：傳入完整的 req 物件，而不是舊的 req.date，這樣才能解鎖一整段！
+      const nextEmps = unlockDate(req.participants, req);
 
       setSchedule(ns);
       setSwapRequests(nextRequests);
       saveData({ schedule: ns, swapRequests: nextRequests, employees: nextEmps });
     }
   } 
-      
-      else if (action === 'Reject' || action === 'Delete') {
-        const nextRequests = (action === 'Delete') 
-          ? swapRequests.filter(r => r.id !== req.id)
-          : swapRequests.map(r => r.id === req.id ? { ...r, status: 'Rejected' } : r);
+  else if (action === 'Reject' || action === 'Delete') {
+    const nextRequests = (action === 'Delete') 
+      ? swapRequests.filter(r => r.id !== req.id)
+      : swapRequests.map(r => r.id === req.id ? { ...r, status: 'Rejected' } : r);
 
-        // 💡 修正點：確保取得所有相關人員 ID
-        const participantsToUnlock = req.participants 
-          ? req.participants.map(p => p.id) 
-          : [req.creatorId, req.targetId];
-        
-        const targetDate = req.date;
+    // 💡 修正點 2：撤回與刪除時，也一併呼叫升級版的 unlockDate 傳入完整的 req 進行整段解鎖！
+    const nextEmps = unlockDate(req.participants, req);
 
-        const nextEmps = employees.map(e => {
-          if (participantsToUnlock.includes(e.id)) {
-            const currentDates = e.applyingDates || [];
-            return { ...e, applyingDates: currentDates.filter(d => d !== targetDate) };
-          }
-          return e;
-        });
-
-        setEmployees(nextEmps);
-        setSwapRequests(nextRequests);
-        saveData({ swapRequests: nextRequests, employees: nextEmps });
-
-        // 同步更新目前登入者狀態
-        const updatedMe = nextEmps.find(e => e.id === currentUser.id);
-        if (updatedMe) setCurrentUser(updatedMe);
-      }
-    };
+    setSwapRequests(nextRequests);
+    saveData({ swapRequests: nextRequests, employees: nextEmps });
+  }
+};
 
 // 💡 在 main 組件內部的 handle 函式區域新增
 const handleParticipantApprove = (reqId) => {
@@ -2888,7 +2859,7 @@ const handleParticipantApprove = (reqId) => {
       <Modal isOpen={showExitConfirm} onClose={() => { setShowExitConfirm(false); setTargetPage(null); }} onConfirm={confirmExit} title="班表尚未發佈" message="您有變更排班表，但尚未「發佈班表」。確定要離開嗎？" confirmText="仍要離開" cancelText="留在這裏" />
       
       {/* 💡 這是臨時加的緊急解鎖按鈕，清空舊資料後就可以整段刪除 */}
-      <button
+      {/*<button
         onClick={() => {
           const nextEmps = employees.map(e => ({ ...e, applyingDates: [] }));
           setEmployees(nextEmps);
@@ -2899,7 +2870,7 @@ const handleParticipantApprove = (reqId) => {
         className="bg-red-500 text-white px-3 py-1 rounded-lg text-sm font-bold shadow-md hover:bg-red-600 transition-all z-50 mb-4 ml-4"
       >
         🚨 緊急強制解鎖
-      </button>
+      </button> */}
       
       <SwapRequestModal 
         // 1. 狀態與基礎資料 (確保 isOpen 只出現一次)
