@@ -365,19 +365,6 @@ const ScheduleTableView = ({ currentMonth, employees, schedule, cellColors, days
   const supportRow = schedule[currentMonth]?.["夜診支援"] || {};
     return Object.values(supportRow).some(v => v && v !== "-" && v !== "#" && v !== "例" && v !== "");
   }, [schedule, currentMonth]);
-
-      <button
-          onClick={() => {
-            const nextEmps = employees.map(e => ({ ...e, applyingDates: [] }));
-            setEmployees(nextEmps);
-            if (currentUser) setCurrentUser({ ...currentUser, applyingDates: [] });
-            saveData({ employees: nextEmps });
-            alert("✅ 系統中所有卡住的日期鎖已全面解除！請重新測試。");
-          }}
-          className="bg-red-500 text-white px-3 py-1 rounded-lg text-sm font-bold shadow-md hover:bg-red-600 transition-all z-50 ml-4"
-        >
-          🚨 緊急強制解鎖
-        </button>
   
   return (
     <div className="flex-grow flex flex-col h-full bg-gray-50 font-sans overflow-hidden">
@@ -2899,6 +2886,21 @@ const handleParticipantApprove = (reqId) => {
         })()}
       </main>
       <Modal isOpen={showExitConfirm} onClose={() => { setShowExitConfirm(false); setTargetPage(null); }} onConfirm={confirmExit} title="班表尚未發佈" message="您有變更排班表，但尚未「發佈班表」。確定要離開嗎？" confirmText="仍要離開" cancelText="留在這裏" />
+      
+      {/* 💡 這是臨時加的緊急解鎖按鈕，清空舊資料後就可以整段刪除 */}
+      <button
+        onClick={() => {
+          const nextEmps = employees.map(e => ({ ...e, applyingDates: [] }));
+          setEmployees(nextEmps);
+          if (currentUser) setCurrentUser(prev => ({ ...prev, applyingDates: [] }));
+          saveData({ employees: nextEmps });
+          alert("✅ 系統中所有卡住的日期鎖已全面解除！請重新測試。");
+        }}
+        className="bg-red-500 text-white px-3 py-1 rounded-lg text-sm font-bold shadow-md hover:bg-red-600 transition-all z-50 mb-4 ml-4"
+      >
+        🚨 緊急強制解鎖
+      </button>
+      
       <SwapRequestModal 
         // 1. 狀態與基礎資料 (確保 isOpen 只出現一次)
         isOpen={isModalOpen && !!swapTarget}  
