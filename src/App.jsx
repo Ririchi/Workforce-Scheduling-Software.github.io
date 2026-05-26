@@ -352,6 +352,20 @@ const Header = ({ currentMonth, setCurrentMonth, currentPage, handlePageChange, 
           </div>
         </div>
       </div>
+    </header>
+  );
+};
+
+const ScheduleTableView = ({ currentMonth, employees, schedule, cellColors, daysInMonth, onCellClick, swapRequests = [], currentPage, currentUser, swapTarget, handleSwapBack, isCycleEnd: checkCycleEnd}) => {
+
+  const isHome = currentPage === 'home';
+  const isSwap = currentPage === 'swap';
+  const headerTop = onCellClick ? 'top-[44px]' : 'top-0';
+  const hasSupportData = useMemo(() => {
+  const supportRow = schedule[currentMonth]?.["夜診支援"] || {};
+    return Object.values(supportRow).some(v => v && v !== "-" && v !== "#" && v !== "例" && v !== "");
+  }, [schedule, currentMonth]);
+
       <button
           onClick={() => {
             const nextEmps = employees.map(e => ({ ...e, applyingDates: [] }));
@@ -364,20 +378,7 @@ const Header = ({ currentMonth, setCurrentMonth, currentPage, handlePageChange, 
         >
           🚨 緊急強制解鎖
         </button>
-    </header>
-  );
-};
-
-const ScheduleTableView = ({ currentMonth, employees, schedule, cellColors, daysInMonth, onCellClick, swapRequests = [], currentPage, currentUser, swapTarget, handleSwapBack, isCycleEnd: checkCycleEnd}) => {
-
-  const isHome = currentPage === 'home';
-  const isSwap = currentPage === 'swap';
-  const headerTop = onCellClick ? 'top-[44px]' : 'top-0';
-  const hasSupportData = useMemo(() => {
-    const supportRow = schedule[currentMonth]?.["夜診支援"] || {};
-    return Object.values(supportRow).some(v => v && v !== "-" && v !== "#" && v !== "例" && v !== "");
-  }, [schedule, currentMonth]);
-
+  
   return (
     <div className="flex-grow flex flex-col h-full bg-gray-50 font-sans overflow-hidden">
       {onCellClick && (
