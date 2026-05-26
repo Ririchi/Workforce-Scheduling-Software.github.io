@@ -2620,46 +2620,6 @@ const handleSwapApply = (targetEmp, dayInfo) => {
     }
   }
   
-
-  // 💡 新增：整段換班與單日換班的嚴格檢核
-  if (isBundle) {
-    // 抓取區間內每一天的班別
-    const creatorRange = daysToSwap.map(d => normalize(schedule[currentMonth]?.[currentUser.name]?.[d]));
-    const targetRange = daysToSwap.map(d => normalize(schedule[currentMonth]?.[targetEmp.name]?.[d]));
-
-    const isValidRange = (range, expectedType) => {
-      if (expectedType === 'A1A2' || expectedType === 'A3') {
-        // A類 與 A3類：區間內必須全是該群組的班別，或 "-"
-        return range.every(shift => getShiftType(shift) === expectedType || shift === "-");
-      } else if (expectedType === 'P') {
-        // P 類：切分為前 6 天與後 8 天
-        const first6 = range.slice(0, 6);
-        const last8 = range.slice(6, 14);
-        
-        // 前 6 天必須是 P 或 "-"
-        const isFirst6Valid = first6.every(shift => getShiftType(shift) === 'P' || shift === "-");
-        // 後 8 天必須「不是」任何正班 (即 getShiftType 回傳 null，代表 "-" 或休假)
-        const isLast8Valid = last8.every(shift => getShiftType(shift) === null);
-        
-        return isFirst6Valid && isLast8Valid;
-      }
-      return false;
-    };
-
-    if (!isValidRange(creatorRange, type) || !isValidRange(targetRange, type)) {
-      alert(`整段換班檢核失敗：區間內含有不符合【${type}】群組規則的班別。\n(若為 P 班，請確認後 8 天是否均為休假)`);
-      return; // 檢核失敗，阻擋申請
-    }
-  } else {
-    // 單日換班時，若雙方都不是 "-"，則必須是相同群組才能單換
-    if (myShift !== "-" && targetShift !== "-") {
-      if (getShiftType(myShift) !== getShiftType(targetShift)) {
-        alert("單日換班檢核失敗：雙方班別不屬於同一群組，無法互換。");
-        return;
-      }
-    }
-  }
-
   if (isBundle && daysToSwap.length > 0) {
     const monthPrefix = dayInfo.fullDate.substring(0, 7); // 抓取 "YYYY-MM"
     const bundleDates = daysToSwap.map(d => `${monthPrefix}-${String(d).padStart(2, '0')}`);
@@ -2712,24 +2672,30 @@ const handleSwapBack = () => {
 
 const handleRecordAction = (req, action) => {
   // 💡 修正 1：升級 unlockDate，讓它能同時解鎖名單內的所有人
-  const unlockDate = (participants, dateToRemove) => {
-    // 取得所有人的 ID 名單
+const unlockDate = (participants, req) => {
     const participantIds = participants ? participants.map(p => p.id) : [req.creatorId, req.targetId];
     
+    // 計算需要解鎖的日期陣列 (預設至少解鎖單日)
+    let datesToUnlock = req.date ? [req.date] : [];
+    if (req.isBundle && Array.isArray(req.daysToSwap) && req.date) {
+      const monthPrefix = req.date.substring(0, 7);
+      datesToUnlock = req.daysToSwap.map(d => `${monthPrefix}-${String(d).padStart(2, '0')}`);
+    }
+
     const nextEmployees = employees.map(e => {
       if (participantIds.includes(e.id)) {
         const currentDates = e.applyingDates || [];
-        return { ...e, applyingDates: currentDates.filter(d => d !== dateToRemove) };
+        // 確保將解鎖陣列內的日期通通清空
+        return { ...e, applyingDates: currentDates.filter(d => !datesToUnlock.includes(d)) };
       }
       return e;
     });
     setEmployees(nextEmployees);
 
-    // 💡 同步更新 currentUser (如果目前登入者就在解鎖名單中)
     if (currentUser && participantIds.includes(currentUser.id)) {
       setCurrentUser(prev => ({
         ...prev,
-        applyingDates: (prev.applyingDates || []).filter(d => d !== dateToRemove)
+        applyingDates: (prev.applyingDates || []).filter(d => !datesToUnlock.includes(d))
       }));
     }
     return nextEmployees;
@@ -3007,15 +2973,13 @@ const handleParticipantApprove = (reqId) => {
             : [rejectingReq.creatorId, rejectingReq.targetId];
           
           // 💡 3. 產生需要解鎖的完整日期陣列
-          let datesToUnlock = [];
-          if (rejectingReq.isBundle && rejectingReq.daysToSwap && rejectingReq.date) {
+          let datesToUnlock = rejectingReq.date ? [rejectingReq.date] : [];
+          if (rejectingReq.isBundle && Array.isArray(rejectingReq.daysToSwap) && rejectingReq.date) {
             const monthPrefix = rejectingReq.date.substring(0, 7);
             datesToUnlock = rejectingReq.daysToSwap.map(d => `${monthPrefix}-${String(d).padStart(2, '0')}`);
-          } else if (rejectingReq.date) {
-            datesToUnlock = [rejectingReq.date];
           }
 
-          // 💡 4. 產出解鎖後的全新 employees 陣列 (將 datesToUnlock 裡面的日子通通解鎖)
+          // 💡 4. 產出解鎖後的全新 employees 陣列
           const nextEmps = employees.map(e => {
             if (participantsToUnlock.includes(e.id)) {
               const currentDates = e.applyingDates || [];
