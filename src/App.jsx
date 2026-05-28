@@ -1968,9 +1968,15 @@ const ManagementReportView = ({ currentMonth, employees, schedule, personDayRule
             <button onClick={() => handleExportCSV('csv')} className="bg-teal-600 text-white px-3 py-1.5 rounded-xl text-xs font-black shadow-md hover:bg-teal-700 flex items-center gap-1.5 transition-all active:scale-95">
               <Download size={13}/> 匯出 CSV
             </button>
-            <button onClick={() => handleExportCSV('excel')} className="bg-emerald-600 text-white px-3 py-1.5 rounded-xl text-xs font-black shadow-md hover:bg-emerald-700 flex items-center gap-1.5 transition-all active:scale-95">
-              <FileSpreadsheet size={13}/> 匯出 Excel (帶顏色)
-            </button>
+            {/* 💡 修正版：使用安全不崩潰的 Download 圖示 */}
+            <div className="flex items-center gap-2">
+              <button onClick={() => handleExportCSV('csv')} className="bg-teal-600 text-white px-3 py-1.5 rounded-xl text-xs font-black shadow-md hover:bg-teal-700 flex items-center gap-1.5 transition-all active:scale-95">
+                <Download size={13}/> 匯出 CSV
+              </button>
+              <button onClick={() => handleExportCSV('excel')} className="bg-emerald-600 text-white px-3 py-1.5 rounded-xl text-xs font-black shadow-md hover:bg-emerald-700 flex items-center gap-1.5 transition-all active:scale-95">
+                <Download size={13}/> 匯出 Excel (帶顏色)
+              </button>
+            </div>
           </div>
         </div>
       </div>
@@ -2372,6 +2378,69 @@ const handleImportCSV = (e) => {
         <div className="flex gap-2">
           {!importPreview && (
             <>
+              {/* 💡 新增：排班頁面的 Excel/CSV 下載功能，自動帶有標準民國年大標題 */}
+<button 
+                onClick={() => {
+                  let titleHeader = "台大醫院雲林分院藥劑部 班表";
+                  if (currentMonth) {
+                    const parts = currentMonth.split('-');
+                    if (parts.length === 2) {
+                      titleHeader = `台大醫院雲林分院藥劑部 ${parseInt(parts[0], 10) - 1911}年${parseInt(parts[1], 10)}月份班表`;
+                    }
+                  }
+
+                  let xmlRows = "";
+                  // 建立大標題列
+                  xmlRows += `
+                    <tr style="height:35px;">
+                      <td colspan="33" style="font-family:Microsoft JhengHei;font-size:16px;font-weight:bold;align:center;vertical-align:middle;background-color:#F3F4F6;">
+                        ${titleHeader}
+                      </td>
+                    </tr>`;
+
+                  // 建立日期與星期標頭列
+                  xmlRows += `<tr style="height:25px;font-family:Microsoft JhengHei;font-size:11px;font-weight:bold;align:center;background-color:#E5E7EB;">`;
+                  xmlRows += `<td style="border:0.5pt solid #D1D5DB;width:60pt;">員工編號</td>`;
+                  xmlRows += `<td style="border:0.5pt solid #D1D5DB;width:60pt;">員工姓名</td>`;
+                  for (let d = 1; d <= 31; d++) {
+                    xmlRows += `<td style="border:0.5pt solid #D1D5DB;width:30pt;">${String(d).padStart(2, '0')}日</td>`;
+                  }
+                  xmlRows += `</tr>`;
+
+                  // 帶入全院同仁目前在大表上的班別
+                  employees.forEach(emp => {
+                    xmlRows += `<tr style="height:24px;font-family:Microsoft JhengHei;font-size:12px;align:center;vertical-align:middle;">`;
+                    xmlRows += `<td style="border:0.5pt solid #E5E7EB;">${emp.id}</td>`;
+                    xmlRows += `<td style="border:0.5pt solid #E5E7EB;font-weight:bold;">${emp.name}</td>`;
+                    
+                    for (let d = 1; d <= 31; d++) {
+                      const cellValue = schedule[currentMonth]?.[emp.name]?.[d] || "-";
+                      let cellBg = "#FFFFFF";
+                      if (cellValue === "P") cellBg = "#DBEAFE"; // P班亮藍
+                      else if (cellValue === "例" || cellValue === "休") cellBg = "#FEE2E2"; // 放假淡紅
+
+                      xmlRows += `<td style="background-color:${cellBg};border:0.5pt solid #E5E7EB;">${cellValue}</td>`;
+                    }
+                    xmlRows += `</tr>`;
+                  });
+
+                  const excelTemplate = `
+                    <html xmlns:o="urn:schemas-microsoft-com:office:office" xmlns:x="urn:schemas-microsoft-com:office:excel" xmlns="http://www.w3.org/TR/REC-html40">
+                    <head></head>
+                    <body><table border="1">${xmlRows}</table></body>
+                    </html>`;
+
+                  const blob = new Blob([excelTemplate], { type: 'application/vnd.ms-excel;charset=utf-8;' });
+                  const link = document.createElement("a");
+                  link.href = URL.createObjectURL(blob);
+                  link.download = `${titleHeader}.xls`;
+                  link.click();
+                }}
+                className="bg-emerald-600 text-white px-3 py-1.5 rounded text-xs font-bold flex items-center gap-1 hover:bg-emerald-700 shadow transition-all active:scale-95"
+              >
+                <Download size={14}/> 下載Excel
+              </button>
+
               <button onClick={() => fileRef.current.click()} className="bg-gray-800 text-white px-4 py-1.5 rounded text-xs font-bold flex items-center gap-1 hover:bg-black shadow"><Upload size={14}/> 上傳 CSV</button>
               <button onClick={handlePublishSchedule} className="bg-blue-600 text-white px-5 py-1.5 rounded text-xs font-bold shadow flex items-center gap-2 hover:bg-blue-700 transition-all"><CheckCircle2 size={16}/> 發佈班表</button>
             </>
