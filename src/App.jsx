@@ -1991,15 +1991,21 @@ const SchedulingView = ({ currentMonth, employees, daysInMonth, schedule, setSch
           
           let fileMonth = null;
           
-          // 1. 抓取 CSV 前 5 行，組合成一個大字串
-          const topRowsText = rows.slice(0, 5).map(r => r.join(",")).join(" ");
+let fileMonth = null;
           
-          // 2. 使用正則表達式，全域尋找「115年3月」、「115 年 03 月份」之類的格式
-          const match = topRowsText.match(/(1\d{2})\s*年\s*(\d{1,2})\s*月/);
+          // 1. 抓取 CSV 前 5 行，並把所有的逗號「,」和空格全部刪除，變成純文字
+          const topRowsText = rows.slice(0, 5)
+            .map(r => r.join(""))
+            .join("")
+            .replace(/,/g, "") // 強制拔除所有逗號
+            .replace(/\s/g, ""); // 強制拔除所有隱形空白
+
+          // 2. 用最乾淨的文字進行正則掃描 (115年6月 或 115年06月)
+          const match = topRowsText.match(/(1\d{2})年(\d{1,2})月/);
           
           if (match) {
             const rocYear = parseInt(match[1], 10); // 抓出民國年 (例如 115)
-            const month = parseInt(match[2], 10);   // 抓出月份 (例如 3)
+            const month = parseInt(match[2], 10);   // 抓出月份 (例如 6)
             const westYear = rocYear + 1911;        // 轉換為西元年 (例如 2026)
             
             // 3. 組合成系統標準的 YYYY-MM 格式
@@ -2008,7 +2014,7 @@ const SchedulingView = ({ currentMonth, employees, daysInMonth, schedule, setSch
           
           // 4. 進行比對
           if (!fileMonth || fileMonth !== currentMonth) {
-            alert(`上傳的班表月份 (${fileMonth || '未偵測到'}) 與當前系統月份 (${currentMonth}) 不符！\n請確認 CSV 檔案最上方是否有類似「115年3月」的文字。`);
+            alert(`上傳的班表月份 (${fileMonth || '未偵測到'}) 與當前系統月份 (${currentMonth}) 不符！\n\n提示：請確認您目前網頁切換的月份，是否與 CSV 檔內的「年月份」一致。`);
             fileRef.current.value = '';
             return;
           }
