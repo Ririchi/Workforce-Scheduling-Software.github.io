@@ -1842,7 +1842,7 @@ const ManagementReportView = ({ currentMonth, employees, schedule, personDayRule
       }
     }
 
-    const headers = ["員編", "姓名", ...reportDays.map(d => `${d.day}(${d.dayOfWeek})`)];
+    const headers = ["員編", "姓名", ...reportDays.map(d => reportType === 'shiftCode' ? String(d.day) : `${d.day}(${d.dayOfWeek})`)];
     if (!isFourWeekMode && !isNightFeeMode) headers.push("總計");
 
     // ================= 【 情況 A：匯出 CSV 格式 】 =================
@@ -1855,10 +1855,20 @@ const ManagementReportView = ({ currentMonth, employees, schedule, personDayRule
         let row = [emp.id, emp.name];
         let rowSum = 0;
         reportDays.forEach(d => {
-          const res = calculateCellValue(emp, d);
-          row.push(res.display || "-");
-          rowSum += res.numeric;
-        });
+        let bg = "#FFFFFF"; // 預設平常日灰色
+        let textColor = "#000000";
+        if (d.rawDay === 0 || !!d.holiday) bg = "#FFB3D9"; // 假日/節慶粉紅
+        else if (d.rawDay === 6) bg = "#FFB366"; // 週六橘色
+        else if (d.day === "總計") bg = "#E0F2F1"; // 總計綠色
+
+        // 💡 針對班別代碼，只顯示純數字；其他維持顯示數字+星期
+        let displayTitle = d.day;
+        if (d.rawDay !== -1 && reportType !== 'shiftCode') {
+          displayTitle = `${d.day}\n(${d.dayOfWeek})`;
+        }
+
+        xmlRows += `<td style="background-color:${bg};color:${textColor};border:0.5pt solid #D1D5DB;white-space:normal;align:center;">${displayTitle}</td>`;
+      });
         if (!isFourWeekMode && !isNightFeeMode) row.push(rowSum.toFixed(reportType === 'personDays' ? 1 : 0));
         csv += row.join(",") + "\n";
       });
@@ -1887,7 +1897,7 @@ const ManagementReportView = ({ currentMonth, employees, schedule, personDayRule
       if (!isFourWeekMode && !isNightFeeMode) reportDays.push({ day: "總計", dayOfWeek: "", rawDay: -1 });
       
       reportDays.forEach(d => {
-        let bg = "#F3F4F6"; // 預設平常日灰色
+        let bg = "#FFFFFF"; // 預設平常日灰色
         let textColor = "#000000";
         if (d.rawDay === 0 || !!d.holiday) bg = "#FFB3D9"; // 假日/節慶粉紅
         else if (d.rawDay === 6) bg = "#FFB366"; // 週六橘色
@@ -1963,12 +1973,6 @@ const ManagementReportView = ({ currentMonth, employees, schedule, personDayRule
               <div className="bg-gray-100 border border-gray-200 px-3 py-1 rounded text-xs font-black text-gray-700">{currentMonth}</div>
             </div>
           )}
-          {/* 💡 升級：提供 CSV 與 帶顏色 Excel 的雙重下載按鈕 */}
-          <div className="flex items-center gap-2">
-            <button onClick={() => handleExportCSV('csv')} className="bg-teal-600 text-white px-3 py-1.5 rounded-xl text-xs font-black shadow-md hover:bg-teal-700 flex items-center gap-1.5 transition-all active:scale-95">
-              <Download size={13}/> 匯出 CSV
-            </button>
-            {/* 💡 修正版：使用安全不崩潰的 Download 圖示 */}
             <div className="flex items-center gap-2">
               <button onClick={() => handleExportCSV('csv')} className="bg-teal-600 text-white px-3 py-1.5 rounded-xl text-xs font-black shadow-md hover:bg-teal-700 flex items-center gap-1.5 transition-all active:scale-95">
                 <Download size={13}/> 匯出 CSV
@@ -2222,7 +2226,7 @@ const handleImportCSV = (e) => {
     }
     setIsDirty(false); 
     setCurrentPage('home');
-    alert("班表發佈完成！");
+    alert("班表發佈完成！已自動下載csv檔備份");
   };
 
   // 💡 勞基法即時檢核器 (跨月拼接 + 完美對齊報表邏輯)
@@ -2379,7 +2383,7 @@ const handleImportCSV = (e) => {
           {!importPreview && (
             <>
               {/* 💡 新增：排班頁面的 Excel/CSV 下載功能，自動帶有標準民國年大標題 */}
-<button 
+              <button 
                 onClick={() => {
                   let titleHeader = "台大醫院雲林分院藥劑部 班表";
                   if (currentMonth) {
@@ -2389,8 +2393,21 @@ const handleImportCSV = (e) => {
                     }
                   }
 
+                  // 💡 色彩翻譯機：將系統的 Tailwind 顏色轉為 Excel 色碼
+                  const getHex = (tailwindClass) => {
+                    if (!tailwindClass) return null;
+                    if (tailwindClass.includes('red') || tailwindClass.includes('rose')) return '#FECACA';
+                    if (tailwindClass.includes('blue') || tailwindClass.includes('sky')) return '#BFDBFE';
+                    if (tailwindClass.includes('green') || tailwindClass.includes('teal') || tailwindClass.includes('emerald')) return '#A7F3D0';
+                    if (tailwindClass.includes('yellow') || tailwindClass.includes('amber')) return '#FEF08A';
+                    if (tailwindClass.includes('purple') || tailwindClass.includes('violet')) return '#E9D5FF';
+                    if (tailwindClass.includes('pink')) return '#FBCFE8';
+                    if (tailwindClass.includes('orange')) return '#FED7AA';
+                    if (tailwindClass.includes('gray') || tailwindClass.includes('slate')) return '#E5E7EB';
+                    return null;
+                  };
+
                   let xmlRows = "";
-                  // 建立大標題列
                   xmlRows += `
                     <tr style="height:35px;">
                       <td colspan="33" style="font-family:Microsoft JhengHei;font-size:16px;font-weight:bold;align:center;vertical-align:middle;background-color:#F3F4F6;">
@@ -2402,22 +2419,42 @@ const handleImportCSV = (e) => {
                   xmlRows += `<tr style="height:25px;font-family:Microsoft JhengHei;font-size:11px;font-weight:bold;align:center;background-color:#E5E7EB;">`;
                   xmlRows += `<td style="border:0.5pt solid #D1D5DB;width:60pt;">員工編號</td>`;
                   xmlRows += `<td style="border:0.5pt solid #D1D5DB;width:60pt;">員工姓名</td>`;
+                  
+                  const weekMap = ['日', '一', '二', '三', '四', '五', '六'];
                   for (let d = 1; d <= 31; d++) {
-                    xmlRows += `<td style="border:0.5pt solid #D1D5DB;width:30pt;">${String(d).padStart(2, '0')}日</td>`;
+                    const dateObj = new Date(`${currentMonth}-${String(d).padStart(2, '0')}`);
+                    const dayOfWeek = weekMap[dateObj.getDay()];
+                    xmlRows += `<td style="border:0.5pt solid #D1D5DB;width:30pt;">${d}(${dayOfWeek})</td>`;
                   }
                   xmlRows += `</tr>`;
 
-                  // 帶入全院同仁目前在大表上的班別
                   employees.forEach(emp => {
                     xmlRows += `<tr style="height:24px;font-family:Microsoft JhengHei;font-size:12px;align:center;vertical-align:middle;">`;
                     xmlRows += `<td style="border:0.5pt solid #E5E7EB;">${emp.id}</td>`;
                     xmlRows += `<td style="border:0.5pt solid #E5E7EB;font-weight:bold;">${emp.name}</td>`;
                     
                     for (let d = 1; d <= 31; d++) {
-                      const cellValue = schedule[currentMonth]?.[emp.name]?.[d] || "-";
+                      // 💡 2. 拔除 || "-" 的預設值，完全呈現空值
+                      const rawValue = schedule[currentMonth]?.[emp.name]?.[d];
+                      const cellValue = (rawValue === undefined || rawValue === null) ? "" : rawValue;
+                      
+                      // 💡 1. 抓取 Firebase 儲存的畫筆顏色
+                      const customColorClass = cellColors?.[currentMonth]?.[emp.name]?.[d];
+                      
+                      // 判斷週末 (這裡利用簡單的 Date 物件推算星期幾)
+                      const dateObj = new Date(`${currentMonth}-${String(d).padStart(2, '0')}`);
+                      const dayOfWeek = dateObj.getDay();
+                      
                       let cellBg = "#FFFFFF";
-                      if (cellValue === "P") cellBg = "#DBEAFE"; // P班亮藍
-                      else if (cellValue === "例" || cellValue === "休") cellBg = "#FEE2E2"; // 放假淡紅
+                      // 週末預設底色
+                      if (dayOfWeek === 0) cellBg = "#FFB3D9"; // 週日粉紅
+                      else if (dayOfWeek === 6) cellBg = "#FFB366"; // 週六橘色
+                      
+                      // 如果有手動畫筆顏色，則覆蓋預設色
+                      if (customColorClass) {
+                        const hex = getHex(customColorClass);
+                        if (hex) cellBg = hex;
+                      }
 
                       xmlRows += `<td style="background-color:${cellBg};border:0.5pt solid #E5E7EB;">${cellValue}</td>`;
                     }
