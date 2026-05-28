@@ -1826,28 +1826,121 @@ const ManagementReportView = ({ currentMonth, employees, schedule, personDayRule
     return list;
   }, [employees, reportType, isFourWeekMode, isNightFeeMode, hasSupportData]);
 
-  const handleExportCSV = () => {
+// 💡 萬能匯出工具：同時支援 CSV 加第一列標題，以及 Excel 帶顏色防呆下載
+  const handleExportCSV = (exportType = 'csv') => {
     const rtTitle = isFourWeekMode ? `28天報表(${startDate})` : `月報表(${currentMonth})`;
     const typeLabel = reportType === 'personDays' ? '人日數' : reportType === 'nightFee' ? '夜班費' : '班別代碼';
-    let csv = `\ufeff藥劑部管理報表 - ${typeLabel} (${rtTitle}),,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,\n`;
+    
+    // 💡 1. 自動推算符合上傳檢核的民國年標題格式 (例如：2026-05 -> 115年5月份)
+    let titleHeader = "台大醫院雲林分院藥劑部 班表";
+    if (currentMonth) {
+      const parts = currentMonth.split('-');
+      if (parts.length === 2) {
+        const rocYear = parseInt(parts[0], 10) - 1911;
+        const rocMonth = parseInt(parts[1], 10);
+        titleHeader = `台大醫院雲林分院藥劑部 ${rocYear}年${rocMonth}月份班表`;
+      }
+    }
+
     const headers = ["員編", "姓名", ...reportDays.map(d => `${d.day}(${d.dayOfWeek})`)];
     if (!isFourWeekMode && !isNightFeeMode) headers.push("總計");
-    csv += headers.join(",") + "\n";
-    filteredEmployees.forEach(emp => {
-      let row = [emp.id, emp.name];
-      let rowSum = 0;
-      reportDays.forEach(d => {
-        const res = calculateCellValue(emp, d);
-        row.push(res.display); rowSum += res.numeric;
+
+    // ================= 【 情況 A：匯出 CSV 格式 】 =================
+    if (exportType === 'csv') {
+      // 第一列強行填入標準檢核標題，後面補滿逗號防止試算表錯位
+      let csv = `\ufeff${titleHeader}${(",").repeat(headers.length - 1)}\n`;
+      csv += headers.join(",") + "\n";
+      
+      filteredEmployees.forEach(emp => {
+        let row = [emp.id, emp.name];
+        let rowSum = 0;
+        reportDays.forEach(d => {
+          const res = calculateCellValue(emp, d);
+          row.push(res.display || "-");
+          rowSum += res.numeric;
+        });
+        if (!isFourWeekMode && !isNightFeeMode) row.push(rowSum.toFixed(reportType === 'personDays' ? 1 : 0));
+        csv += row.join(",") + "\n";
       });
-      if (!isFourWeekMode && !isNightFeeMode) row.push(rowSum.toFixed(reportType === 'personDays' ? 1 : 0));
-      csv += row.join(",") + "\n";
-    });
-    const blob = new Blob([csv], { type: 'text/csv;charset=utf-8;' });
-    const link = document.createElement("a");
-    link.href = URL.createObjectURL(blob);
-    link.download = `管理報表_${typeLabel}_${rtTitle}.csv`;
-    link.click();
+
+      const blob = new Blob([csv], { type: 'text/csv;charset=utf-8;' });
+      const link = document.createElement("a");
+      link.href = URL.createObjectURL(blob);
+      link.download = `${titleHeader}_(${typeLabel}).csv`;
+      link.click();
+    } 
+    // ================= 【 情況 B：匯出帶顏色的 Excel 格式 】 =================
+    else if (exportType === 'excel') {
+      let xmlRows = "";
+
+      // 建立第一列：大標題（合併儲存格，讓它漂亮置中）
+      xmlRows += `
+        <tr style="height:35px;">
+          <td colspan="${headers.length}" style="font-family:Microsoft JhengHei;font-size:16px;font-weight:bold;align:center;vertical-align:middle;background-color:#F3F4F6;">
+            ${titleHeader} (${typeLabel})
+          </td>
+        </tr>`;
+
+      // 建立第二列：日期標題列 (比照您的排班表顏色)
+      xmlRows += `<tr style="height:28px;font-family:Microsoft JhengHei;font-size:12px;font-weight:bold;align:center;vertical-align:middle;">`;
+      reportDays.unshift({ day: "員編", dayOfWeek: "", rawDay: -1 }, { day: "姓名", dayOfWeek: "", rawDay: -1 });
+      if (!isFourWeekMode && !isNightFeeMode) reportDays.push({ day: "總計", dayOfWeek: "", rawDay: -1 });
+      
+      reportDays.forEach(d => {
+        let bg = "#F3F4F6"; // 預設平常日灰色
+        let textColor = "#000000";
+        if (d.rawDay === 0 || !!d.holiday) bg = "#FFB3D9"; // 假日/節慶粉紅
+        else if (d.rawDay === 6) bg = "#FFB366"; // 週六橘色
+        else if (d.day === "總計") bg = "#E0F2F1"; // 總計綠色
+
+        const displayTitle = d.rawDay === -1 ? d.day : `${d.day}\n(${d.dayOfWeek})`;
+        xmlRows += `<td style="background-color:${bg};color:${textColor};border:0.5pt solid #D1D5DB;white-space:normal;align:center;">${displayTitle}</td>`;
+      });
+      xmlRows += `</tr>`;
+      
+      // 還原陣列結構，避免影響後續計算
+      reportDays.splice(0, 2);
+      if (!isFourWeekMode && !isNightFeeMode) reportDays.pop();
+
+      // 建立同仁的班別資料列
+      filteredEmployees.forEach(emp => {
+        xmlRows += `<tr style="height:25px;font-family:Microsoft JhengHei;font-size:12px;align:center;vertical-align:middle;">`;
+        xmlRows += `<td style="border:0.5pt solid #E5E7EB;align:center;">${emp.id}</td>`;
+        xmlRows += `<td style="border:0.5pt solid #E5E7EB;font-weight:bold;align:center;">${emp.name}</td>`;
+        
+        let rowSum = 0;
+        reportDays.forEach(d => {
+          const res = calculateCellValue(emp, d);
+          rowSum += res.numeric;
+          
+          let cellBg = "#FFFFFF";
+          // 💡 這裡可以自由對照您的班別塗顏色，例如：如果是 "P" 班就塗成亮藍色
+          if (res.display === "P") cellBg = "#DBEAFE";
+          else if (res.display === "例" || res.display === "休") cellBg = "#FEE2E2";
+          else if (d.rawDay === 0 || d.rawDay === 6 || !!d.holiday) cellBg = "#F9FAFB"; // 假日格子淡淡灰
+
+          xmlRows += `<td style="background-color:${cellBg};border:0.5pt solid #E5E7EB;align:center;">${res.display || "-"}</td>`;
+        });
+
+        if (!isFourWeekMode && !isNightFeeMode) {
+          xmlRows += `<td style="background-color:#F1F8F7;font-weight:bold;color:#0F766E;border:0.5pt solid #E5E7EB;align:center;">${rowSum.toFixed(reportType === 'personDays' ? 1 : 0)}</td>`;
+        }
+        xmlRows += `</tr>`;
+      });
+
+      // 打包成正統 Excel 能直接讀取的 XML 格式
+      const excelTemplate = `
+        <html xmlns:o="urn:schemas-microsoft-com:office:office" xmlns:x="urn:schemas-microsoft-com:office:excel" xmlns="http://www.w3.org/TR/REC-html40">
+        <head></head>
+        <body><table border="1">${xmlRows}</table></body>
+        </html>`;
+
+      const blob = new Blob([excelTemplate], { type: 'application/vnd.ms-excel;charset=utf-8;' });
+      const link = document.createElement("a");
+      link.href = URL.createObjectURL(blob);
+      link.download = `${titleHeader}_(${typeLabel}).xls`;
+      link.click();
+    }
   };
 
   return (
@@ -1870,9 +1963,15 @@ const ManagementReportView = ({ currentMonth, employees, schedule, personDayRule
               <div className="bg-gray-100 border border-gray-200 px-3 py-1 rounded text-xs font-black text-gray-700">{currentMonth}</div>
             </div>
           )}
-          <button onClick={handleExportCSV} className="bg-emerald-600 text-white px-4 py-1.5 rounded-xl text-xs font-black shadow-lg hover:bg-emerald-700 flex items-center gap-2 transition-all active:scale-95">
-            <Download size={14}/> 匯出 CSV
-          </button>
+          {/* 💡 升級：提供 CSV 與 帶顏色 Excel 的雙重下載按鈕 */}
+          <div className="flex items-center gap-2">
+            <button onClick={() => handleExportCSV('csv')} className="bg-teal-600 text-white px-3 py-1.5 rounded-xl text-xs font-black shadow-md hover:bg-teal-700 flex items-center gap-1.5 transition-all active:scale-95">
+              <Download size={13}/> 匯出 CSV
+            </button>
+            <button onClick={() => handleExportCSV('excel')} className="bg-emerald-600 text-white px-3 py-1.5 rounded-xl text-xs font-black shadow-md hover:bg-emerald-700 flex items-center gap-1.5 transition-all active:scale-95">
+              <FileSpreadsheet size={13}/> 匯出 Excel (帶顏色)
+            </button>
+          </div>
         </div>
       </div>
       <div className="flex-grow overflow-auto relative">
@@ -1980,90 +2079,95 @@ const SchedulingView = ({ currentMonth, employees, daysInMonth, schedule, setSch
   }, [currentMonth, employees, daysInMonth, schedule, editSched]); 
 
   // 💡 修正 2：精確鎖定 Y+5碼員編的匯入檢核
-  const handleImportCSV = (e) => {
+const handleImportCSV = (e) => {
     try {
       const file = e.target.files[0];
       if (!file) return;
       const reader = new FileReader();
       reader.onload = (ev) => {
         try {
+          // 拆解 CSV 資料並清除引號與空白
           const rows = ev.target.result.split(/\r?\n/).map(r => r.split(',').map(c => c.trim().replace(/^"|"$/g, '')));
           
+          // =================== 【 1. 彈性月份檢核 】 ===================
           let fileMonth = null;
-          
-          // 1. 抓取 CSV 前 5 行，並把所有的逗號「,」和空格全部刪除，變成純文字
-          const topRowsText = rows.slice(0, 5)
-            .map(r => r.join(""))
-            .join("")
-            .replace(/,/g, "") // 強制拔除所有逗號
-            .replace(/\s/g, ""); // 強制拔除所有隱形空白
-
-          // 2. 用最乾淨的文字進行正則掃描 (115年6月 或 115年06月)
+          const topRowsText = rows.slice(0, 5).map(r => r.join("")).join("").replace(/,/g, "").replace(/\s/g, "");
           const match = topRowsText.match(/(1\d{2})年(\d{1,2})月/);
           
           if (match) {
-            const rocYear = parseInt(match[1], 10); // 抓出民國年 (例如 115)
-            const month = parseInt(match[2], 10);   // 抓出月份 (例如 6)
-            const westYear = rocYear + 1911;        // 轉換為西元年 (例如 2026)
-            
-            // 3. 組合成系統標準的 YYYY-MM 格式
-            fileMonth = `${westYear}-${String(month).padStart(2, '0')}`;
+            const rocYear = parseInt(match[1], 10);
+            const month = parseInt(match[2], 10);
+            fileMonth = `${rocYear + 1911}-${String(month).padStart(2, '0')}`;
           }
           
-          // 4. 進行比對
           if (!fileMonth || fileMonth !== currentMonth) {
-            alert(`上傳的班表月份 (${fileMonth || '未偵測到'}) 與當前系統月份 (${currentMonth}) 不符！\n\n提示：請確認您目前網頁切換的月份，是否與 CSV 檔內的「年月份」一致。`);
+            alert(`上傳的班表月份 (${fileMonth || '未偵測到'}) 與當前系統月份 (${currentMonth}) 不符！\n請確認 CSV 檔案最上方是否有正確的年月份。`);
             fileRef.current.value = '';
             return;
           }
-          
-          const nextPreview = deepClone(editSched || {});
-          
-          // 🔥 修正點：將正則表達式改為極度精準的 Y 加上 5個數字
-          const idPattern = /^Y\d{5}$/; 
-          
-          let missingEmployeesLog = "";
-          let hasGhostEmployee = false;
-          const seenGhosts = new Set();
 
-          rows.forEach(rowCells => {
-            rowCells.forEach((cell, cellIdx) => {
-              if (idPattern.test(cell)) {
-                const systemEmp = (employees || []).find(e => e.id === cell);
-                
-                if (systemEmp && nextPreview[systemEmp.name]) {
-                  for (let d = 1; d <= daysInMonth.length; d++) {
-                    const shiftVal = rowCells[cellIdx + 1 + d];
-                    if (shiftVal !== undefined) nextPreview[systemEmp.name][d] = shiftVal || (getIsNightClinic(systemEmp) ? "" : "-");
-                  }
-                } else if (!systemEmp) {
-                  hasGhostEmployee = true;
-                  if (!seenGhosts.has(cell)) {
-                    seenGhosts.add(cell);
-                    const ghostName = rowCells[cellIdx + 1] || "未知同仁";
-                    missingEmployeesLog += `員編 ${cell}  ${ghostName}\n`;
-                  }
-                }
-              }
-            });
-          });
+          // =================== 【 2. 動態尋找「姓名」欄位定位 】 ===================
+          let nameIdx = -1;
+          let headerRow = null;
 
-          if (hasGhostEmployee) {
-            alert(`⚠️ 班表已成功匯入預覽區！\n\n但偵測到以下人員不在系統名單內（已自動略過其班表）：\n\n${missingEmployeesLog}\n若需排入上述人員，請先於「帳號管理」新增資料。`);
+          // 掃描前 5 列，找出哪一列是包含「姓名」或「員工姓名」的標頭列
+          for (let i = 0; i < Math.min(rows.length, 5); i++) {
+            const idx = rows[i].findIndex(c => c.includes("姓名") || c === "姓名");
+            if (idx !== -1) {
+              nameIdx = idx;
+              headerRow = rows[i];
+              break;
+            }
           }
 
-          setIgnoredCells(new Set()); 
-          setImportPreview(nextPreview);
-        } catch (innerError) {
-          console.error("解析 CSV 內部錯誤：", innerError);
-          alert("CSV 檔案格式解析失敗，請檢查內容是否正確。");
+          // 防呆：如果完全找不到姓名欄位，拋出錯誤
+          if (nameIdx === -1) {
+            alert("無法解析此 CSV 檔案！檔案內必須包含「姓名」或「員工姓名」欄位。");
+            fileRef.current.value = '';
+            return;
+          }
+
+          // =================== 【 3. 彈性抓取每日班別資料 】 ===================
+          const nextImportData = {};
+
+          rows.forEach((r) => {
+            const empName = r[nameIdx]; // 💡 動態鎖定姓名位置
+            if (!empName || empName === "姓名" || empName === "員工姓名" || empName.trim() === "") return;
+
+            // 檢查這個人是否存在於系統的員工名單中
+            const empExists = employees.some(e => e.name === empName);
+            if (!empExists) return; // 略過非員工列 (例如標頭、空白列、備註等)
+
+            if (!nextImportData[empName]) nextImportData[empName] = {};
+
+            // 💡 姓名欄位的「右邊第一格」就是 1 號的班別，依此類推抓滿 31 天
+            for (let day = 1; day <= 31; day++) {
+              const cellValue = r[nameIdx + day]; // 動態推算日期欄位位置
+              if (cellValue !== undefined) {
+                // 將畫面上看到的中文字如 "例假"、"休假" 縮寫回系統認得的 "例"、"休"
+                let finalValue = cellValue.trim();
+                if (finalValue === "例假") finalValue = "例";
+                if (finalValue === "休假") finalValue = "休";
+                if (finalValue === "") finalValue = "-";
+                
+                nextImportData[empName][day] = finalValue;
+              }
+            }
+          });
+
+          // 成功解析，送入比對與預覽模式
+          setImportPreview(nextImportData);
+          alert("🎉 CSV 班表上傳成功！系統已進入「對比模式」，請確認無誤後點擊上方『確認套用』發佈！");
+
+        } catch (err) {
+          console.error(err);
+          alert("上傳失敗，請檢查檔案格式是否為CSV UTF-8。");
         }
       };
-      reader.readAsText(file); 
-    } catch (outerError) {
-      console.error("上傳檔案錯誤：", outerError);
+      reader.readAsText(file, "UTF-8");
+    } catch (error) {
+      console.error(error);
     }
-    e.target.value = '';
   };
 
   const confirmApplyImport = () => {
