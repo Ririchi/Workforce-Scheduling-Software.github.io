@@ -1953,7 +1953,7 @@ const ManagementReportView = ({ currentMonth, employees, schedule, personDayRule
     }
   };
 
-  return (
+return (
     <div className="flex-grow flex flex-col bg-gray-50 overflow-hidden font-sans">
       <div className="bg-white border-b-2 border-gray-800 p-3 flex flex-wrap justify-between items-center shadow-md z-[60] gap-3">
         <div className="flex items-center gap-1 bg-gray-100 p-1 rounded-xl shadow-inner">
@@ -1961,6 +1961,7 @@ const ManagementReportView = ({ currentMonth, employees, schedule, personDayRule
           <button onClick={() => setReportType('nightFee')} className={`px-4 py-1.5 rounded-lg text-xs font-black transition-all ${reportType === 'nightFee' ? 'bg-white text-indigo-600 shadow-md scale-105' : 'text-gray-400 hover:text-gray-600'}`}>夜班費</button>
           <button onClick={() => setReportType('shiftCode')} className={`px-4 py-1.5 rounded-lg text-xs font-black transition-all ${reportType === 'shiftCode' ? 'bg-white text-blue-600 shadow-md scale-105' : 'text-gray-400 hover:text-gray-600'}`}>班別代碼(四周)</button>
         </div>
+        
         <div className="flex items-center gap-3">
           {isFourWeekMode ? (
             <div className="flex items-center gap-2">
@@ -1973,17 +1974,17 @@ const ManagementReportView = ({ currentMonth, employees, schedule, personDayRule
               <div className="bg-gray-100 border border-gray-200 px-3 py-1 rounded text-xs font-black text-gray-700">{currentMonth}</div>
             </div>
           )}
-            <div className="flex items-center gap-2">
-              <button onClick={() => handleExportCSV('csv')} className="bg-teal-600 text-white px-3 py-1.5 rounded-xl text-xs font-black shadow-md hover:bg-teal-700 flex items-center gap-1.5 transition-all active:scale-95">
-                <Download size={13}/> 匯出 CSV
-              </button>
-              <button onClick={() => handleExportCSV('excel')} className="bg-emerald-600 text-white px-3 py-1.5 rounded-xl text-xs font-black shadow-md hover:bg-emerald-700 flex items-center gap-1.5 transition-all active:scale-95">
-                <Download size={13}/> 匯出 Excel (帶顏色)
-              </button>
-            </div>
+          
+          {/* 💡 乾淨完整的 Excel 匯出按鈕區塊 */}
+          <div className="flex items-center gap-2">
+            <button onClick={() => handleExportCSV('excel')} className="bg-emerald-600 text-white px-3 py-1.5 rounded-xl text-xs font-black shadow-md hover:bg-emerald-700 flex items-center gap-1.5 transition-all active:scale-95">
+              <Download size={13}/> 匯出 Excel 報表 (帶顏色)
+            </button>
           </div>
         </div>
       </div>
+      
+      <div className="flex-grow overflow-auto relative">
       <div className="flex-grow overflow-auto relative">
         <table className="w-full text-[12px] text-center border-separate border-spacing-0 table-fixed min-w-[1600px]">
           <thead className="sticky top-0 z-[50]">
@@ -2138,6 +2139,7 @@ const handleImportCSV = (e) => {
           }
 
           // =================== 【 3. 彈性抓取每日班別資料 】 ===================
+// =================== 【 3. 彈性抓取每日班別資料 (過濾相同班別) 】 ===================
           const nextImportData = {};
 
           rows.forEach((r) => {
@@ -2146,28 +2148,41 @@ const handleImportCSV = (e) => {
 
             // 檢查這個人是否存在於系統的員工名單中
             const empExists = employees.some(e => e.name === empName);
-            if (!empExists) return; // 略過非員工列 (例如標頭、空白列、備註等)
-
-            if (!nextImportData[empName]) nextImportData[empName] = {};
+            if (!empExists) return;
 
             // 💡 姓名欄位的「右邊第一格」就是 1 號的班別，依此類推抓滿 31 天
             for (let day = 1; day <= 31; day++) {
-              const cellValue = r[nameIdx + day]; // 動態推算日期欄位位置
+              const cellValue = r[nameIdx + day]; 
               if (cellValue !== undefined) {
-                // 將畫面上看到的中文字如 "例假"、"休假" 縮寫回系統認得的 "例"、"休"
+                // 將畫面上看到的中文字如 "例假"、"休假" 縮寫回系統認得的格式
                 let finalValue = cellValue.trim();
                 if (finalValue === "例假") finalValue = "例";
                 if (finalValue === "休假") finalValue = "休";
                 if (finalValue === "") finalValue = "-";
                 
-                nextImportData[empName][day] = finalValue;
+                // 【關鍵修復】：取得系統目前已經存的舊班別，並進行格式統一
+                const currentRaw = schedule[currentMonth]?.[empName]?.[day];
+                const currentVal = (currentRaw === null || currentRaw === undefined || String(currentRaw).trim() === "") ? "-" : String(currentRaw).trim();
+                
+                // 💡 只有當「上傳的新班別」跟「原本的舊班別」真的不同時，才記錄為變動！
+                if (finalValue !== currentVal) {
+                  if (!nextImportData[empName]) nextImportData[empName] = {};
+                  nextImportData[empName][day] = finalValue;
+                }
               }
             }
           });
 
-          // 成功解析，送入比對與預覽模式
+          // 【加碼防呆】：如果整張表掃完，發現跟現在系統裡的班表一模一樣
+          if (Object.keys(nextImportData).length === 0) {
+            alert("比對完成：上傳的班表與目前系統內的班表「完全一致」，沒有變動的班別！");
+            fileRef.current.value = '';
+            return;
+          }
+
+          // 成功解析並有差異，送入比對與預覽模式
           setImportPreview(nextImportData);
-          alert("🎉 CSV 班表上傳成功！系統已進入「對比模式」，請確認無誤後點擊上方『確認套用』發佈！");
+          alert("🎉 CSV 班表解析成功！系統已進入「對比模式」，請確認藍框變動處無誤後，點擊『確認套用』！");
 
         } catch (err) {
           console.error(err);
@@ -2385,93 +2400,89 @@ const handleImportCSV = (e) => {
               {/* 💡 新增：排班頁面的 Excel/CSV 下載功能，自動帶有標準民國年大標題 */}
               <button 
                 onClick={() => {
-                  let titleHeader = "台大醫院雲林分院藥劑部 班表";
-                  if (currentMonth) {
-                    const parts = currentMonth.split('-');
-                    if (parts.length === 2) {
-                      titleHeader = `台大醫院雲林分院藥劑部 ${parseInt(parts[0], 10) - 1911}年${parseInt(parts[1], 10)}月份班表`;
-                    }
-                  }
-
-                  // 💡 色彩翻譯機：將系統的 Tailwind 顏色轉為 Excel 色碼
-                  const getHex = (tailwindClass) => {
-                    if (!tailwindClass) return null;
-                    if (tailwindClass.includes('red') || tailwindClass.includes('rose')) return '#FECACA';
-                    if (tailwindClass.includes('blue') || tailwindClass.includes('sky')) return '#BFDBFE';
-                    if (tailwindClass.includes('green') || tailwindClass.includes('teal') || tailwindClass.includes('emerald')) return '#A7F3D0';
-                    if (tailwindClass.includes('yellow') || tailwindClass.includes('amber')) return '#FEF08A';
-                    if (tailwindClass.includes('purple') || tailwindClass.includes('violet')) return '#E9D5FF';
-                    if (tailwindClass.includes('pink')) return '#FBCFE8';
-                    if (tailwindClass.includes('orange')) return '#FED7AA';
-                    if (tailwindClass.includes('gray') || tailwindClass.includes('slate')) return '#E5E7EB';
-                    return null;
-                  };
-
-                  let xmlRows = "";
-                  xmlRows += `
-                    <tr style="height:35px;">
-                      <td colspan="33" style="font-family:Microsoft JhengHei;font-size:16px;font-weight:bold;align:center;vertical-align:middle;background-color:#F3F4F6;">
-                        ${titleHeader}
-                      </td>
-                    </tr>`;
-
-                  // 建立日期與星期標頭列
-                  xmlRows += `<tr style="height:25px;font-family:Microsoft JhengHei;font-size:11px;font-weight:bold;align:center;background-color:#E5E7EB;">`;
-                  xmlRows += `<td style="border:0.5pt solid #D1D5DB;width:60pt;">員工編號</td>`;
-                  xmlRows += `<td style="border:0.5pt solid #D1D5DB;width:60pt;">員工姓名</td>`;
-                  
-                  const weekMap = ['日', '一', '二', '三', '四', '五', '六'];
-                  for (let d = 1; d <= 31; d++) {
-                    const dateObj = new Date(`${currentMonth}-${String(d).padStart(2, '0')}`);
-                    const dayOfWeek = weekMap[dateObj.getDay()];
-                    xmlRows += `<td style="border:0.5pt solid #D1D5DB;width:30pt;">${d}(${dayOfWeek})</td>`;
-                  }
-                  xmlRows += `</tr>`;
-
-                  employees.forEach(emp => {
-                    xmlRows += `<tr style="height:24px;font-family:Microsoft JhengHei;font-size:12px;align:center;vertical-align:middle;">`;
-                    xmlRows += `<td style="border:0.5pt solid #E5E7EB;">${emp.id}</td>`;
-                    xmlRows += `<td style="border:0.5pt solid #E5E7EB;font-weight:bold;">${emp.name}</td>`;
-                    
-                    for (let d = 1; d <= 31; d++) {
-                      // 💡 2. 拔除 || "-" 的預設值，完全呈現空值
-                      const rawValue = schedule[currentMonth]?.[emp.name]?.[d];
-                      const cellValue = (rawValue === undefined || rawValue === null) ? "" : rawValue;
-                      
-                      // 💡 1. 抓取 Firebase 儲存的畫筆顏色
-                      const customColorClass = cellColors?.[currentMonth]?.[emp.name]?.[d];
-                      
-                      // 判斷週末 (這裡利用簡單的 Date 物件推算星期幾)
-                      const dateObj = new Date(`${currentMonth}-${String(d).padStart(2, '0')}`);
-                      const dayOfWeek = dateObj.getDay();
-                      
-                      let cellBg = "#FFFFFF";
-                      // 週末預設底色
-                      if (dayOfWeek === 0) cellBg = "#FFB3D9"; // 週日粉紅
-                      else if (dayOfWeek === 6) cellBg = "#FFB366"; // 週六橘色
-                      
-                      // 如果有手動畫筆顏色，則覆蓋預設色
-                      if (customColorClass) {
-                        const hex = getHex(customColorClass);
-                        if (hex) cellBg = hex;
+                  try {
+                    let titleHeader = "台大醫院雲林分院藥劑部 班表";
+                    if (currentMonth) {
+                      const parts = currentMonth.split('-');
+                      if (parts.length === 2) {
+                        titleHeader = `台大醫院雲林分院藥劑部 ${parseInt(parts[0], 10) - 1911}年${parseInt(parts[1], 10)}月份班表`;
                       }
+                    }
 
-                      xmlRows += `<td style="background-color:${cellBg};border:0.5pt solid #E5E7EB;">${cellValue}</td>`;
+                    const getHex = (tailwindClass) => {
+                      if (!tailwindClass) return null;
+                      if (tailwindClass.includes('red') || tailwindClass.includes('rose')) return '#FECACA';
+                      if (tailwindClass.includes('blue') || tailwindClass.includes('sky')) return '#BFDBFE';
+                      if (tailwindClass.includes('green') || tailwindClass.includes('teal') || tailwindClass.includes('emerald')) return '#A7F3D0';
+                      if (tailwindClass.includes('yellow') || tailwindClass.includes('amber')) return '#FEF08A';
+                      if (tailwindClass.includes('purple') || tailwindClass.includes('violet')) return '#E9D5FF';
+                      if (tailwindClass.includes('pink')) return '#FBCFE8';
+                      if (tailwindClass.includes('orange')) return '#FED7AA';
+                      if (tailwindClass.includes('gray') || tailwindClass.includes('slate')) return '#E5E7EB';
+                      return null;
+                    };
+
+                    let xmlRows = "";
+                    xmlRows += `
+                      <tr style="height:35px;">
+                        <td colspan="33" style="font-family:Microsoft JhengHei;font-size:16px;font-weight:bold;align:center;vertical-align:middle;background-color:#F3F4F6;">
+                          ${titleHeader}
+                        </td>
+                      </tr>`;
+
+                    xmlRows += `<tr style="height:25px;font-family:Microsoft JhengHei;font-size:11px;font-weight:bold;align:center;background-color:#E5E7EB;">`;
+                    xmlRows += `<td style="border:0.5pt solid #D1D5DB;width:60pt;">員工編號</td>`;
+                    xmlRows += `<td style="border:0.5pt solid #D1D5DB;width:60pt;">員工姓名</td>`;
+                    
+                    const weekMap = ['日', '一', '二', '三', '四', '五', '六'];
+                    for (let d = 1; d <= 31; d++) {
+                      const dateObj = new Date(`${currentMonth}-${String(d).padStart(2, '0')}`);
+                      const dayOfWeek = weekMap[dateObj.getDay()];
+                      xmlRows += `<td style="border:0.5pt solid #D1D5DB;width:30pt;">${d}(${dayOfWeek})</td>`;
                     }
                     xmlRows += `</tr>`;
-                  });
 
-                  const excelTemplate = `
-                    <html xmlns:o="urn:schemas-microsoft-com:office:office" xmlns:x="urn:schemas-microsoft-com:office:excel" xmlns="http://www.w3.org/TR/REC-html40">
-                    <head></head>
-                    <body><table border="1">${xmlRows}</table></body>
-                    </html>`;
+                    employees.forEach(emp => {
+                      xmlRows += `<tr style="height:24px;font-family:Microsoft JhengHei;font-size:12px;align:center;vertical-align:middle;">`;
+                      xmlRows += `<td style="border:0.5pt solid #E5E7EB;">${emp.id}</td>`;
+                      xmlRows += `<td style="border:0.5pt solid #E5E7EB;font-weight:bold;">${emp.name}</td>`;
+                      
+                      for (let d = 1; d <= 31; d++) {
+                        const rawValue = schedule[currentMonth]?.[emp.name]?.[d];
+                        const cellValue = (rawValue === undefined || rawValue === null) ? "" : rawValue;
+                        
+                        const customColorClass = cellColors?.[currentMonth]?.[emp.name]?.[d];
+                        const dateObj = new Date(`${currentMonth}-${String(d).padStart(2, '0')}`);
+                        const dayOfWeek = dateObj.getDay();
+                        
+                        let cellBg = "#FFFFFF";
+                        if (dayOfWeek === 0) cellBg = "#FFB3D9"; 
+                        else if (dayOfWeek === 6) cellBg = "#FFB366"; 
+                        
+                        if (customColorClass) {
+                          const hex = getHex(customColorClass);
+                          if (hex) cellBg = hex;
+                        }
 
-                  const blob = new Blob([excelTemplate], { type: 'application/vnd.ms-excel;charset=utf-8;' });
-                  const link = document.createElement("a");
-                  link.href = URL.createObjectURL(blob);
-                  link.download = `${titleHeader}.xls`;
-                  link.click();
+                        xmlRows += `<td style="background-color:${cellBg};border:0.5pt solid #E5E7EB;">${cellValue}</td>`;
+                      }
+                      xmlRows += `</tr>`;
+                    });
+
+                    const excelTemplate = `
+                      <html xmlns:o="urn:schemas-microsoft-com:office:office" xmlns:x="urn:schemas-microsoft-com:office:excel" xmlns="http://www.w3.org/TR/REC-html40">
+                      <head></head>
+                      <body><table border="1">${xmlRows}</table></body>
+                      </html>`;
+
+                    const blob = new Blob([excelTemplate], { type: 'application/vnd.ms-excel;charset=utf-8;' });
+                    const link = document.createElement("a");
+                    link.href = URL.createObjectURL(blob);
+                    link.download = `${titleHeader}.xls`;
+                    link.click();
+                  } catch (err) {
+                    console.error("匯出錯誤:", err);
+                  }
                 }}
                 className="bg-emerald-600 text-white px-3 py-1.5 rounded text-xs font-bold flex items-center gap-1 hover:bg-emerald-700 shadow transition-all active:scale-95"
               >
