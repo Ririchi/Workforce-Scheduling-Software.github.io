@@ -1991,8 +1991,6 @@ const SchedulingView = ({ currentMonth, employees, daysInMonth, schedule, setSch
           
           let fileMonth = null;
           
-let fileMonth = null;
-          
           // 1. 抓取 CSV 前 5 行，並把所有的逗號「,」和空格全部刪除，變成純文字
           const topRowsText = rows.slice(0, 5)
             .map(r => r.join(""))
