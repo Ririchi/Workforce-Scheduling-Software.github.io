@@ -1723,13 +1723,10 @@ const ManagementReportView = ({ currentMonth, employees, schedule, personDayRule
     }
   }, [currentMonth, startDate, isFourWeekMode, holidays]);
 
-// =======================================================================
-  // 👑 修正版 1：優化代碼轉換，將「#」、「例」、「休」通通精確對齊為代碼 "0"
-  // =======================================================================
   const calculateCellValue = (emp, dayInfo) => {
     const mKey = isFourWeekMode ? dayInfo.monthKey : currentMonth;
     let rawVal = schedule[mKey]?.[emp.name]?.[dayInfo.day];
-    
+
     if (!rawVal || rawVal === "" || rawVal === undefined) {
       if (dayInfo.rawDay === 0 || dayInfo.holiday) rawVal = "例";
       else if (dayInfo.rawDay === 6) rawVal = "#";
@@ -1741,7 +1738,6 @@ const ManagementReportView = ({ currentMonth, employees, schedule, personDayRule
     if (reportType === 'shiftCode') {
       const baseShiftName = rawStr.split('/')[0];
       const shiftObj = (shifts || []).find(s => s.name === baseShiftName);
-      // 🔥 修正點：不只 "#" 算 "0"，自動填補或手動輸入的 "例"、"休" 也必須是代碼 "0"
       const codeVal = shiftObj ? shiftObj.code : (["#", "例", "休"].includes(baseShiftName) ? "0" : (baseShiftName === "-" ? "1" : baseShiftName));
       return { display: codeVal, numeric: 0 };
     }
@@ -1769,22 +1765,15 @@ const ManagementReportView = ({ currentMonth, employees, schedule, personDayRule
     return { display: rawStr, numeric: 0 };
   };
 
-  // =======================================================================
-  // 👑 修正版 2：滿血獨立檢核邏輯，完美跟隨起始日期變動，且切換分頁絕不卡死
-  // =======================================================================
   const checkLaborCompliance = (emp, days) => {
     if (!isFourWeekMode) return true;
-    
-    // 這裡的 days 就是隨著起始日期變動的 28 天，精確切成兩個 14 天區塊
     const blocks = [days.slice(0, 14), days.slice(14, 28)];
-    
+
     for (const block of blocks) {
-      // 💡 關鍵修正：建立完全獨立的真實代碼提取，不受當前頁面切換到「人日數」或「夜班費」的干擾！
       const codes = block.map(d => {
         const mKey = d.monthKey || currentMonth;
         let rawVal = schedule[mKey]?.[emp.name]?.[d.day];
-        
-        // 100% 模擬排班表當天的預設值
+
         if (!rawVal || rawVal === "" || rawVal === undefined) {
           if (d.rawDay === 0 || d.holiday) rawVal = "例";
           else if (d.rawDay === 6) rawVal = "#";
@@ -1794,24 +1783,20 @@ const ManagementReportView = ({ currentMonth, employees, schedule, personDayRule
         const rawStr = rawVal.toString().trim();
         const baseShiftName = rawStr.split('/')[0];
         const shiftObj = (shifts || []).find(s => s.name === baseShiftName);
-        
-        // 確保精確轉譯為真實代碼，將「例/休/#」通通群組為 "0" 進行加總
+
         if (shiftObj) return shiftObj.code;
         if (["#", "例", "休"].includes(baseShiftName)) return "0";
         if (baseShiftName === "-") return "1";
         return baseShiftName;
       });
-      
+
       const count0 = codes.filter(c => c === "0").length;
       const countMinus3 = codes.filter(c => c === "-3").length;
-      
-      // 💡 執行組長指定的最新規則
+
       if (emp.labor === 'N') { 
-        // 勞基法人員：14天內，"0" 必須剛好 4 天
         if (count0 !== 4) return false; 
       } 
       else if (emp.labor === 'Y') { 
-        // 非勞基法人員：14天內，"0" 剛好 4 天 且 "-3" 剛好 4 天
         if (count0 !== 2 || countMinus3 !== 2) return false; 
       }
     }
@@ -1826,7 +1811,7 @@ const ManagementReportView = ({ currentMonth, employees, schedule, personDayRule
     return list;
   }, [employees, reportType, isFourWeekMode, isNightFeeMode, hasSupportData]);
 
-const handleExportCSV = (exportType = 'excel') => {
+  const handleExportCSV = (exportType = 'csv') => {
     const typeLabel = reportType === 'personDays' ? '人日數' : reportType === 'nightFee' ? '夜班費' : '班別代碼';
     
     let titleHeader = "台大醫院雲林分院藥劑部 班表";
@@ -1840,53 +1825,88 @@ const handleExportCSV = (exportType = 'excel') => {
     const headers = ["員編", "姓名", ...reportDays.map(d => reportType === 'shiftCode' ? String(d.day) : `${d.day}(${d.dayOfWeek})`)];
     if (!isFourWeekMode && !isNightFeeMode) headers.push("總計");
 
-    let xmlRows = "";
-    // 建立大標題列
-    xmlRows += `<tr style="height:35px;"><td colspan="${headers.length}" style="font-family:Microsoft JhengHei;font-size:16px;font-weight:bold;align:center;vertical-align:middle;background-color:#F3F4F6;">${titleHeader} (${typeLabel})</td></tr>`;
-
-    // 建立日期標題列
-    xmlRows += `<tr style="height:28px;font-family:Microsoft JhengHei;font-size:12px;font-weight:bold;align:center;vertical-align:middle;">`;
-    headers.forEach(h => xmlRows += `<td style="background-color:#E5E7EB;border:0.5pt solid #D1D5DB;align:center;">${h.replace(/\n/g, " ")}</td>`);
-    xmlRows += `</tr>`;
-    
-    // 建立資料列
-    filteredEmployees.forEach(emp => {
-      xmlRows += `<tr><td style="border:0.5pt solid #D1D5DB;">${emp.id}</td><td style="border:0.5pt solid #D1D5DB; font-weight:bold;">${emp.name}</td>`;
+    if (exportType === 'csv') {
+      let csv = `\ufeff${titleHeader}${(",").repeat(headers.length - 1)}\n`;
+      csv += headers.join(",") + "\n";
       
-      reportDays.forEach(d => {
-        const res = calculateCellValue(emp, d);
-        
-        // 1. 處理顯示值：確保 null/undefined/- 都變為真正空白
-        const displayVal = (res.display === "-" || res.display === undefined || res.display === null) ? "" : res.display;
-    
-        // 2. 顏色判斷優先級邏輯
-        // 優先級：週末/假日顏色 > Firebase 自訂顏色 > 預設白色
-        let bg = "#FFFFFF"; 
-        if (d.rawDay === 0 || !!d.holiday) bg = "#FFB3D9"; // 假日/節慶
-        else if (d.rawDay === 6) bg = "#FFB366"; // 週六
-        else {
-           // 只有在非週末時，才檢查 Firebase 自訂色
-           const customColor = cellColors?.[currentMonth]?.[emp.name]?.[d.day];
-           if (customColor) {
-              if (customColor.includes('red')) bg = '#FECACA';
-              else if (customColor.includes('blue')) bg = '#BFDBFE';
-              else if (customColor.includes('green')) bg = '#A7F3D0';
-              else if (customColor.includes('yellow')) bg = '#FEF08A';
-              else if (customColor.includes('purple')) bg = '#E9D5FF';
-           }
-        }
-
-        xmlRows += `<td style="background-color:${bg}; border:0.5pt solid #D1D5DB; align:center;">${displayVal}</td>`;
+      filteredEmployees.forEach(emp => {
+        let row = [emp.id, emp.name];
+        let rowSum = 0;
+        reportDays.forEach(d => {
+          const res = calculateCellValue(emp, d);
+          rowSum += res.numeric;
+          row.push(res.display || "");
+        });
+        if (!isFourWeekMode && !isNightFeeMode) row.push(rowSum.toFixed(reportType === 'personDays' ? 1 : 0));
+        csv += row.join(",") + "\n";
       });
-      xmlRows += `</tr>`;
-    });
 
-    const excelTemplate = `<html xmlns:o="urn:schemas-microsoft-com:office:office" xmlns:x="urn:schemas-microsoft-com:office:excel" xmlns="http://www.w3.org/TR/REC-html40"><head><meta charset="utf-8"/></head><body><table border="1">${xmlRows}</table></body></html>`;
-    const blob = new Blob([excelTemplate], { type: 'application/vnd.ms-excel;charset=utf-8;' });
-    const link = document.createElement("a");
-    link.href = URL.createObjectURL(blob);
-    link.download = `${titleHeader}_${typeLabel}.xls`;
-    link.click();
+      const blob = new Blob([csv], { type: 'text/csv;charset=utf-8;' });
+      const link = document.createElement("a");
+      link.href = URL.createObjectURL(blob);
+      link.download = `${titleHeader}_(${typeLabel}).csv`;
+      link.click();
+    } 
+    else if (exportType === 'excel') {
+      let xmlRows = "";
+
+      xmlRows += `
+        <tr style="height:35px;">
+          <td colspan="${headers.length}" style="font-family:Microsoft JhengHei;font-size:16px;font-weight:bold;align:center;vertical-align:middle;background-color:#F3F4F6;">
+            ${titleHeader} (${typeLabel})
+          </td>
+        </tr>`;
+
+      xmlRows += `<tr style="height:28px;font-family:Microsoft JhengHei;font-size:12px;font-weight:bold;align:center;vertical-align:middle;">`;
+      headers.forEach(h => xmlRows += `<td style="background-color:#E5E7EB;border:0.5pt solid #D1D5DB;align:center;">${h.replace(/\n/g, " ")}</td>`);
+      xmlRows += `</tr>`;
+      
+      filteredEmployees.forEach(emp => {
+        xmlRows += `<tr style="height:25px;font-family:Microsoft JhengHei;font-size:12px;align:center;vertical-align:middle;">`;
+        xmlRows += `<td style="border:0.5pt solid #E5E7EB;align:center;">${emp.id}</td>`;
+        xmlRows += `<td style="border:0.5pt solid #E5E7EB;font-weight:bold;align:center;">${emp.name}</td>`;
+
+        let rowSum = 0;
+        reportDays.forEach(d => {
+          const res = calculateCellValue(emp, d);
+          rowSum += res.numeric;
+          
+          let cellBg = "#FFFFFF";
+          if (d.rawDay === 0 || !!d.holiday) cellBg = "#FFB3D9";
+          else if (d.rawDay === 6) cellBg = "#FFB366";
+          else {
+            const customColor = cellColors?.[currentMonth]?.[emp.name]?.[d.day];
+            if (customColor) {
+               if (customColor.includes('red')) cellBg = '#FECACA';
+               else if (customColor.includes('blue')) cellBg = '#BFDBFE';
+               else if (customColor.includes('green')) cellBg = '#A7F3D0';
+               else if (customColor.includes('yellow')) cellBg = '#FEF08A';
+               else if (customColor.includes('purple')) cellBg = '#E9D5FF';
+            }
+          }
+
+          const displayVal = (res.display === "-" || res.display === undefined || res.display === null) ? "" : res.display;
+          xmlRows += `<td style="background-color:${cellBg};border:0.5pt solid #E5E7EB;align:center;">${displayVal}</td>`;
+        });
+
+        if (!isFourWeekMode && !isNightFeeMode) {
+          xmlRows += `<td style="background-color:#F1F8F7;font-weight:bold;color:#0F766E;border:0.5pt solid #E5E7EB;align:center;">${rowSum.toFixed(reportType === 'personDays' ? 1 : 0)}</td>`;
+        }
+        xmlRows += `</tr>`;
+      });
+
+      const excelTemplate = `
+        <html xmlns:o="urn:schemas-microsoft-com:office:office" xmlns:x="urn:schemas-microsoft-com:office:excel" xmlns="http://www.w3.org/TR/REC-html40">
+        <head></head>
+        <body><table border="1">${xmlRows}</table></body>
+        </html>`;
+
+      const blob = new Blob([excelTemplate], { type: 'application/vnd.ms-excel;charset=utf-8;' });
+      const link = document.createElement("a");
+      link.href = URL.createObjectURL(blob);
+      link.download = `${titleHeader}_(${typeLabel}).xls`;
+      link.click();
+    }
   };
 
   return (
@@ -1897,42 +1917,82 @@ const handleExportCSV = (exportType = 'excel') => {
           <button onClick={() => setReportType('nightFee')} className={`px-4 py-1.5 rounded-lg text-xs font-black transition-all ${reportType === 'nightFee' ? 'bg-white text-indigo-600 shadow-md scale-105' : 'text-gray-400 hover:text-gray-600'}`}>夜班費</button>
           <button onClick={() => setReportType('shiftCode')} className={`px-4 py-1.5 rounded-lg text-xs font-black transition-all ${reportType === 'shiftCode' ? 'bg-white text-blue-600 shadow-md scale-105' : 'text-gray-400 hover:text-gray-600'}`}>班別代碼(四周)</button>
         </div>
-        <div className="flex items-center gap-2">
-          <button onClick={() => handleExportCSV('csv')} className="bg-teal-600 text-white px-3 py-1.5 rounded-xl text-xs font-black shadow-md hover:bg-teal-700">
-            匯出 CSV
-          </button>
-          <button onClick={() => handleExportCSV('excel')} className="bg-emerald-600 text-white px-3 py-1.5 rounded-xl text-xs font-black shadow-md hover:bg-emerald-700">
-            匯出 Excel (帶顏色)
-          </button>
+        
+        <div className="flex items-center gap-3">
+          {isFourWeekMode ? (
+            <div className="flex items-center gap-2">
+              <span className="text-[11px] font-black text-gray-400 uppercase tracking-tighter">起始日期</span>
+              <input type="date" value={startDate} onChange={(e) => setStartDate(e.target.value)} className="border-2 border-gray-300 rounded px-2 py-1 text-xs font-bold focus:border-blue-500 outline-none" />
+            </div>
+          ) : (
+            <div className="flex items-center gap-2">
+              <span className="text-[11px] font-black text-gray-400 uppercase tracking-tighter">統計月份</span>
+              <div className="bg-gray-100 border border-gray-200 px-3 py-1 rounded text-xs font-black text-gray-700">{currentMonth}</div>
+            </div>
+          )}
+          
+          <div className="flex items-center gap-2">
+            <button onClick={() => handleExportCSV('csv')} className="bg-teal-600 text-white px-3 py-1.5 rounded-xl text-xs font-black shadow-md hover:bg-teal-700">
+              匯出 CSV
+            </button>
+            <button onClick={() => handleExportCSV('excel')} className="bg-emerald-600 text-white px-3 py-1.5 rounded-xl text-xs font-black shadow-md hover:bg-emerald-700">
+              匯出 Excel (帶顏色)
+            </button>
+          </div>
         </div>
       </div>
+      
       <div className="flex-grow overflow-auto relative">
         <table className="w-full text-[12px] text-center border-separate border-spacing-0 table-fixed min-w-[1600px]">
           <thead className="sticky top-0 z-[50]">
             <tr className="bg-gray-100">
-              <th className="sticky left-0 top-0 z-[55] bg-gray-100 border-r-2 border-b-2 border-gray-300 p-3 w-16 font-black text-[11px]">姓名</th>
-              {reportDays.map((d, idx) => (
-                <th key={idx} className={`border-r border-b-2 border-gray-300 p-1 w-12 font-bold ${d.rawDay === 0 || !!d.holiday ? 'bg-[#FFB3D9]' : d.rawDay === 6 ? 'bg-[#FFB366]' : 'bg-gray-100'}`}>
-                  <div className="text-[10px] opacity-60">{d.dayOfWeek}</div><div className="text-base">{d.day}</div>
-                </th>
-              ))}
+              <th className="sticky left-0 top-0 z-[55] bg-gray-100 border-r-2 border-b-2 border-gray-300 p-3 w-16 font-black text-[11px] shadow-[2px_0_5px_rgba(0,0,0,0.1)]">姓名</th>
+              {reportDays.map((d, idx) => {
+                const isHoliday = d.rawDay === 0 || !!d.holiday;
+                const isSat = d.rawDay === 6;
+                return (
+                  <th key={idx} className={`border-r border-b-2 border-gray-300 p-1 w-12 font-bold ${isHoliday ? 'bg-[#FFB3D9]' : isSat ? 'bg-[#FFB366]' : 'bg-gray-100'}`}>
+                    <div className="text-[10px] opacity-60">{d.dayOfWeek}</div><div className="text-base">{d.day}</div><div className="text-[9px] text-red-700 font-normal truncate h-3 mt-0.5" title={d.holiday}>{d.holiday}</div>
+                  </th>
+                );
+              })}
+              {!isFourWeekMode && !isNightFeeMode && (<th className="sticky right-0 top-0 z-[45] bg-[#E0F2F1] border-l-2 border-b-2 border-gray-300 p-3 w-20 font-black text-teal-700 shadow-[-2px_0_5px_rgba(0,0,0,0.05)]">總計</th>)}
             </tr>
           </thead>
           <tbody>
-            {filteredEmployees.map(emp => (
-              <tr key={emp.id} className="hover:bg-blue-50 transition-colors">
-                <td className="sticky left-0 z-40 bg-white border-r-2 border-b border-gray-200 p-2 font-black">{emp.name}</td>
-                {reportDays.map((d, idx) => {
-                  const res = calculateCellValue(emp, d);
-                  return <td key={idx} className="border-r border-b border-gray-200 p-0 h-10">{res.display}</td>
-                })}
-              </tr>
-            ))}
+            {filteredEmployees.map(emp => {
+              let rowSum = 0;
+              const isCompliant = checkLaborCompliance(emp, reportDays);
+              return (
+                <tr key={emp.id} className="hover:bg-blue-50 transition-colors group">
+                  <td className={`sticky left-0 z-40 bg-white border-r-2 border-b border-gray-200 p-2 font-black group-hover:bg-blue-50 text-[12px] truncate shadow-[2px_0_5px_rgba(0,0,0,0.05)] ${!isCompliant ? 'text-red-600' : ''}`}>
+                    {emp.name}{!isCompliant && <div className="text-[8px] font-normal leading-none">⚠️ 例休</div>}
+                  </td>
+                  {reportDays.map((d, idx) => {
+                    const res = calculateCellValue(emp, d); 
+                    rowSum += res.numeric;
+                    let bgClass = "bg-white";
+                    if (d.rawDay === 0 || !!d.holiday) bgClass = "bg-[#FFB3D9]"; else if (d.rawDay === 6) bgClass = "bg-[#FFB366]";
+                    return (
+                      <td key={idx} className={`border-r border-b border-gray-200 p-0 h-10 ${bgClass}`}>
+                        <span className={`${(res.display === "" || res.display === "-" || res.display === "#" || res.display === "例") ? 'text-gray-300' : 'text-gray-800'} font-medium text-[13px]`}>{res.display}</span>
+                      </td>
+                    );
+                  })}
+                  {!isFourWeekMode && !isNightFeeMode && (
+                    <td className="sticky right-0 z-30 bg-[#F1F8F7] border-l-2 border-b border-gray-200 p-2 font-black text-teal-800 group-hover:bg-[#E0F2F1] shadow-[-2px_0_5px_rgba(0,0,0,0.05)] text-sm">
+                      {rowSum > 0 ? rowSum.toFixed(reportType === 'personDays' ? 1 : 0) : "-"}
+                    </td>
+                  )}
+                </tr>
+              );
+            })}
           </tbody>
         </table>
       </div>
     </div>
   );
+};
 
 const SchedulingView = ({ currentMonth, employees, daysInMonth, schedule, setSchedule, cellColors, setCellColors, shifts, exportScheduleCSV, setCurrentPage, setIsDirty, saveData, preLeaveData, setPreLeaveData, isAdmin, isMonthDrawn }) => {
   const [editSched, setEditSched] = useState({});
