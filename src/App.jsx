@@ -2058,36 +2058,20 @@ const handleImportCSV = (e) => {
           
           // =================== 【 1. 彈性月份檢核 】 ===================
             let fileMonth = null;
-            
-            // 1. 先處理文字，徹底移除所有可能的干擾符號
-            const topRowsText = rows.slice(0, 5)
-              .map(r => r.join(""))
-              .join("")
-              .replace(/,/g, "")
-              .replace(/\s/g, "")
-              .replace(/\u3000/g, ""); // 移除全形空白
-            
-            // 2. 改用更靈活的正規表示法
-            // 1\d{2}年 : 匹配年份
-            // .*?      : 匹配中間可能有的任何字 (包含月)
-            // (\d{1,2})月 : 強制匹配月份，並且確保後面跟著「月」
-            const match = topRowsText.match(/(1\d{2})年.*?(\d{1,2})月/);
-            
-            if (match) {
-              const rocYear = parseInt(match[1], 10);
-              const month = parseInt(match[2], 10);
-              fileMonth = `${rocYear + 1911}-${String(month).padStart(2, '0')}`;
-            }
-            
-            // 3. 除錯檢查 (如果還是失敗，打開瀏覽器 F12 看看 Console 輸出什麼)
-            console.log("檢核字串:", topRowsText);
-            console.log("匹配月份:", fileMonth);
-            
-            if (!fileMonth || fileMonth !== currentMonth) {
-              alert(`檢核失敗！\n偵測到的月份: ${fileMonth}\n系統目標月份: ${currentMonth}\n請檢查 CSV 標題是否包含「115年6月」`);
-              fileRef.current.value = '';
-              return;
-            }
+              const topRowsText = rows.slice(0, 5).map(r => r.join("")).join("").replace(/,/g, "").replace(/\s/g, "");
+              const match = topRowsText.match(/(1\d{2})年(\d{1,2})月/);
+              
+              if (match) {
+                const rocYear = parseInt(match[1], 10);
+                const month = parseInt(match[2], 10);
+                fileMonth = `${rocYear + 1911}-${String(month).padStart(2, '0')}`;
+              }
+    
+              if (!fileMonth || fileMonth !== currentMonth) {
+                alert(`上傳的班表月份 (${fileMonth || '未偵測到'}) 與當前系統月份 (${currentMonth}) 不符！\n請確認 CSV 檔案最上方是否有正確的年月份。`);
+                fileRef.current.value = '';
+                return;
+              } 
 
           // =================== 【 2. 動態尋找「姓名」欄位定位 】 ===================
           let nameIdx = -1;
@@ -2110,8 +2094,7 @@ const handleImportCSV = (e) => {
             return;
           }
 
-          // =================== 【 3. 彈性抓取每日班別資料 】 ===================
-// =================== 【 3. 彈性抓取每日班別資料 (過濾相同班別) 】 ===================
+          // =================== 【 3. 彈性抓取每日班別資料 (過濾相同班別) 】 ===================
           const nextImportData = {};
 
           rows.forEach((r) => {
