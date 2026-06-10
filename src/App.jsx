@@ -1681,7 +1681,7 @@ const ShiftsManagementView = ({ shifts, setShifts, holidays, setHolidays, setDel
   );
   };
 
-const ManagementReportView = ({ currentMonth, employees, schedule, personDayRules, holidays, shifts }) => {
+const ManagementReportView = ({ currentMonth, employees, schedule, personDayRules, holidays, shifts, cellColors }) => {
   const [reportType, setReportType] = useState('personDays'); 
   const [startDate, setStartDate] = useState(() => {
     const d = new Date();
