@@ -1851,37 +1851,33 @@ const handleExportCSV = (exportType = 'excel') => {
     
     // 建立資料列
     filteredEmployees.forEach(emp => {
-      xmlRows += `<tr style="height:25px;font-family:Microsoft JhengHei;font-size:12px;align:center;vertical-align:middle;">`;
-      xmlRows += `<td style="border:0.5pt solid #E5E7EB;">${emp.id}</td>`;
-      xmlRows += `<td style="border:0.5pt solid #E5E7EB;font-weight:bold;">${emp.name}</td>`;
+      xmlRows += `<tr><td style="border:0.5pt solid #D1D5DB;">${emp.id}</td><td style="border:0.5pt solid #D1D5DB; font-weight:bold;">${emp.name}</td>`;
       
-      let rowSum = 0;
       reportDays.forEach(d => {
         const res = calculateCellValue(emp, d);
-        rowSum += res.numeric;
         
-        // 💡 顏色邏輯：先看週末/假日，再看 Firebase 自訂顏色
-        let cellBg = "#FFFFFF";
-        if (d.rawDay === 0 || !!d.holiday) cellBg = "#FFB3D9";
-        else if (d.rawDay === 6) cellBg = "#FFB366";
-        
-        const customColor = cellColors?.[currentMonth]?.[emp.name]?.[d.day];
-        if (customColor) {
-           if (customColor.includes('red')) cellBg = '#FECACA';
-           else if (customColor.includes('blue')) cellBg = '#BFDBFE';
-           else if (customColor.includes('green')) cellBg = '#A7F3D0';
-           else if (customColor.includes('yellow')) cellBg = '#FEF08A';
-           else if (customColor.includes('purple')) cellBg = '#E9D5FF';
+        // 1. 處理顯示值：確保 null/undefined/- 都變為真正空白
+        const displayVal = (res.display === "-" || res.display === undefined || res.display === null) ? "" : res.display;
+    
+        // 2. 顏色判斷優先級邏輯
+        // 優先級：週末/假日顏色 > Firebase 自訂顏色 > 預設白色
+        let bg = "#FFFFFF"; 
+        if (d.rawDay === 0 || !!d.holiday) bg = "#FFB3D9"; // 假日/節慶
+        else if (d.rawDay === 6) bg = "#FFB366"; // 週六
+        else {
+           // 只有在非週末時，才檢查 Firebase 自訂色
+           const customColor = cellColors?.[currentMonth]?.[emp.name]?.[d.day];
+           if (customColor) {
+              if (customColor.includes('red')) bg = '#FECACA';
+              else if (customColor.includes('blue')) bg = '#BFDBFE';
+              else if (customColor.includes('green')) bg = '#A7F3D0';
+              else if (customColor.includes('yellow')) bg = '#FEF08A';
+              else if (customColor.includes('purple')) bg = '#E9D5FF';
+           }
         }
 
-        // 💡 若為空值，顯示為空字串，不要強加符號
-        const displayVal = (res.display === "-" || res.display === undefined || res.display === null) ? "" : res.display;
-        xmlRows += `<td style="background-color:${cellBg};border:0.5pt solid #E5E7EB;align:center;">${displayVal}</td>`;
+        xmlRows += `<td style="background-color:${bg}; border:0.5pt solid #D1D5DB; align:center;">${displayVal}</td>`;
       });
-
-      if (!isFourWeekMode && !isNightFeeMode) {
-        xmlRows += `<td style="background-color:#F1F8F7;font-weight:bold;color:#0F766E;border:0.5pt solid #E5E7EB;align:center;">${rowSum.toFixed(reportType === 'personDays' ? 1 : 0)}</td>`;
-      }
       xmlRows += `</tr>`;
     });
 
@@ -1901,9 +1897,12 @@ const handleExportCSV = (exportType = 'excel') => {
           <button onClick={() => setReportType('nightFee')} className={`px-4 py-1.5 rounded-lg text-xs font-black transition-all ${reportType === 'nightFee' ? 'bg-white text-indigo-600 shadow-md scale-105' : 'text-gray-400 hover:text-gray-600'}`}>夜班費</button>
           <button onClick={() => setReportType('shiftCode')} className={`px-4 py-1.5 rounded-lg text-xs font-black transition-all ${reportType === 'shiftCode' ? 'bg-white text-blue-600 shadow-md scale-105' : 'text-gray-400 hover:text-gray-600'}`}>班別代碼(四周)</button>
         </div>
-        <div className="flex items-center gap-3">
-          <button onClick={handleExportCSV} className="bg-emerald-600 text-white px-3 py-1.5 rounded-xl text-xs font-black shadow-md hover:bg-emerald-700 flex items-center gap-1.5 transition-all active:scale-95">
-            <Download size={13}/> 匯出 Excel 報表
+        <div className="flex items-center gap-2">
+          <button onClick={() => handleExportCSV('csv')} className="bg-teal-600 text-white px-3 py-1.5 rounded-xl text-xs font-black shadow-md hover:bg-teal-700">
+            匯出 CSV
+          </button>
+          <button onClick={() => handleExportCSV('excel')} className="bg-emerald-600 text-white px-3 py-1.5 rounded-xl text-xs font-black shadow-md hover:bg-emerald-700">
+            匯出 Excel (帶顏色)
           </button>
         </div>
       </div>
@@ -2969,7 +2968,7 @@ const handleParticipantApprove = (reqId) => {
             case 'records': return <RecordsView currentUser={currentUser} swapRequests={swapRequests} onAction={handleRecordAction} onApprove={handleParticipantApprove} setRejectingReq={setRejectingReq} schedule={schedule} currentMonth={currentMonth} />;
             case 'leave':  return  <PreLeaveView currentMonth={currentMonth} employees={employees} daysInMonth={daysInMonth} currentUser={currentUser} schedule={schedule} setSchedule={(val) => { setSchedule(val); saveData({ schedule: val }); }} preLeaveData={preLeaveData} setPreLeaveData={(val) => { setPreLeaveData(val); saveData({ preLeaveData: val }); }} saveData={saveData} />;
             case 'schedule': return <SchedulingView currentMonth={currentMonth} employees={employees} daysInMonth={daysInMonth} schedule={schedule} setSchedule={setSchedule} cellColors={cellColors} setCellColors={setCellColors} shifts={shifts} exportScheduleCSV={exportScheduleCSV} setCurrentPage={setCurrentPage} setIsDirty={setIsDirty} saveData={saveData} preLeaveData={preLeaveData}  setPreLeaveData={setPreLeaveData}  isAdmin={currentUser?.role === '0'}/> ;
-            case 'report': return <ManagementReportView currentMonth={currentMonth} employees={employees} schedule={schedule} personDayRules={personDayRules} holidays={holidays} shifts={shifts} />;
+            case 'report': return <ManagementReportView currentMonth={currentMonth} employees={employees} schedule={schedule} personDayRules={personDayRules} holidays={holidays} shifts={shifts} cellColors={cellColors}/>;
             case 'login': {
               const triggerLogin = () => { const id = document.getElementById('uid')?.value.toUpperCase(); const pwd = document.getElementById('upwd')?.value; if (!pwd) { alert("請輸入密碼！"); return; } handleLoginAction(id, pwd); };
               return (<div className="flex flex-col items-center justify-center min-h-[60vh] p-4"><div className="bg-white p-10 rounded-[2.5rem] shadow-2xl border max-w-sm w-full text-center"><h2 className="text-xl font-black mb-2 text-gray-800">藥劑部 班表系統登入</h2><div className="text-[10px] text-gray-400 font-bold mb-8">第一次輸入的密碼會自動設定為密碼</div><div className="space-y-4"><input className="w-full border-2 p-3 rounded-2xl outline-none font-mono text-center uppercase" placeholder="員編" id="uid" onInput={(e) => e.target.value = e.target.value.toUpperCase()} onKeyDown={(e) => e.key === 'Enter' && triggerLogin()} /><div className="relative"><input className="w-full border-2 p-3 rounded-2xl outline-none text-center" type={showPassword ? "text" : "password"} placeholder="密碼" id="upwd" onKeyDown={(e) => e.key === 'Enter' && triggerLogin()} /><button onClick={()=>setShowPassword(!showPassword)} className="absolute right-4 top-4 text-gray-400">{showPassword ? <Eye size={18}/> : <EyeOff size={18}/>}</button></div><button onClick={triggerLogin} className="w-full bg-blue-600 text-white p-3 rounded-2xl font-black shadow transition-all transform active:scale-95">進入系統</button></div></div><div className="mt-12 text-[11px] text-gray-400 font-bold tracking-wider">© 2026 NTUH Yunlin Pharmacy - V1.8</div></div>);
