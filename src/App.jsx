@@ -2564,7 +2564,10 @@ const SchedulingView = ({ currentMonth, employees, daysInMonth, schedule, setSch
                     const previewVal = importPreview ? importPreview[emp.name]?.[d.day] : null;
                     const isConflict = importPreview && originalVal !== "-" && originalVal !== "#" && originalVal !== "例" && originalVal !== "" && originalVal !== previewVal;
                     const isIgnored = ignoredCells.has(`${emp.name}-${d.day}`);
-                    const displayVal = (importPreview && !isIgnored) ? previewVal : originalVal;
+                    // 如果預覽值存在、不是 null 且不等於原值，才判定為變動
+                    const isChanged = previewVal !== null && previewVal !== undefined && previewVal !== originalVal && !isIgnored;
+                    // 3. 決定最終顯示內容
+                    const displayVal = (previewVal !== null && previewVal !== undefined && !isIgnored) ? previewVal : originalVal;
                     const customColor = cellColors[currentMonth]?.[emp.name]?.[d.day];
                     
                     let bgClass = "bg-white"; 
@@ -2596,6 +2599,9 @@ const SchedulingView = ({ currentMonth, employees, daysInMonth, schedule, setSch
                           }
                         }}
                       >
+                        {isChanged && (
+                          <div className="absolute inset-0 bg-blue-200 border-2 border-blue-500 pointer-events-none z-0" />
+                        )}
                         <input 
                           type="text" 
                           value={displayVal} 
