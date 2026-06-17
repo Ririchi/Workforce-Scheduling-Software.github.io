@@ -2562,7 +2562,11 @@ const SchedulingView = ({ currentMonth, employees, daysInMonth, schedule, setSch
                   {daysInMonth.map((d) => {
                     const originalVal = editSched[emp.name]?.[d.day] || (isNC ? "" : "-");
                     const previewVal = importPreview ? importPreview[emp.name]?.[d.day] : null;
-                    const isConflict = importPreview && originalVal !== "-" && originalVal !== "#" && originalVal !== "例" && originalVal !== "" && originalVal !== previewVal;
+                    const isConflict = importPreview && 
+                                      previewVal !== null && 
+                                      previewVal !== undefined && 
+                                      previewVal !== originalVal;
+                    // 對比模式藍框衝突判定邏輯
                     const isIgnored = ignoredCells.has(`${emp.name}-${d.day}`);
                     // 如果預覽值存在、不是 null 且不等於原值，才判定為變動
                     const isChanged = previewVal !== null && previewVal !== undefined && previewVal !== originalVal && !isIgnored;
