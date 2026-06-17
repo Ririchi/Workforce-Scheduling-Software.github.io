@@ -2664,7 +2664,20 @@ const App = () => {
   const [pendingPage, setPendingPage] = useState(null); 
   const [isLoggedIn, setIsLoggedIn] = useState(false);
   const [currentUser, setCurrentUser] = useState(null);
-  const [currentMonth, setCurrentMonth] = useState('2026-05');
+  const [currentMonth, setCurrentMonth] = useState(() => {
+    // 優先從 localStorage 讀取上一次停留在哪
+    const saved = localStorage.getItem('lastMonth');
+    if (saved) return saved;
+    
+    // 沒紀錄的話，才用今天日期
+    const now = new Date();
+    return `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}`;
+  });
+  
+  // 當月份改變時，同步儲存到 localStorage
+  useEffect(() => {
+    localStorage.setItem('lastMonth', currentMonth);
+  }, [currentMonth]);
   const [showPassword, setShowPassword] = useState(false);
   const [employees, setEmployees] = useState(INITIAL_EMPLOYEES);
   const [shifts, setShifts] = useState(INITIAL_SHIFTS);
