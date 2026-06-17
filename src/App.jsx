@@ -2121,42 +2121,40 @@ const SchedulingView = ({ currentMonth, employees, daysInMonth, schedule, setSch
         }
 
         // =================== 【 3. 彈性抓取班別資料 (以員編比對) 】 ===================
+        // =================== 【 員編導向的比對邏輯 】 ===================
         const nextImportData = {};
-
+        
         for (let i = dataStartRow; i < rows.length; i++) {
           const r = rows[i];
-          // 用剛才找到的 idIdx 抓取員編
           const empId = r[idIdx] ? r[idIdx].trim() : "";
           if (!empId) continue;
-
-          // 使用員編比對系統員工
+        
+          // 1. 透過員編找到正確的員工物件 (這保證了姓名的一致性)
           const emp = employees.find(e => String(e.id).trim() === empId);
           if (!emp) continue;
-
+        
           for (let day = 1; day <= 31; day++) {
-            // 2. 防禦：確保 cellValue 即使是 undefined 也能安全處理
-            let cellValue = r[nameIdx + day];
-            
-            // 將 undefined, null 或空字串強制轉為 "-"
-            let finalValue = (cellValue === undefined || cellValue === null) ? "-" : cellValue.trim();
-            
-            // 轉換系統用縮寫
+            // 2. 獲取新值 (CSV)
+            let finalValue = (r[nameIdx + day] === undefined || r[nameIdx + day] === null || String(r[nameIdx + day]).trim() === "") 
+                             ? "-" 
+                             : String(r[nameIdx + day]).trim();
             if (finalValue === "例假") finalValue = "例";
             else if (finalValue === "休假") finalValue = "休";
-            else if (finalValue === "") finalValue = "-";
-            
-            // 取得舊值比對
+        
+            // 3. 【員編導向撈取】：強制使用 emp.name (系統標準名) 撈取舊值
+            // 因為 emp 已經是透過員編匹配出來的，所以 emp.name 一定是系統內正確的名字
             const currentRaw = schedule[currentMonth]?.[emp.name]?.[day];
-            const currentVal = (currentRaw === null || currentRaw === undefined || String(currentRaw).trim() === "") ? "-" : String(currentRaw).trim();
+            const currentVal = (currentRaw === null || currentRaw === undefined || String(currentRaw).trim() === "") 
+                               ? "-" 
+                               : String(currentRaw).trim();
             
-            // 💡 只有當兩個值真的不同時才加入變更清單
+            // 4. 比對差異
             if (finalValue !== currentVal) {
               if (!nextImportData[emp.name]) nextImportData[emp.name] = {};
-              nextImportData[emp.name][day] = finalValue; // 確保這裡存的永遠是字串，不會是 undefined
+              nextImportData[emp.name][day] = finalValue;
             }
           }
         }
-
         if (Object.keys(nextImportData).length === 0) {
           alert("班表內容完全一致，無變動。");
           return;
@@ -3047,7 +3045,7 @@ const handleParticipantApprove = (reqId) => {
 
     const exportScheduleCSV = (prefix = "") => {
     const rt = toROCTitle(currentMonth), fp = prefix ? `${prefix}_` : "";
-    let csv = `\ufeff醫院藥劑部 ${rt} 班表,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,\n`; csv += "員編,姓名," + daysInMonth.map(d => `${d.day}(${d.dayOfWeek})`).join(",") + "\n";
+    let csv = `\ufeff台大醫院雲林分院藥劑部 ${rt} 班表,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,\n`; csv += "員編,姓名," + daysInMonth.map(d => `${d.day}(${d.dayOfWeek})`).join(",") + "\n";
     employees.forEach(emp => { if (emp.isSeparator) return; let row = [emp.id, emp.name]; daysInMonth.forEach(d => row.push(schedule[currentMonth]?.[emp.name]?.[d.day] || "-")); csv += row.join(",") + "\n"; });
     const b = new Blob([csv], { type: 'text/csv;charset=utf-8' }), l = document.createElement("a"); l.href = URL.createObjectURL(b); l.download = `${fp}班表_${currentMonth}.csv`; l.click();
   };
