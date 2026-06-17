@@ -1699,15 +1699,27 @@ const ManagementReportView = ({ currentMonth, employees, schedule, personDayRule
   const reportDays = useMemo(() => {
     if (!isFourWeekMode) {
       const [year, month] = currentMonth.split('-').map(Number);
-      const date = new Date(year, month, 0);
+      
+      // 💡 修正點：明確使用 year 和 month (JavaScript 月份從 0 開始，所以這裡用 month 就剛好代表下個月的第 0 天)
+      const lastDay = new Date(year, month, 0).getDate(); 
       const days = [];
-      for (let i = 1; i <= date.getDate(); i++) {
+      
+      for (let i = 1; i <= lastDay; i++) {
+        // 💡 修正點：明確使用 month - 1 來對應正確月份
         const d = new Date(year, month - 1, i);
         const fullDate = `${currentMonth}-${String(i).padStart(2, '0')}`;
-        days.push({ day: i, dayOfWeek: WEEKDAYS_MAP[d.getDay()], rawDay: d.getDay(), holiday: holidays[fullDate] || "", fullDate });
+        
+        days.push({ 
+          day: i, 
+          dayOfWeek: WEEKDAYS_MAP[d.getDay()], 
+          rawDay: d.getDay(), 
+          holiday: holidays[fullDate] || "", 
+          fullDate 
+        });
       }
       return days;
     } else {
+      // 四週模式不需要變動
       const days = [];
       const start = new Date(startDate);
       for (let i = 0; i < 28; i++) {
@@ -2045,109 +2057,116 @@ const SchedulingView = ({ currentMonth, employees, daysInMonth, schedule, setSch
     }
   }, [currentMonth, employees, daysInMonth, schedule, editSched]); 
 
-  // 💡 修正 2：精確鎖定 Y+5碼員編的匯入檢核
-const handleImportCSV = (e) => {
-    try {
-      const file = e.target.files[0];
-      if (!file) return;
-      const reader = new FileReader();
-      reader.onload = (ev) => {
+  const handleImportCSV = (e) => {
+    const file = e.target.files[0];
+    if (!file) return;
+
+    const reader = new FileReader();
+    // 1. 整個讀取流程用 try 包起來
+    reader.onload = (ev) => {
+      try {
+        const arrayBuffer = ev.target.result;
+        
+        // 2. 編碼轉換的 try-catch (處理亂碼風險)
+        let text;
         try {
-          // 拆解 CSV 資料並清除引號與空白
-          const rows = ev.target.result.split(/\r?\n/).map(r => r.split(',').map(c => c.trim().replace(/^"|"$/g, '')));
-          
-          // =================== 【 1. 彈性月份檢核 】 ===================
-            let fileMonth = null;
-              const topRowsText = rows.slice(0, 5).map(r => r.join("")).join("").replace(/,/g, "").replace(/\s/g, "");
-              const match = topRowsText.match(/(1\d{2})年(\d{1,2})月/);
-              
-              if (match) {
-                const rocYear = parseInt(match[1], 10);
-                const month = parseInt(match[2], 10);
-                fileMonth = `${rocYear + 1911}-${String(month).padStart(2, '0')}`;
-              }
-    
-              if (!fileMonth || fileMonth !== currentMonth) {
-                alert(`上傳的班表月份 (${fileMonth || '未偵測到'}) 與當前系統月份 (${currentMonth}) 不符！\n請確認 CSV 檔案最上方是否有正確的年月份。`);
-                fileRef.current.value = '';
-                return;
-              } 
-
-          // =================== 【 2. 動態尋找「姓名」欄位定位 】 ===================
-          let nameIdx = -1;
-          let headerRow = null;
-
-          // 掃描前 5 列，找出哪一列是包含「姓名」或「員工姓名」的標頭列
-          for (let i = 0; i < Math.min(rows.length, 5); i++) {
-            const idx = rows[i].findIndex(c => c.includes("姓名") || c === "姓名");
-            if (idx !== -1) {
-              nameIdx = idx;
-              headerRow = rows[i];
-              break;
-            }
+          text = new TextDecoder('big5').decode(arrayBuffer);
+          // 如果發現沒有中文字，代表這可能是 UTF-8，則重新解碼
+          if (!text.includes('藥劑部')) {
+            text = new TextDecoder('utf-8').decode(arrayBuffer);
           }
-
-          // 防呆：如果完全找不到姓名欄位，拋出錯誤
-          if (nameIdx === -1) {
-            alert("無法解析此 CSV 檔案！檔案內必須包含「姓名」或「員工姓名」欄位。");
-            fileRef.current.value = '';
-            return;
-          }
-
-          // =================== 【 3. 彈性抓取每日班別資料 (過濾相同班別) 】 ===================
-          const nextImportData = {};
-
-          rows.forEach((r) => {
-            const empName = r[nameIdx]; // 💡 動態鎖定姓名位置
-            if (!empName || empName === "姓名" || empName === "員工姓名" || empName.trim() === "") return;
-
-            // 檢查這個人是否存在於系統的員工名單中
-            const empExists = employees.some(e => e.name === empName);
-            if (!empExists) return;
-
-            // 💡 姓名欄位的「右邊第一格」就是 1 號的班別，依此類推抓滿 31 天
-            for (let day = 1; day <= 31; day++) {
-              const cellValue = r[nameIdx + day]; 
-              if (cellValue !== undefined) {
-                // 將畫面上看到的中文字如 "例假"、"休假" 縮寫回系統認得的格式
-                let finalValue = cellValue.trim();
-                if (finalValue === "例假") finalValue = "例";
-                if (finalValue === "休假") finalValue = "休";
-                if (finalValue === "") finalValue = "-";
-                
-                // 【關鍵修復】：取得系統目前已經存的舊班別，並進行格式統一
-                const currentRaw = schedule[currentMonth]?.[empName]?.[day];
-                const currentVal = (currentRaw === null || currentRaw === undefined || String(currentRaw).trim() === "") ? "-" : String(currentRaw).trim();
-                
-                // 💡 只有當「上傳的新班別」跟「原本的舊班別」真的不同時，才記錄為變動！
-                if (finalValue !== currentVal) {
-                  if (!nextImportData[empName]) nextImportData[empName] = {};
-                  nextImportData[empName][day] = finalValue;
-                }
-              }
-            }
-          });
-
-          // 【加碼防呆】：如果整張表掃完，發現跟現在系統裡的班表一模一樣
-          if (Object.keys(nextImportData).length === 0) {
-            alert("比對完成：上傳的班表與目前系統內的班表「完全一致」，沒有變動的班別！");
-            fileRef.current.value = '';
-            return;
-          }
-
-          // 成功解析並有差異，送入比對與預覽模式
-          setImportPreview(nextImportData);
-          alert("🎉 CSV 班表解析成功！系統已進入「對比模式」，請確認藍框變動處無誤後，點擊『確認套用』！");
-
         } catch (err) {
-          console.error(err);
-          alert("上傳失敗，請檢查檔案格式是否為CSV UTF-8。");
+          text = new TextDecoder('utf-8').decode(arrayBuffer);
         }
-      };
-      reader.readAsText(file, "UTF-8");
-    } catch (error) {
-      console.error(error);
-    }
+
+        // 拆解 CSV 資料
+        // 3. 處理與檢核的 try-catch (處理格式錯誤風險)
+        const rows = text.split(/\r?\n/).map(r => r.split(',').map(c => c.trim().replace(/^"|"$/g, '')));
+        
+        const topRowsText = rows.slice(0, 5)
+          .map(r => r.join(""))
+          .join("")
+          .replace(/,/g, "")
+          .replace(/\s/g, "")
+          .replace(/\u3000/g, "");
+
+        const match = topRowsText.match(/(1\d{2})年.*?(\d{1,2})月/);
+        
+        if (!match) throw new Error("找不到年份月份");
+        
+        const fileMonth = `${parseInt(match[1], 10) + 1911}-${String(parseInt(match[2], 10)).padStart(2, '0')}`;
+        
+        if (fileMonth !== currentMonth) {
+          throw new Error(`月份不符: 偵測到 ${fileMonth}，系統要求 ${currentMonth}`);
+        }
+
+        // =================== 【 2. 動態尋找「姓名」欄位 】 ===================
+        // 尋找「姓名」兩字在哪一行，且該行長度要大於 10 (避免抓到標題列)
+        let nameIdx = -1;
+        let dataStartRow = -1;
+
+        for (let i = 0; i < Math.min(rows.length, 10); i++) {
+          const idx = rows[i].findIndex(c => c.includes("姓名"));
+          if (idx !== -1 && rows[i].length > 5) { // 確保不是標題行
+            nameIdx = idx;
+            dataStartRow = i + 1;
+            break;
+          }
+        }
+
+        if (nameIdx === -1) { alert("找不到姓名欄位"); return; }
+
+        // =================== 【 3. 彈性抓取班別資料 (強化防禦版) 】 ===================
+        const nextImportData = {};
+        for (let i = dataStartRow; i < rows.length; i++) {
+          const r = rows[i];
+          // 1. 確保 empName 存在
+          const empName = r[nameIdx] ? r[nameIdx].trim() : "";
+          if (!empName) continue;
+
+          const emp = employees.find(e => e.name === empName);
+          if (!emp) continue;
+
+          for (let day = 1; day <= 31; day++) {
+            // 2. 防禦：確保 cellValue 即使是 undefined 也能安全處理
+            let cellValue = r[nameIdx + day];
+            
+            // 將 undefined, null 或空字串強制轉為 "-"
+            let finalValue = (cellValue === undefined || cellValue === null) ? "-" : cellValue.trim();
+            
+            // 轉換系統用縮寫
+            if (finalValue === "例假") finalValue = "例";
+            else if (finalValue === "休假") finalValue = "休";
+            else if (finalValue === "") finalValue = "-";
+            
+            // 取得舊值比對
+            const currentRaw = schedule[currentMonth]?.[emp.name]?.[day];
+            const currentVal = (currentRaw === null || currentRaw === undefined || String(currentRaw).trim() === "") ? "-" : String(currentRaw).trim();
+            
+            // 💡 只有當兩個值真的不同時才加入變更清單
+            if (finalValue !== currentVal) {
+              if (!nextImportData[emp.name]) nextImportData[emp.name] = {};
+              nextImportData[emp.name][day] = finalValue; // 確保這裡存的永遠是字串，不會是 undefined
+            }
+          }
+        }
+
+        if (Object.keys(nextImportData).length === 0) {
+          alert("班表內容完全一致，無變動。");
+          return;
+        }
+
+        setImportPreview(nextImportData);
+        alert("解析成功！請確認對比預覽。");
+
+      } catch (err) {
+        console.error(err);
+        alert("解析失敗，檔案編碼或格式有誤。");
+      }
+    };
+    
+    // 💡 關鍵：讀取為 ArrayBuffer 才能手動處理編碼
+    reader.readAsArrayBuffer(file);
   };
 
   const confirmApplyImport = () => {
