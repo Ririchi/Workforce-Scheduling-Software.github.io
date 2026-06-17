@@ -2100,31 +2100,37 @@ const SchedulingView = ({ currentMonth, employees, daysInMonth, schedule, setSch
           throw new Error(`月份不符: 偵測到 ${fileMonth}，系統要求 ${currentMonth}`);
         }
 
-        // =================== 【 2. 動態尋找「姓名」欄位 】 ===================
-        // 尋找「姓名」兩字在哪一行，且該行長度要大於 10 (避免抓到標題列)
-        let nameIdx = -1;
-        let dataStartRow = -1;
+        // =================== 【 2. 動態尋找「姓名」與「員編」欄位 】 ===================
+        let idIdx = -1, nameIdx = -1, dataStartRow = -1;
 
         for (let i = 0; i < Math.min(rows.length, 10); i++) {
-          const idx = rows[i].findIndex(c => c.includes("姓名"));
-          if (idx !== -1 && rows[i].length > 5) { // 確保不是標題行
-            nameIdx = idx;
+          const row = rows[i];
+          // 使用您原本的變數名稱直接指派，不要再加 const
+          idIdx = row.findIndex(c => c.includes("編號") || c.includes("員編"));
+          nameIdx = row.findIndex(c => c.includes("姓名"));
+          
+          if (idIdx !== -1 && nameIdx !== -1) {
             dataStartRow = i + 1;
             break;
           }
         }
 
-        if (nameIdx === -1) { alert("找不到姓名欄位"); return; }
+        if (idIdx === -1 || nameIdx === -1) {
+          alert("找不到「員編」或「姓名」欄位，請檢查 CSV 格式。");
+          return;
+        }
 
-        // =================== 【 3. 彈性抓取班別資料 (強化防禦版) 】 ===================
+        // =================== 【 3. 彈性抓取班別資料 (以員編比對) 】 ===================
         const nextImportData = {};
+
         for (let i = dataStartRow; i < rows.length; i++) {
           const r = rows[i];
-          // 1. 確保 empName 存在
-          const empName = r[nameIdx] ? r[nameIdx].trim() : "";
-          if (!empName) continue;
+          // 用剛才找到的 idIdx 抓取員編
+          const empId = r[idIdx] ? r[idIdx].trim() : "";
+          if (!empId) continue;
 
-          const emp = employees.find(e => e.name === empName);
+          // 使用員編比對系統員工
+          const emp = employees.find(e => String(e.id).trim() === empId);
           if (!emp) continue;
 
           for (let day = 1; day <= 31; day++) {
