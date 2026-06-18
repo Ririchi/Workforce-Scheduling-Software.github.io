@@ -2103,25 +2103,37 @@ const SchedulingView = ({ currentMonth, employees, daysInMonth, schedule, setSch
         // =================== 【 2. 動態尋找「姓名」與「員編」欄位 】 ===================
         let idIdx = -1, nameIdx = -1, dataStartRow = -1;
 
-        for (let i = 0; i < Math.min(rows.length, 10); i++) {
+        // 1. 搜尋邏輯：直接尋找「包含員編」或「以 Y 開頭的字串」作為基準
+        for (let i = 0; i < Math.min(rows.length, 20); i++) {
           const row = rows[i];
-          // 使用您原本的變數名稱直接指派，不要再加 const
-          idIdx = row.findIndex(c => c.includes("編號") || c.includes("員編"));
-          nameIdx = row.findIndex(c => c.includes("姓名"));
           
-          if (idIdx !== -1 && nameIdx !== -1) {
-            dataStartRow = i + 1;
+          // 找到「員編」文字，或是直接找到 Y 開頭的字串（這是您的員編識別碼）
+          const foundIdIdx = row.findIndex(c => 
+            (c && c.includes("員編")) || 
+            (c && c.length >= 5 && c.startsWith("Y"))
+          );
+
+          if (foundIdIdx !== -1) {
+            idIdx = foundIdIdx;
+            // 2. 直接鎖定下一欄為姓名 (這是最穩定、不受表頭排版影響的抓法)
+            nameIdx = idIdx + 1;
+            dataStartRow = i; // 從這一列開始讀取資料
+            
+            // 3. 檢查：若該列剛好是標題列（裡面有「員編」二字），則資料列需再下一行
+            if (row[idIdx].includes("員編")) {
+              dataStartRow = i + 1;
+            }
             break;
           }
         }
 
-        if (idIdx === -1 || nameIdx === -1) {
-          alert("找不到「員編」或「姓名」欄位，請檢查 CSV 格式。");
+        // 4. 最後確認
+        if (idIdx === -1 || nameIdx === -1 || nameIdx >= rows[dataStartRow]?.length) {
+          alert("定位失敗：找不到員編欄位或姓名欄位異常。");
           return;
         }
 
         // =================== 【 3. 彈性抓取班別資料 (以員編比對) 】 ===================
-        // =================== 【 員編導向的比對邏輯 】 ===================
         const nextImportData = {};
         
         for (let i = dataStartRow; i < rows.length; i++) {
