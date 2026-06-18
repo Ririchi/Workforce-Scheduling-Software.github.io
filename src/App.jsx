@@ -663,6 +663,8 @@ const ScheduleTableView = ({ currentMonth, employees, schedule, cellColors, days
     }
   };
 
+  const [isRulesExpanded, setIsRulesExpanded] = useState(false);
+
   return (
     <div className="flex-grow flex flex-col bg-white overflow-hidden select-none font-sans">
       <div className="flex-grow overflow-auto relative">
@@ -745,9 +747,9 @@ const ScheduleTableView = ({ currentMonth, employees, schedule, cellColors, days
                     <td 
                       key={d.day} 
                       onClick={() => handleToggle(emp.name, d.day)} 
-                      className={`border py-4 px-1 min-h-16 transition-all ${bgClass} ${cycleEnd ? 'border-r-4 border-r-gray-400' : ''} ${isApplied || isWinner ? 'ring-2 ring-inset ring-orange-400 shadow-inner' : ''} ${canToggle ? 'cursor-pointer hover:opacity-80' : 'cursor-not-allowed'}`}
+                      className={`border py-1.5 px-0 h-10 transition-all ${bgClass} ${cycleEnd ? 'border-r-4 border-r-gray-400' : ''} ${isApplied || isWinner ? 'ring-2 ring-inset ring-orange-400 shadow-inner' : ''} ${canToggle ? 'cursor-pointer hover:opacity-80' : 'cursor-not-allowed'}`}
                     >
-                      <div className="flex flex-col items-center justify-center min-h-[40px]">
+                      <div className="flex flex-col items-center justify-center h-full">
                         {isFixed ? <span className="text-gray-500 font-bold opacity-60 text-xs">{sVal}</span> :
                          isWinner ? <span className="text-green-800 font-black text-[13px] bg-green-50 px-1 rounded">休</span> :
                          /* 💡 修正後：只有在『已完成抽籤(isMonthDrawn)』且『沒抽中』時才顯示『預假(未中)』；抽籤前一律顯示原本乾淨的『預假』 */
@@ -796,61 +798,62 @@ const ScheduleTableView = ({ currentMonth, employees, schedule, cellColors, days
         </table>
       </div>
       
-      <div className="p-4 border-t bg-gray-50 flex flex-wrap items-center gap-6 shadow-inner relative">
+      <div className="border-t bg-gray-50 shadow-inner relative">
+        {/* 1. 抽籤鎖定提示 (保留原本的絕對定位樣式) */}
         {isMonthDrawn && (
-          <div className="absolute top-[-20px] left-1/2 transform -translate-x-1/2 bg-red-600 text-white px-6 py-1 rounded-t-xl font-black text-xs shadow-lg flex items-center gap-2">
+          <div className="absolute top-[-20px] left-1/2 transform -translate-x-1/2 bg-red-600 text-white px-6 py-1 rounded-t-xl font-black text-xs shadow-lg flex items-center gap-2 z-10 whitespace-nowrap">
             <Lock size={14}/> 本月已抽籤完畢，功能已鎖定
           </div>
         )}
-        <div className="flex items-center gap-2"><Settings size={18} className="text-gray-600"/><span className="text-sm font-black text-gray-700">預假規範</span></div>
-        <div className="flex flex-wrap items-center gap-4">
-          <div className="flex items-center gap-2 bg-white px-3 py-1.5 rounded-xl border border-gray-200 shadow-sm">
-            <span className="text-[11px] font-black text-gray-500">假日名額</span>
-            <input 
-              type="number" 
-              value={preLeaveData.weekendLimit || 10} 
-              onChange={e => handleAdminSettingChange('holiday', parseInt(e.target.value) || 0)}
-              className="w-10 text-center border-b font-bold outline-none text-blue-600"
-              disabled={!isAdmin || isMonthDrawn}
-            />
+      
+        {/* 2. 標題列：點擊展開/收合 (加入折疊邏輯) */}
+        <div 
+          className="p-3 flex items-center justify-between cursor-pointer hover:bg-gray-100 transition-colors"
+          onClick={() => setIsRulesExpanded(!isRulesExpanded)}
+        >
+          <div className="flex items-center gap-2">
+            <Settings size={18} className="text-gray-600"/>
+            <span className="text-sm font-black text-gray-700">預假規範 {isRulesExpanded ? '▲' : '▼'}</span>
           </div>
-
-          <div className="flex items-center gap-2 bg-white px-3 pay-1.5 rounded-xl border border-gray-200 shadow-sm">
-            <span className="text-[11px] font-black text-gray-500">平日名額</span>
-            <input 
-              type="number" 
-              value={preLeaveData.weekdayLimit || 3} 
-              onChange={e => handleAdminSettingChange('weekday', parseInt(e.target.value) || 0)}
-              className="w-10 text-center border-b font-bold outline-none text-blue-600"
-              disabled={!isAdmin || isMonthDrawn}
-            />
-          </div>
-
-          <div className="flex items-center gap-2 bg-white px-3 py-1.5 rounded-xl border border-gray-200 shadow-sm">
-            <span className="text-[11px] font-black text-gray-500">抽籤日</span>
-            <input 
-              type="number" 
-              value={preLeaveData.lotteryDay || 15} 
-              onChange={e => handleAdminSettingChange('lotteryDay', parseInt(e.target.value) || 1)}
-              className="w-10 text-center border-b font-bold outline-none text-blue-600"
-              disabled={!isAdmin || isMonthDrawn}
-            />
-          </div>
-
-          <div className="text-[11px] font-bold text-gray-500 flex items-center gap-2 bg-white px-3 py-2 rounded-xl border border-dashed border-gray-300">
-            <Clock size={14} className="text-indigo-200"/> {isMonthDrawn ? "本月已完成抽籤" : `自動抽籤：每月 ${lotteryDay} 號 0:00`}
-          </div>
-
-          {!isMonthDrawn && isAdmin && (
-            <button onClick={handleLottery} className="flex items-center gap-2 px-6 py-2 bg-red-400 text-white rounded-xl text-xs font-black hover:bg-red-400 shadow-lg shadow-red-200 transition-all active:scale-95">
-              <Dice5 size={16}/> 立即手動抽籤
-            </button>
-          )}
-
-          <button onClick={handleExportPreLeave} className="flex items-center gap-2 px-4 py-2 bg-green-600 text-white rounded-xl text-xs font-bold hover:bg-green-600 shadow transition-all">
-            <Download size={14}/> 抽籤結果 CSV 
-          </button>
+          <span className="text-[9px] text-gray-400 font-bold bg-gray-200 px-2 py-0.5 rounded-full">
+            {isMonthDrawn ? "已抽籤" : `每月 ${preLeaveData.lotteryDay || 15} 號抽`}
+          </span>
         </div>
+      
+        {/* 3. 展開內容區 (包含原本所有 Input 與按鈕) */}
+        {isRulesExpanded && (
+          <div className="p-3 pt-0 border-t border-gray-200 bg-white">
+            <div className="flex flex-wrap gap-2 mt-3">
+              {/* 輸入框群組 */}
+              <div className="flex-1 flex gap-2">
+                <div className="flex-1 bg-gray-50 p-2 rounded-lg border border-gray-200">
+                   <div className="text-[9px] font-black text-gray-400 mb-1">假日名額</div>
+                   <input type="number" value={preLeaveData.weekendLimit || 10} onChange={e => handleAdminSettingChange('holiday', parseInt(e.target.value) || 0)} className="w-full bg-transparent font-bold text-blue-600 text-sm outline-none" disabled={!isAdmin || isMonthDrawn} />
+                </div>
+                <div className="flex-1 bg-gray-50 p-2 rounded-lg border border-gray-200">
+                   <div className="text-[9px] font-black text-gray-400 mb-1">平日名額</div>
+                   <input type="number" value={preLeaveData.weekdayLimit || 3} onChange={e => handleAdminSettingChange('weekday', parseInt(e.target.value) || 0)} className="w-full bg-transparent font-bold text-blue-600 text-sm outline-none" disabled={!isAdmin || isMonthDrawn} />
+                </div>
+                <div className="flex-1 bg-gray-50 p-2 rounded-lg border border-gray-200">
+                   <div className="text-[9px] font-black text-gray-400 mb-1">抽籤日</div>
+                   <input type="number" value={preLeaveData.lotteryDay || 15} onChange={e => handleAdminSettingChange('lotteryDay', parseInt(e.target.value) || 1)} className="w-full bg-transparent font-bold text-blue-600 text-sm outline-none" disabled={!isAdmin || isMonthDrawn} />
+                </div>
+              </div>
+      
+              {/* 操作按鈕群組 */}
+              <div className="flex w-full gap-2 mt-1">
+                {!isMonthDrawn && isAdmin && (
+                  <button onClick={handleLottery} className="flex-1 py-2 bg-red-500 text-white rounded-lg text-xs font-black shadow-sm active:scale-95 transition-transform">
+                    <Dice5 size={14} className="inline mr-1"/>立即抽籤
+                  </button>
+                )}
+                <button onClick={handleExportPreLeave} className="flex-1 py-2 bg-green-600 text-white rounded-lg text-xs font-bold shadow-sm active:scale-95 transition-transform">
+                  <Download size={14} className="inline mr-1"/>匯出 CSV
+                </button>
+              </div>
+            </div>
+          </div>
+        )}
       </div>
     </div>
   );
