@@ -74,6 +74,24 @@ const db = getFirestore(app);
 const appId = typeof __app_id !== 'undefined' ? __app_id : 'pharmacy-system-v1-8';
 
 // --- 輔助函數 ---
+const cleanBundleData = (source) => {
+  if (!source) return source;
+
+  // 檢查是否有 daysToSwap 且是陣列
+  if (source.isBundle && Array.isArray(source.daysToSwap)) {
+    // 檢查第一個元素。如果字串中不包含 "-"，代表它是舊的純數字格式（例如 [28, 29]）
+    if (source.daysToSwap.length > 0 && !String(source.daysToSwap[0]).includes('-')) {
+      
+      // 取得基準月份 (例如 "2026-06")
+      const monthPrefix = source.date ? source.date.substring(0, 7) : '2026-06'; 
+      
+      // 【舊轉新】自動把 [28, 29] 升級成 ["2026-06-28", "2026-06-29"]
+      source.daysToSwap = source.daysToSwap.map(d => `${monthPrefix}-${String(d).padStart(2, '0')}`);
+    }
+  }
+  return source;
+};
+
 const deepClone = (obj) => {
   if (!obj) return obj;
   return JSON.parse(JSON.stringify(obj));
@@ -190,15 +208,25 @@ const SwapRequestModal = ({ isOpen, onClose, onConfirm, data, setIsModalOpen, ha
                     </tr>
                   </thead>
                   <tbody className="divide-y divide-gray-100">
-                    {data.daysToSwap.map((day) => (
-                      <tr key={day} className="hover:bg-blue-50/50 transition-colors">
-                        <td className="py-2 font-black text-gray-500 bg-gray-50/50 border-r border-gray-100 w-12">{day}日</td>
-                        {data.participants.map((p, idx) => {
-                          // 抓取當前這天的原始班別
-                          const shift = schedule[currentMonth]?.[p.name]?.[day] || "-";
-                          // 抓取換班後會獲得的新班別
-                          const nextPerson = data.participants[(idx + 1) % data.participants.length];
-                          const nextShift = schedule[currentMonth]?.[nextPerson.name]?.[day] || "-";
+                    {data.daysToSwap.map((dayStr) => {
+                      // 1. 從 "YYYY-MM-DD" 中切出正確的 "YYYY-MM" (動態支援跨月/跨年)
+                      const targetMonth = dayStr.substring(0, 7); 
+                      
+                      // 2. 從 "YYYY-MM-DD" 中切出純數字的「日」(例如 "24" -> 24)
+                      const dayNum = Number(dayStr.split('-')[2]);
+
+                      return (
+                        <tr key={dayStr} className="hover:bg-blue-50/50 transition-colors">
+                          {/* 畫面維持顯示乾淨的數字：例如 24日 */}
+                          <td className="py-2 font-black text-gray-500 bg-gray-50/50 border-r border-gray-100 w-12">{dayNum}日</td>
+                          {data.participants.map((p, idx) => {
+                            // 3. 💡 將原本的 [currentMonth] 改為 [targetMonth]，並用 [dayNum] 抓班別
+                            // 徹底解決跨月跨年時，班別抓錯月份的問題！
+                            const shift = schedule[targetMonth]?.[p.name]?.[dayNum] || "-";
+                            
+                            // 抓取換班後會獲得的新班別
+                            const nextPerson = data.participants[(idx + 1) % data.participants.length];
+                            const nextShift = schedule[targetMonth]?.[nextPerson.name]?.[dayNum] || "-";
 
                           return (
                             <td key={p.id} className="py-1.5 px-1">
@@ -214,7 +242,7 @@ const SwapRequestModal = ({ isOpen, onClose, onConfirm, data, setIsModalOpen, ha
                           );
                         })}
                       </tr>
-                    ))}
+                    );})}
                   </tbody>
                 </table>
               </div>
@@ -411,7 +439,8 @@ const ScheduleTableView = ({ currentMonth, employees, schedule, cellColors, days
                     const isPendingSwap = currentPage === 'swap' && swapRequests.some(r => 
                       (r.creatorId === currentUser?.id || r.targetId === currentUser?.id) &&
                       (r.creatorName === emp.name || r.targetName === emp.name) && 
-                      (r.isBundle ? (d.day >= r.daysToSwap[0] && d.day <= r.daysToSwap[r.daysToSwap.length - 1]) : (r.date === d.fullDate)) &&
+                      // 💡 修正關鍵：不論是單日還是連班，都統一用最精準的 fullDate 進行對應
+                      (r.isBundle ? r.daysToSwap.includes(d.fullDate) : r.date === d.fullDate) &&
                       (r.status === 'PendingTarget' || r.status === 'PendingAdmin')
                     );
 
@@ -443,9 +472,8 @@ const ScheduleTableView = ({ currentMonth, employees, schedule, cellColors, days
                             let isSelecting = false;
                             if (swapTarget && swapTarget.participants?.some(p => p.id === emp.id)) {
                               if (swapTarget.isBundle && swapTarget.daysToSwap) {
-                                const monthPrefix = swapTarget.date.substring(0, 7);
-                                const bundleDates = swapTarget.daysToSwap.map(day => `${monthPrefix}-${String(day).padStart(2, '0')}`);
-                                isSelecting = bundleDates.includes(d.fullDate);
+                                // 🔥 徹底拋棄 bundleDates 這個變數名稱，直接用新格式陣列進行判斷
+                                isSelecting = swapTarget.daysToSwap.includes(d.fullDate);
                               } else {
                                 isSelecting = swapTarget.date === d.fullDate;
                               }
@@ -459,9 +487,8 @@ const ScheduleTableView = ({ currentMonth, employees, schedule, cellColors, days
                                 if (!isValidStatus || !isParticipant) return false;
 
                                 if (req.isBundle && req.daysToSwap) {
-                                  const monthPrefix = (req.date || d.fullDate).substring(0, 7);
-                                  const bundleDates = req.daysToSwap.map(day => `${monthPrefix}-${String(day).padStart(2, '0')}`);
-                                  return bundleDates.includes(d.fullDate);
+                                  // 💡 修正關鍵：因為已經是新格式，直接檢查是否包含目前的完整日期，不再做多餘的宣告與 map 拼接！
+                                  return req.daysToSwap.includes(d.fullDate);
                                 } else {
                                   return req.date === d.fullDate;
                                 }
@@ -505,7 +532,7 @@ const ScheduleTableView = ({ currentMonth, employees, schedule, cellColors, days
   const isAdmin = currentUser?.role === '0';
   const isMonthDrawn = (preLeaveData.drawnMonths || []).includes(currentMonth);
 
-// ========================================================
+  // ========================================================
   // 💡 完美修正：對齊「每月 X 號 00:00 抽出下個月預假結果」的月份邏輯
   // ========================================================
   useEffect(() => {
@@ -662,7 +689,6 @@ const ScheduleTableView = ({ currentMonth, employees, schedule, cellColors, days
       }, 100);
     }
   };
-
   const [isRulesExpanded, setIsRulesExpanded] = useState(false);
 
   return (
@@ -805,7 +831,7 @@ const ScheduleTableView = ({ currentMonth, employees, schedule, cellColors, days
             <Lock size={14}/> 本月已抽籤完畢，功能已鎖定
           </div>
         )}
-      
+
         {/* 2. 標題列：點擊展開/收合 (加入折疊邏輯) */}
         <div 
           className="p-3 flex items-center justify-between cursor-pointer hover:bg-gray-100 transition-colors"
@@ -819,7 +845,7 @@ const ScheduleTableView = ({ currentMonth, employees, schedule, cellColors, days
             {isMonthDrawn ? "已抽籤" : `每月 ${preLeaveData.lotteryDay || 15} 號抽`}
           </span>
         </div>
-      
+
         {/* 3. 展開內容區 (包含原本所有 Input 與按鈕) */}
         {isRulesExpanded && (
           <div className="p-3 pt-0 border-t border-gray-200 bg-white">
@@ -827,19 +853,19 @@ const ScheduleTableView = ({ currentMonth, employees, schedule, cellColors, days
               {/* 輸入框群組 */}
               <div className="flex-1 flex gap-2">
                 <div className="flex-1 bg-gray-50 p-2 rounded-lg border border-gray-200">
-                   <div className="text-[9px] font-black text-gray-400 mb-1">假日名額</div>
-                   <input type="number" value={preLeaveData.weekendLimit || 10} onChange={e => handleAdminSettingChange('holiday', parseInt(e.target.value) || 0)} className="w-full bg-transparent font-bold text-blue-600 text-sm outline-none" disabled={!isAdmin || isMonthDrawn} />
+                  <div className="text-[9px] font-black text-gray-400 mb-1">假日名額</div>
+                  <input type="number" value={preLeaveData.weekendLimit || 10} onChange={e => handleAdminSettingChange('holiday', parseInt(e.target.value) || 0)} className="w-full bg-transparent font-bold text-blue-600 text-sm outline-none" disabled={!isAdmin || isMonthDrawn} />
                 </div>
                 <div className="flex-1 bg-gray-50 p-2 rounded-lg border border-gray-200">
-                   <div className="text-[9px] font-black text-gray-400 mb-1">平日名額</div>
-                   <input type="number" value={preLeaveData.weekdayLimit || 3} onChange={e => handleAdminSettingChange('weekday', parseInt(e.target.value) || 0)} className="w-full bg-transparent font-bold text-blue-600 text-sm outline-none" disabled={!isAdmin || isMonthDrawn} />
+                  <div className="text-[9px] font-black text-gray-400 mb-1">平日名額</div>
+                  <input type="number" value={preLeaveData.weekdayLimit || 3} onChange={e => handleAdminSettingChange('weekday', parseInt(e.target.value) || 0)} className="w-full bg-transparent font-bold text-blue-600 text-sm outline-none" disabled={!isAdmin || isMonthDrawn} />
                 </div>
                 <div className="flex-1 bg-gray-50 p-2 rounded-lg border border-gray-200">
-                   <div className="text-[9px] font-black text-gray-400 mb-1">抽籤日</div>
-                   <input type="number" value={preLeaveData.lotteryDay || 15} onChange={e => handleAdminSettingChange('lotteryDay', parseInt(e.target.value) || 1)} className="w-full bg-transparent font-bold text-blue-600 text-sm outline-none" disabled={!isAdmin || isMonthDrawn} />
+                  <div className="text-[9px] font-black text-gray-400 mb-1">抽籤日</div>
+                  <input type="number" value={preLeaveData.lotteryDay || 15} onChange={e => handleAdminSettingChange('lotteryDay', parseInt(e.target.value) || 1)} className="w-full bg-transparent font-bold text-blue-600 text-sm outline-none" disabled={!isAdmin || isMonthDrawn} />
                 </div>
               </div>
-      
+
               {/* 操作按鈕群組 */}
               <div className="flex w-full gap-2 mt-1">
                 {!isMonthDrawn && isAdmin && (
@@ -1033,22 +1059,29 @@ const RecordsView = ({ currentUser, swapRequests, onAction, onApprove, setReject
           {pendingList.length === 0 ? <div className="bg-white p-10 rounded-2xl border border-dashed text-center text-gray-300 italic font-bold">目前無待核定資料</div> :
             pendingList.map(req => {
               // 核心修正：不要直接用全域的 currentMonth，要抓取該筆申請資料的月份
-              // 假設 req.date 格式為 "2026-05-20"，切割出 "2026-05"
               const reqMonthKey = req.date ? req.date.substring(0, 7) : currentMonth;
               const checkDays = req.isBundle ? req.daysToSwap : [req.day];
+              
               const isShiftMismatched = checkDays.some(d => {
-                // 這裡改用 reqMonthKey 確保抓到正確月份的班表資料
-                const rawCurTarget = schedule[reqMonthKey]?.[req.targetName]?.[d];
+                // 💡 關鍵修正：判斷 d 是完整字串 (新格式) 還是純數字/舊格式
+                // 如果是新格式 "YYYY-MM-DD"，動態切出正確的月份與純數字日期
+                const isFullDate = String(d).includes('-');
+                const targetMonth = isFullDate ? d.substring(0, 7) : reqMonthKey;
+                const dayKey = isFullDate ? Number(d.split('-')[2]) : d;
+
+                // 這裡改用動態的 targetMonth 與 dayKey，確保跨月與純數字結構能精準對上
+                const rawCurTarget = schedule[targetMonth]?.[req.targetName]?.[dayKey];
+                
                 const normalize = (v) => {
                   const s = (v === null || v === undefined) ? "-" : String(v).trim();
-                  return (s === "" || s === "-") ? "-" : s;};
+                  return (s === "" || s === "-") ? "-" : s;
+                };
                 const curTargetS = normalize(rawCurTarget);
                 const storedTargetS = normalize(req.targetShift);
                 const clean = (val) => val.replace(/#|\(國\)/g, '');
                 return clean(curTargetS) !== clean(storedTargetS);
-          });
+              });
 
-              // 找到 pendingList.map(req => { ... return ( ... ) }) 裡面的 return 部分
               return (
                 <div key={req.id} className="bg-white p-5 rounded-3xl shadow-sm border border-l-8 border-l-indigo-400 space-y-4">
                   {/* 標題與時間 */}
@@ -2135,7 +2168,7 @@ const SchedulingView = ({ currentMonth, employees, daysInMonth, schedule, setSch
           alert("定位失敗：找不到員編欄位或姓名欄位異常。");
           return;
         }
-
+        
         // =================== 【 3. 彈性抓取班別資料 (以員編比對) 】 ===================
         const nextImportData = {};
         
@@ -2722,6 +2755,12 @@ const App = () => {
 
   const saveData = async (updates) => {
     if (!auth.currentUser) return;
+    
+    // ✨ 終極盾牌一：只要有人丟資料進來存，發現裡面有 swapRequests，立刻全面強制清洗！
+    if (updates && updates.swapRequests && Array.isArray(updates.swapRequests)) {
+      updates.swapRequests = updates.swapRequests.map(req => cleanBundleData(req));
+    }
+
     const docRef = doc(db, 'artifacts', appId, 'public', 'data', 'roster', 'main');
     try {
       await setDoc(docRef, updates, { merge: true });
@@ -2733,21 +2772,29 @@ const App = () => {
   useEffect(() => {const initAuth = async () => { try {if (typeof __initial_auth_token !== 'undefined' && __initial_auth_token) {await signInWithCustomToken(auth, __initial_auth_token);} else {await signInAnonymously(auth);}} catch (err) {console.warn("驗證不匹配:", err);await signInAnonymously(auth);}};initAuth();
 }, []);
   
-    useEffect(() => {const docRef = doc(db, 'artifacts', appId, 'public', 'data', 'roster', 'main');const unsubData = onSnapshot(docRef, (snap) => {
-      if (snap.exists()) {const d = snap.data();
-        if (d.employees) setEmployees(d.employees);
-        if (d.shifts) setShifts(d.shifts);
-        if (d.holidays) setHolidays(d.holidays);
-        if (d.personDayRules) setPersonDayRules(d.personDayRules);
-        if (d.schedule) setSchedule(d.schedule);
-        if (d.cellColors) setCellColors(d.cellColors);
-        if (d.swapRequests) setSwapRequests(d.swapRequests);
-        if (d.preLeaveData) setPreLeaveData(d.preLeaveData); 
-      }
-    }, (error) => console.error("雲端監聽失敗:", error));
+    useEffect(() => {
+      const docRef = doc(db, 'artifacts', appId, 'public', 'data', 'roster', 'main');
+      const unsubData = onSnapshot(docRef, (snap) => {
+        if (snap.exists()) {
+          const d = snap.data();
+          if (d.employees) setEmployees(d.employees);
+          if (d.shifts) setShifts(d.shifts);
+          if (d.holidays) setHolidays(d.holidays);
+          if (d.personDayRules) setPersonDayRules(d.personDayRules);
+          if (d.schedule) setSchedule(d.schedule);
+          if (d.cellColors) setCellColors(d.cellColors);
+          if (d.preLeaveData) setPreLeaveData(d.preLeaveData); 
 
-    return () => unsubData();
-  }, [appId]);
+          // ✨ 盾牌二：在儲存到 React State 之前，自動將每一筆舊資料清洗、就地升級！
+          if (d.swapRequests && Array.isArray(d.swapRequests)) {
+            const cleanRequests = d.swapRequests.map(req => cleanBundleData(req));
+            setSwapRequests(cleanRequests);
+          }
+        }
+      }, (error) => console.error("雲端監聽失敗:", error));
+      
+      return () => unsubData(); // 記得要 return 卸載監聽
+    }, [appId]);
     
   const daysInMonth = useMemo(() => {
     const [year, month] = currentMonth.split('-').map(Number);
@@ -2822,10 +2869,13 @@ const handleSwapApply = (targetEmp, dayInfo) => {
   }
 
   // 【首選模式】：點選第一個換班對象
-  const myShift = normalize(schedule[currentMonth]?.[currentUser.name]?.[dayInfo.day]);
-  
+  // 💡 修正 1：月份改由 fullDate 動態切出，避免跨月或跨年時用全域 currentMonth 抓錯班表
+  const clickedMonth = dayInfo.fullDate.substring(0, 7);
+  const myShift = normalize(schedule[clickedMonth]?.[currentUser.name]?.[dayInfo.day]);
+
   // ... (您的整段換班判定邏輯 isBundle, daysToSwap 等維持不變) ...
-  let isBundle = false, startDate = dayInfo.fullDate, endDate = dayInfo.fullDate, daysToSwap = [dayInfo.day];
+  // 💡 修正 2：將初始的 daysToSwap 從純數字 [dayInfo.day] 改為完整日期 [dayInfo.fullDate]
+  let isBundle = false, startDate = dayInfo.fullDate, endDate = dayInfo.fullDate, daysToSwap = [dayInfo.fullDate];
   const targetDate = new Date(dayInfo.fullDate);
   const dOfW = targetDate.getDay(); 
 
@@ -2839,44 +2889,88 @@ const handleSwapApply = (targetEmp, dayInfo) => {
   const type = getShiftType(targetShift) || getShiftType(myShift);
 
   if (type === 'A1A2') {
-    if (dOfW >= 1 && dOfW <= 5) {
-      isBundle = true;
-      const mon = new Date(targetDate); mon.setDate(targetDate.getDate() - (dOfW - 1));
-      const fri = new Date(mon); fri.setDate(mon.getDate() + 4);
-      startDate = `${currentMonth}-${String(mon.getDate()).padStart(2, '0')}`;
-      endDate = `${currentMonth}-${String(fri.getDate()).padStart(2, '0')}`;
-      daysToSwap = []; for (let i = 0; i < 5; i++) { const d = new Date(mon); d.setDate(mon.getDate() + i); daysToSwap.push(d.getDate()); }
-    }
-  } else if (type === 'A3') {
-    if (dOfW >= 1 && dOfW <= 4) {
-      isBundle = true;
-      const mon = new Date(targetDate); mon.setDate(targetDate.getDate() - (dOfW - 1));
-      const thu = new Date(mon); thu.setDate(mon.getDate() + 3);
-      startDate = `${currentMonth}-${String(mon.getDate()).padStart(2, '0')}`;
-      endDate = `${currentMonth}-${String(thu.getDate()).padStart(2, '0')}`;
-      daysToSwap = []; for (let i = 0; i < 4; i++) { const d = new Date(mon); d.setDate(mon.getDate() + i); daysToSwap.push(d.getDate()); }
-    }
-  } else if (type === 'P') {
+      if (dOfW >= 1 && dOfW <= 5) {
+        isBundle = true;
+        const mon = new Date(targetDate); mon.setDate(targetDate.getDate() - (dOfW - 1));
+        const fri = new Date(mon); fri.setDate(mon.getDate() + 4);
+        
+        // 💡 修正：動態取得年、月、日，徹底解決跨月跨年 Bug
+        startDate = `${mon.getFullYear()}-${String(mon.getMonth() + 1).padStart(2, '0')}-${String(mon.getDate()).padStart(2, '0')}`;
+        endDate = `${fri.getFullYear()}-${String(fri.getMonth() + 1).padStart(2, '0')}-${String(fri.getDate()).padStart(2, '0')}`;
+        
+        // 💡 修正：改存 YYYY-MM-DD 完整日期字串
+        daysToSwap = []; 
+        for (let i = 0; i < 5; i++) { 
+          const d = new Date(mon); 
+          d.setDate(mon.getDate() + i); 
+          const yStr = d.getFullYear();
+          const mStr = String(d.getMonth() + 1).padStart(2, '0');
+          const dStr = String(d.getDate()).padStart(2, '0');
+          daysToSwap.push(`${yStr}-${mStr}-${dStr}`); 
+        }
+      }
+    } else if (type === 'A3') {
+      if (dOfW >= 1 && dOfW <= 4) {
+        isBundle = true;
+        const mon = new Date(targetDate); mon.setDate(targetDate.getDate() - (dOfW - 1));
+        const thu = new Date(mon); thu.setDate(mon.getDate() + 3);
+        
+        // 💡 修正：動態取得年、月、日，徹底解決跨月跨年 Bug
+        startDate = `${mon.getFullYear()}-${String(mon.getMonth() + 1).padStart(2, '0')}-${String(mon.getDate()).padStart(2, '0')}`;
+        endDate = `${thu.getFullYear()}-${String(thu.getMonth() + 1).padStart(2, '0')}-${String(thu.getDate()).padStart(2, '0')}`;
+        
+        // 💡 修正：改存 YYYY-MM-DD 完整日期字串
+        daysToSwap = []; 
+        for (let i = 0; i < 4; i++) { 
+          const d = new Date(mon); 
+          d.setDate(mon.getDate() + i); 
+          const yStr = d.getFullYear();
+          const mStr = String(d.getMonth() + 1).padStart(2, '0');
+          const dStr = String(d.getDate()).padStart(2, '0');
+          daysToSwap.push(`${yStr}-${mStr}-${dStr}`); 
+        }
+      }
+    } else if (type === 'P') {
     if (dOfW === 6 || dOfW === 0 || (dOfW >= 1 && dOfW <= 4)) {
       isBundle = true;
-      const sat = new Date(targetDate);
-      if (dOfW === 6) {} else if (dOfW === 0) sat.setDate(targetDate.getDate() - 1); else sat.setDate(targetDate.getDate() - (dOfW + 1));
       
-      // 💡 修改點：P 班延長為連續 14 天 (前 6 天 P 班 + 後 8 天休)
-      const nextFri = new Date(sat); nextFri.setDate(sat.getDate() + 13);
-      startDate = `${currentMonth}-${String(sat.getDate()).padStart(2, '0')}`;
-      endDate = `${currentMonth}-${String(nextFri.getDate()).padStart(2, '0')}`;
-      daysToSwap = []; for (let i = 0; i < 14; i++) { const d = new Date(sat); d.setDate(sat.getDate() + i); daysToSwap.push(d.getDate());  }
+      // 1. 取得起始日物件 (正確處理日期回溯)
+      const sat = new Date(targetDate);
+      if (dOfW === 6) {
+        // 週六：不變
+      } else if (dOfW === 0) {
+        sat.setDate(targetDate.getDate() - 1);
+      } else {
+        sat.setDate(targetDate.getDate() - (dOfW + 1));
+      }
+
+      // 2. 計算結束日
+      const endDay = new Date(sat);
+      endDay.setDate(sat.getDate() + 13);
+      
+      // 直接在賦值時格式化，不再內部宣告 function，避免大括號衝突
+      startDate = `${sat.getFullYear()}-${String(sat.getMonth() + 1).padStart(2, '0')}-${String(sat.getDate()).padStart(2, '0')}`;
+      endDate = `${endDay.getFullYear()}-${String(endDay.getMonth() + 1).padStart(2, '0')}-${String(endDay.getDate()).padStart(2, '0')}`;
+
+      // 3. 產生連續 14 天的完整日期陣列
+      daysToSwap = [];
+      for (let i = 0; i < 14; i++) {
+        const d = new Date(sat);
+        d.setDate(sat.getDate() + i);
+        
+        const yStr = d.getFullYear();
+        const mStr = String(d.getMonth() + 1).padStart(2, '0');
+        const dStr = String(d.getDate()).padStart(2, '0');
+        
+        daysToSwap.push(`${yStr}-${mStr}-${dStr}`); 
+      }
     }
-  }
-  
-  if (isBundle && daysToSwap.length > 0) {
-    const monthPrefix = dayInfo.fullDate.substring(0, 7); // 抓取 "YYYY-MM"
-    const bundleDates = daysToSwap.map(d => `${monthPrefix}-${String(d).padStart(2, '0')}`);
+
     
     // 檢查申請人與被申請人的鎖定清單中，是否包含這段區間的任何一天
-    const isCreatorLocked = bundleDates.some(d => currentUser.applyingDates?.includes(d));
-    const isTargetLocked = bundleDates.some(d => targetEmp.applyingDates?.includes(d));
+    // 💡 修正關鍵：直接將原本的 bundleDates 替換成最新的新格式變數 daysToSwap
+    const isCreatorLocked = daysToSwap.some(d => currentUser.applyingDates?.includes(d));
+    const isTargetLocked = daysToSwap.some(d => targetEmp.applyingDates?.includes(d));
     
     if (isCreatorLocked || isTargetLocked) {
       alert(`無法換班：這段整段換班的區間內，您或對方已經有其他的換班申請正在流程中了！\n（整段區間若與他人申請重疊，將被禁止換班）`);
@@ -2888,7 +2982,7 @@ const handleSwapApply = (targetEmp, dayInfo) => {
   setSwapTarget({
     date: dayInfo.fullDate,
     dayOfWeek: dayInfo.dayOfWeek,
-    day: dayInfo.day,
+    day: dayInfo.day, // 保留原本的純數字日期（如 24），不破壞原本其他可能讀取 day 的小地方
     creatorId: currentUser.id,
     creatorName: currentUser.name,
     creatorShift: myShift,
@@ -2899,10 +2993,10 @@ const handleSwapApply = (targetEmp, dayInfo) => {
       { id: currentUser.id, name: currentUser.name, oldShift: myShift },
       { id: targetEmp.id, name: targetEmp.name, oldShift: targetShift }
     ],
-    isBundle,
-    startDate,
-    endDate,
-    daysToSwap
+    isBundle,     // 已在前面自動升級
+    startDate,    // 已在前面自動升級（YYYY-MM-DD）
+    endDate,      // 已在前面自動升級（YYYY-MM-DD）
+    daysToSwap    // 已在前面自動升級（["YYYY-MM-DD", ...])
   });
 
   setIsModalOpen(true); // 💡 顯示申請框
@@ -2928,8 +3022,9 @@ const handleRecordAction = (req, action) => {
     // 計算需要解鎖的日期陣列 (預設至少解鎖單日)
     let datesToUnlock = req.date ? [req.date] : [];
     if (req.isBundle && Array.isArray(req.daysToSwap) && req.date) {
-      const monthPrefix = req.date.substring(0, 7);
-      datesToUnlock = req.daysToSwap.map(d => `${monthPrefix}-${String(d).padStart(2, '0')}`);
+      // 由於 req.daysToSwap 已經是完整的 ["YYYY-MM-DD", ...] 陣列
+      // 直接將其賦值給 datesToUnlock 即可，不需要再拼接月份
+      datesToUnlock = [...req.daysToSwap];
     }
 
     const nextEmployees = employees.map(e => {
@@ -2995,12 +3090,14 @@ const handleRecordAction = (req, action) => {
       if (!ns[targetMonthKey]) ns[targetMonthKey] = {};
       
       let daysArray = [];
-      if (req.isBundle && req.daysToSwap) {
-        daysArray = req.daysToSwap;
-      } else {
-        const exactDay = req.day || (req.date ? Number(req.date.split('-')[2]) : null);
-        if (exactDay) daysArray = [exactDay];
-      }
+        if (req.isBundle && req.daysToSwap) {
+          // 已經是完整字串陣列 ["YYYY-MM-DD", ...]，直接複製賦值
+          daysArray = [...req.daysToSwap];
+        } else {
+          // 💡 完全還原你原本舊程式碼的邏輯，不進行任何調整，確保下游安全：
+          const exactDay = req.day || (req.date ? Number(req.date.split('-')[2]) : null);
+          if (exactDay) daysArray = [exactDay];
+        }
 
       // 2. 針對每一天，進行班別交換
       daysArray.forEach(d => {
@@ -3160,7 +3257,7 @@ const handleParticipantApprove = (reqId) => {
               isBundle: swapTarget.isBundle,
               startDate: swapTarget.startDate,
               endDate: swapTarget.endDate,
-              daysToSwap: swapTarget.daysToSwap
+              daysToSwap: swapTarget.daysToSwap // 這裡安全承接新格式
             },
             ...swapRequests
           ];
@@ -3168,8 +3265,9 @@ const handleParticipantApprove = (reqId) => {
           // 💡 1. 產生需要上鎖的完整日期陣列 (單日或整段)
           let datesToLock = [targetDateStr];
           if (swapTarget.isBundle && swapTarget.daysToSwap) {
-            const monthPrefix = targetDateStr.substring(0, 7); // 取得 "YYYY-MM"
-            datesToLock = swapTarget.daysToSwap.map(d => `${monthPrefix}-${String(d).padStart(2, '0')}`);
+            // 💡 修正關鍵：因為 daysToSwap 已經是完整的 ["YYYY-MM-DD", ...] 陣列
+            // 我們完全保留原本的 datesToLock 賦值邏輯，移除會造成跨年 Bug 的月份拼接
+            datesToLock = [...swapTarget.daysToSwap];
           }
 
           // 💡 2. 將整組陣列寫入同仁狀態中上鎖
