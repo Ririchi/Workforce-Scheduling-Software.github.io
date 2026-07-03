@@ -13,8 +13,7 @@ import {
 // 版本記錄：V1.8 - 深度重構連續換班校驗：僅校驗 Target 並相容 P#/P 變化
 const WEEKDAYS_MAP = ["日", "一", "二", "三", "四", "五", "六"];
 const PALETTE = [
-  { name: '無色', class: 'none' },
-  { name: '白', class: 'bg-white' },     // 真正的白色
+  { name: '無色'},
   { name: '黃', class: 'bg-yellow-200' },
   { name: '藍', class: 'bg-blue-200' },
   { name: '綠', class: 'bg-green-200' },
