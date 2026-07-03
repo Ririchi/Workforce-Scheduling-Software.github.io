@@ -2642,23 +2642,32 @@ const SchedulingView = ({ currentMonth, employees, daysInMonth, schedule, setSch
                             else n.add(`${emp.name}-${d.day}`); 
                             setIgnoredCells(n);
                           } else if (!importPreview) { 
-                            const nc = deepClone(cellColors); 
-                            if (!nc[currentMonth]) nc[currentMonth] = {}; 
-                            if (!nc[currentMonth][emp.name]) nc[currentMonth][emp.name] = {}; 
-                          
-                            // --- 修改核心邏輯開始 ---
-                            if (activeColor === 'bg-white') {
-                              // 如果選的是白色，直接刪除該紀錄，不寫入任何東西
-                              delete nc[currentMonth][emp.name][d.day];
-                            } else {
-                              // 只有選其他顏色才寫入
-                              nc[currentMonth][emp.name][d.day] = activeColor;
-                            }
-                            // --- 修改核心邏輯結束 ---
-                          
-                            setCellColors(nc);
-                            saveData({ cellColors: nc }); 
+                          const nc = deepClone(cellColors); 
+                          if (!nc[currentMonth]) nc[currentMonth] = {}; 
+                          if (!nc[currentMonth][emp.name]) nc[currentMonth][emp.name] = {}; 
+                        
+                          // 1. 更新或刪除顏色
+                          if (activeColor === 'bg-white') {
+                            delete nc[currentMonth][emp.name][d.day];
+                          } else {
+                            nc[currentMonth][emp.name][d.day] = activeColor;
                           }
+                        
+                          // 2. 【新增】清理空物件邏輯 (防止空架構遺留在資料庫)
+                          
+                          // 如果該人員當月沒有任何顏色設定，刪除該人員的 key
+                          if (Object.keys(nc[currentMonth][emp.name]).length === 0) {
+                            delete nc[currentMonth][emp.name];
+                          }
+                          
+                          // 如果該月份連任何人員都沒有顏色設定，刪除該月份的 key
+                          if (Object.keys(nc[currentMonth]).length === 0) {
+                            delete nc[currentMonth];
+                          }
+                        
+                          setCellColors(nc);
+                          saveData({ cellColors: nc }); 
+                        }
                         }}
                       >
                         {isChanged && (
