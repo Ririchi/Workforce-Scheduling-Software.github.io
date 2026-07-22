@@ -1,7 +1,7 @@
 import React, { useState, useEffect, useMemo, useRef } from 'react';
 import { initializeApp } from 'firebase/app';
 import { getAuth, signInWithCustomToken, signInAnonymously, onAuthStateChanged } from 'firebase/auth';
-import { getFirestore, doc, setDoc, getDoc, onSnapshot, collection, query, updateDoc, deleteDoc } from 'firebase/firestore';
+import { getFirestore, doc, setDoc, getDoc, onSnapshot, collection, query, updateDoc, deleteDoc, getDocs } from 'firebase/firestore';
 import {
   Home, UserCog, CalendarRange, ArrowLeftRight, Clock, LayoutGrid, Download, Upload, LogIn, LogOut,
   GripVertical, Plus, Trash2, Save, UserPlus, AlertCircle, Calendar as CalendarIcon, CheckCircle2,
@@ -373,6 +373,12 @@ const Header = ({ currentMonth, setCurrentMonth, currentPage, handlePageChange, 
             <>
               <NavButton id="schedule" label="排班" icon={LayoutGrid} colorClass="bg-purple-200" active={currentPage==='schedule'} onClick={handlePageChange} />
               <NavButton id="report" label="管理報表" icon={BarChart3} colorClass="bg-emerald-200" active={currentPage==='report'} onClick={handlePageChange} />
+              <button 
+                onClick={handleFullBackup}
+                className="bg-purple-600 text-white px-4 py-2 rounded-xl text-xs font-black shadow hover:bg-purple-700 transition-all"
+              >
+                下載完整備份 (JSON)
+              </button>
             </>
           )}
           <div className="ml-2 pl-2 border-l border-gray-300">
@@ -2797,6 +2803,37 @@ const App = () => {
   const [preLeaveData, setPreLeaveData] = useState({apps: {},dailyLimits: {},remarks: {},weekendLimit: 10,weekdayLimit: 3,lotteryDay: 15,drawnMonths: []});
   const [isModalOpen, setIsModalOpen] = useState(false);
 
+  const handleFullBackup = async () => {
+    try {
+      // 1. 抓取 roster 路徑下的所有文件 (包含 main 與各月份文件)
+      const rosterRef = collection(db, 'artifacts/pharmacy-system-v1-8/public/data/roster');
+      const querySnapshot = await getDocs(rosterRef);
+      
+      const backupData = {};
+      querySnapshot.forEach((doc) => {
+        backupData[doc.id] = doc.data();
+      });
+  
+      // 2. 轉換成 JSON 字串
+      const jsonString = JSON.stringify(backupData, null, 2);
+      
+      // 3. 建立下載連結
+      const blob = new Blob([jsonString], { type: 'application/json' });
+      const url = URL.createObjectURL(blob);
+      const link = document.createElement('a');
+      link.href = url;
+      link.download = `pharmacy-backup-${new Date().toISOString().slice(0, 10)}.json`;
+      document.body.appendChild(link);
+      link.click();
+      document.body.removeChild(link);
+      
+      alert("備份已成功下載！");
+    } catch (error) {
+      console.error("備份失敗:", error);
+      alert("備份失敗，請檢查權限或連線。");
+    }
+  };
+  
   const saveData = async (updates) => {
     if (!auth.currentUser) return;
     
