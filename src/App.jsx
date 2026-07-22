@@ -373,12 +373,6 @@ const Header = ({ currentMonth, setCurrentMonth, currentPage, handlePageChange, 
             <>
               <NavButton id="schedule" label="排班" icon={LayoutGrid} colorClass="bg-purple-200" active={currentPage==='schedule'} onClick={handlePageChange} />
               <NavButton id="report" label="管理報表" icon={BarChart3} colorClass="bg-emerald-200" active={currentPage==='report'} onClick={handlePageChange} />
-              <button 
-                onClick={handleFullBackup}
-                className="bg-purple-600 text-white px-4 py-2 rounded-xl text-xs font-black shadow hover:bg-purple-700 transition-all"
-              >
-                下載完整備份 (JSON)
-              </button>
             </>
           )}
           <div className="ml-2 pl-2 border-l border-gray-300">
@@ -1491,6 +1485,12 @@ const handleImport = (e) => {
           總計：{employees.filter(e => !e.isSeparator).length} 位人員
         </div>
       </div>
+              <button 
+                onClick={handleFullBackup}
+                className="bg-purple-600 text-white px-4 py-2 rounded-xl text-xs font-black shadow hover:bg-purple-700 transition-all"
+              >
+                下載完整備份 (JSON)
+              </button>
     </div>
   );
 };
