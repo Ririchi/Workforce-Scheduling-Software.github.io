@@ -1485,12 +1485,6 @@ const handleImport = (e) => {
           總計：{employees.filter(e => !e.isSeparator).length} 位人員
         </div>
       </div>
-              <button 
-                onClick={handleFullBackup}
-                className="bg-purple-600 text-white px-4 py-2 rounded-xl text-xs font-black shadow hover:bg-purple-700 transition-all"
-              >
-                下載完整備份 (JSON)
-              </button>
     </div>
   );
 };
