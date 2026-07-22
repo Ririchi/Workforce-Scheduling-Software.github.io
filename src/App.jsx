@@ -364,6 +364,12 @@ const Header = ({ currentMonth, setCurrentMonth, currentPage, handlePageChange, 
             <>
               <NavButton id="account" label="帳號管理" icon={UserCog} colorClass="bg-pink-200" active={currentPage==='account'} onClick={handlePageChange} />
               <NavButton id="shifts" label="班別管理" icon={CalendarRange} colorClass="bg-blue-100" active={currentPage==='shifts'} onClick={handlePageChange} />
+              <button 
+              onClick={handleFullBackup}
+              className="bg-purple-600 text-white px-4 py-2 rounded-xl text-xs font-black shadow hover:bg-purple-700 transition-all"
+            >
+              下載完整備份 (JSON)
+            </button>
             </>
           )}
           <NavButton id="swap" label="換班" icon={ArrowLeftRight} colorClass="bg-cyan-200" active={currentPage==='swap'} onClick={handlePageChange} />
@@ -1394,6 +1400,12 @@ const handleImport = (e) => {
 
   return (
     <div className="p-4 max-w-6xl mx-auto grid grid-cols-1 lg:grid-cols-12 gap-6 font-sans">
+      <button 
+        onClick={handleFullBackup}
+        className="bg-purple-600 text-white px-4 py-2 rounded-xl text-xs font-black shadow hover:bg-purple-700 transition-all"
+      >
+        下載完整備份 (JSON)
+      </button>
       <div className="lg:col-span-4 bg-white p-5 rounded-3xl shadow border h-fit">
         <h2 className="text-lg font-black mb-4 flex items-center gap-2 text-gray-800"><UserCog size={20}/> 人員管理</h2>
         <form className="space-y-3" onSubmit={(e) => {
