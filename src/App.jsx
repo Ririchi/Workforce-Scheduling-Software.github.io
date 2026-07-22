@@ -364,12 +364,6 @@ const Header = ({ currentMonth, setCurrentMonth, currentPage, handlePageChange, 
             <>
               <NavButton id="account" label="帳號管理" icon={UserCog} colorClass="bg-pink-200" active={currentPage==='account'} onClick={handlePageChange} />
               <NavButton id="shifts" label="班別管理" icon={CalendarRange} colorClass="bg-blue-100" active={currentPage==='shifts'} onClick={handlePageChange} />
-              <button 
-              onClick={handleFullBackup}
-              className="bg-purple-600 text-white px-4 py-2 rounded-xl text-xs font-black shadow hover:bg-purple-700 transition-all"
-            >
-              下載完整備份 (JSON)
-            </button>
             </>
           )}
           <NavButton id="swap" label="換班" icon={ArrowLeftRight} colorClass="bg-cyan-200" active={currentPage==='swap'} onClick={handlePageChange} />
