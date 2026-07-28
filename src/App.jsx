@@ -1327,7 +1327,7 @@ const RecordsView = ({ currentUser, swapRequests, onAction, onApprove, setReject
   );
 };
 
-const AccountManagementView = ({ employees, setEmployees, setDeleteTarget }) => {
+const AccountManagementView = ({ employees, setEmployees, setDeleteTarget, saveData }) => { // 💡 1. 接收 saveData
   const [formData, setFormData] = useState({ id: '', name: '', role: '1', labor: 'N', password: '' });
   const [editingId, setEditingId] = useState(null);
   const [draggedIdx, setDraggedIdx] = useState(null);
@@ -1345,6 +1345,7 @@ const AccountManagementView = ({ employees, setEmployees, setDeleteTarget }) => 
     const item = next.splice(draggedIdx, 1)[0];
     next.splice(targetIdx, 0, item);
     setEmployees(next);
+    if (saveData) saveData({ employees: next }); // 💡 2. 拖曳排序後同步存檔
     setDraggedIdx(null);
     setDragOverIdx(null);
   };
@@ -1361,36 +1362,37 @@ const AccountManagementView = ({ employees, setEmployees, setDeleteTarget }) => 
     link.click();
   };
 
-const handleImport = (e) => {
-  const file = e.target.files[0];
-  if (!file) return;
-  const reader = new FileReader();
-  reader.onload = (ev) => {
-    const rows = ev.target.result.split(/\r?\n/).map(r => r.trim()).filter(Boolean).slice(1);
-    
-    let addedCount = 0;
-    let existingIds = new Set(employees.map(emp => emp.id)); // 先取得目前所有員編
-    let nextEmployees = [...employees];
+  const handleImport = (e) => {
+    const file = e.target.files[0];
+    if (!file) return;
+    const reader = new FileReader();
+    reader.onload = (ev) => {
+      const rows = ev.target.result.split(/\r?\n/).map(r => r.trim()).filter(Boolean).slice(1);
+      
+      let addedCount = 0;
+      let existingIds = new Set(employees.map(emp => emp.id));
+      let nextEmployees = [...employees];
 
-    rows.forEach(r => {
-      const [id, name, role, labor, pwd] = r.split(',');
-      if (id && name && !existingIds.has(id)) {
-        const isNC = (id === "E1" || id === "E2" || id === "E3" || name.includes("夜診"));
-        nextEmployees.push({ id, name, role: role || '1', labor: labor || 'N', password: pwd || "", isNightClinic: isNC });
-        existingIds.add(id); // 避免同一份 CSV 內有重複
-        addedCount++;
+      rows.forEach(r => {
+        const [id, name, role, labor, pwd] = r.split(',');
+        if (id && name && !existingIds.has(id)) {
+          const isNC = (id === "E1" || id === "E2" || id === "E3" || name.includes("夜診"));
+          nextEmployees.push({ id, name, role: role || '1', labor: labor || 'N', password: pwd || "", isNightClinic: isNC });
+          existingIds.add(id);
+          addedCount++;
+        }
+      });
+
+      if (addedCount > 0) { 
+        setEmployees(nextEmployees); 
+        if (saveData) saveData({ employees: nextEmployees }); // 💡 3. 匯入後同步存檔
+        alert(`匯入完成！共新增 ${addedCount} 名新員工，已重複的員編已自動忽略。`); 
+      } else {
+        alert("匯入檔案中沒有新的人員資料。");
       }
-    });
-
-    if (addedCount > 0) { 
-      setEmployees(nextEmployees); 
-      alert(`匯入完成！共新增 ${addedCount} 名新員工，已重複的員編已自動忽略。`); 
-    } else {
-      alert("匯入檔案中沒有新的人員資料。");
-    }
+    };
+    reader.readAsText(file);
   };
-  reader.readAsText(file);
-};
 
   return (
     <div className="p-4 max-w-6xl mx-auto grid grid-cols-1 lg:grid-cols-12 gap-6 font-sans">
@@ -1398,16 +1400,31 @@ const handleImport = (e) => {
         <h2 className="text-lg font-black mb-4 flex items-center gap-2 text-gray-800"><UserCog size={20}/> 人員管理</h2>
         <form className="space-y-3" onSubmit={(e) => {
           e.preventDefault();
-          if (editingId) {setEmployees(employees.map(emp => emp.id === editingId ? formData : emp));setEditingId(null);
+          let nextEmployees;
+          if (editingId) {
+            nextEmployees = employees.map(emp => emp.id === editingId ? formData : emp);
+            setEmployees(nextEmployees);
+            setEditingId(null);
           } else {
-          const isDuplicate = employees.some(emp => emp.id === formData.id);
+            const isDuplicate = employees.some(emp => emp.id === formData.id);
+            if (isDuplicate) {
+              alert("該員編已存在，系統已自動忽略。"); 
+              return;
+            } else {
+              nextEmployees = [...employees, formData];
+              setEmployees(nextEmployees);
+              alert("成功新增 1 名員工。");
+            }
+          }
+          
+          // 💡 4. 表單新增或編輯後，立即同步存入 Firebase
+          if (saveData && nextEmployees) {
+            saveData({ employees: nextEmployees });
+          }
 
-          if (isDuplicate) {alert("該員編已存在，系統已自動忽略。"); 
-        } else {setEmployees([...employees, formData]);alert("成功新增 1 名員工。");
-      }
-    }
           setFormData({id: '', name: '', role: '1', labor: 'N', password: ''});
         }}>
+          {/* 表單欄位維持不變 */}
           <div className="grid grid-cols-2 gap-2">
             <input className="border p-2 rounded-xl text-sm font-mono outline-none" placeholder="員編" value={formData.id} onChange={e => setFormData({...formData, id: e.target.value})} disabled={!!editingId} />
             <input className="border p-2 rounded-xl text-sm outline-none font-bold" placeholder="姓名" value={formData.name} onChange={e => setFormData({...formData, name: e.target.value})} />
@@ -1434,11 +1451,16 @@ const handleImport = (e) => {
             <input type="file" ref={importRef} className="hidden" accept=".csv" onChange={handleImport} />
             <button type="button" onClick={handleExport} className="py-2 border rounded-xl text-xs font-black hover:bg-gray-50 flex items-center justify-center gap-1"><Download size={14}/> 匯出名冊</button>
           </div>
-          <button type="button" onClick={() => setEmployees([...employees, { id: `SEP-${Date.now()}`, isSeparator: true }])} className="w-full mt-2 py-2 border-2 border-dashed rounded-xl text-[10px] font-black text-gray-400 hover:bg-gray-50 transition-all">插入分組分隔線</button>
+          <button type="button" onClick={() => {
+            const next = [...employees, { id: `SEP-${Date.now()}`, isSeparator: true }];
+            setEmployees(next);
+            if (saveData) saveData({ employees: next }); // 💡 5. 插入分隔線也同步存檔
+          }} className="w-full mt-2 py-2 border-2 border-dashed rounded-xl text-[10px] font-black text-gray-400 hover:bg-gray-50 transition-all">插入分組分隔線</button>
         </form>
       </div>
+      {/* 右側表格區塊維持不變 */}
       <div className="lg:col-span-8 bg-white rounded-3xl shadow border flex flex-col h-[650px]"> 
-        <div className="flex-1 overflow-y-auto"> {/* 💡 這是讓內容可以捲動的關鍵 */}
+        <div className="flex-1 overflow-y-auto">
           <table className="w-full text-sm border-collapse">
           <thead className="bg-gray-50 border-b text-[10px] font-black uppercase text-gray-400 sticky top-0 z-10">
             <tr>
@@ -1480,7 +1502,6 @@ const handleImport = (e) => {
             </tbody>
           </table>
         </div>
-        {/* 表格底部固定顯示統計 */}
         <div className="p-3 bg-gray-50 border-t text-[10px] font-black text-gray-400 text-center rounded-b-3xl">
           總計：{employees.filter(e => !e.isSeparator).length} 位人員
         </div>
@@ -2844,15 +2865,32 @@ const App = () => {
     }
   };
 
-  useEffect(() => {const initAuth = async () => { try {if (typeof __initial_auth_token !== 'undefined' && __initial_auth_token) {await signInWithCustomToken(auth, __initial_auth_token);} else {await signInAnonymously(auth);}} catch (err) {console.warn("驗證不匹配:", err);await signInAnonymously(auth);}};initAuth();
-}, []);
-  
-    useEffect(() => {
+useEffect(() => {
       const docRef = doc(db, 'artifacts', appId, 'public', 'data', 'roster', 'main');
       const unsubData = onSnapshot(docRef, (snap) => {
         if (snap.exists()) {
           const d = snap.data();
-          if (d.employees) setEmployees(d.employees);
+          
+          // 🛡️ 智慧防護：更新 employees 時，避免雲端舊資料覆蓋掉本地剛修改好的密碼
+          if (d.employees && Array.isArray(d.employees)) {
+            setEmployees(prevEmployees => {
+              // 建立一個本地密碼對照表 (id -> password)
+              const localPasswordMap = {};
+              prevEmployees.forEach(emp => {
+                if (emp.password) localPasswordMap[emp.id] = emp.password;
+              });
+
+              // 將雲端抓下來的名單與本地密碼進行智慧合併
+              return d.employees.map(cloudEmp => {
+                // 如果雲端密碼是空的，但本地剛好有改過、有密碼，就優先保留本地的密碼！
+                if (!cloudEmp.password && localPasswordMap[cloudEmp.id]) {
+                  return { ...cloudEmp, password: localPasswordMap[cloudEmp.id] };
+                }
+                return cloudEmp;
+              });
+            });
+          }
+
           if (d.shifts) setShifts(d.shifts);
           if (d.holidays) setHolidays(d.holidays);
           if (d.personDayRules) setPersonDayRules(d.personDayRules);
