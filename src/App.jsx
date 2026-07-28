@@ -1471,33 +1471,38 @@ const AccountManagementView = ({ employees, setEmployees, setDeleteTarget, saveD
             </tr>
           </thead>
             <tbody>
-              {employees.map((emp, idx) => (
-                <tr 
-                  key={emp.id} 
-                  draggable 
-                  onDragStart={() => setDraggedIdx(idx)} 
-                  onDragOver={e => { e.preventDefault(); setDragOverIdx(idx); }} 
-                  onDrop={() => onDrop(idx)} 
-                  className={`transition-all border-b last:border-0 group cursor-move ${emp.isSeparator ? 'bg-gray-100 h-[4px]' : 'hover:bg-blue-50'} ${dragOverIdx === idx ? 'border-t-4 border-t-blue-400' : ''}`}
-                >
-                  <td className="p-4 text-gray-300 group-hover:text-blue-500"><GripVertical size={16}/></td>
-                  {emp.isSeparator ? <td colSpan={3} className="p-4 italic text-[10px] text-gray-400">分組線</td> : (
-                    <>
-                      <td className="p-4 font-mono text-xs">{emp.id}</td>
-                      <td className="p-4 font-bold">{emp.name}</td>
-                      <td className="p-4">
-                        <span className={`px-2 py-0.5 rounded-full text-[10px] font-black ${emp.role === '0' ? 'bg-purple-100 text-purple-600' : emp.role === '1' ? 'bg-blue-100 text-blue-600' : 'bg-gray-100 text-gray-500'}`}>
-                          {getRoleLabel(emp.role)}
-                        </span>
-                      </td>
-                    </>
-                  )}
-                  <td className="p-4 text-right">
-                    {!emp.isSeparator && <button onClick={() => { setEditingId(emp.id); setFormData(emp); }} className="text-blue-500 text-xs font-black mr-4">編輯</button>}
-                    <button onClick={() => setDeleteTarget(emp)} className="text-red-400 hover:text-red-600 transition-all"><Trash2 size={16}/></button>
-                  </td>
-                </tr>
-              ))}
+              {Array.isArray(employees) && employees.filter(Boolean).map((emp, idx) => {
+                // 🛡️ 雙重保險：若該筆資料缺失 id 或格式錯誤，直接略過不渲染，絕不白屏
+                if (!emp || !emp.id) return null;
+                
+                return (
+                  <tr 
+                    key={emp.id || idx} 
+                    draggable 
+                    onDragStart={() => setDraggedIdx(idx)} 
+                    onDragOver={e => { e.preventDefault(); setDragOverIdx(idx); }} 
+                    onDrop={() => onDrop(idx)} 
+                    className={`transition-all border-b last:border-0 group cursor-move ${emp.isSeparator ? 'bg-gray-100 h-[4px]' : 'hover:bg-blue-50'} ${dragOverIdx === idx ? 'border-t-4 border-t-blue-400' : ''}`}
+                  >
+                    <td className="p-4 text-gray-300 group-hover:text-blue-500"><GripVertical size={16}/></td>
+                    {emp.isSeparator ? <td colSpan={3} className="p-4 italic text-[10px] text-gray-400">分組線</td> : (
+                      <>
+                        <td className="p-4 font-mono text-xs">{emp.id}</td>
+                        <td className="p-4 font-bold">{emp.name}</td>
+                        <td className="p-4">
+                          <span className={`px-2 py-0.5 rounded-full text-[10px] font-black ${emp.role === '0' ? 'bg-purple-100 text-purple-600' : emp.role === '1' ? 'bg-blue-100 text-blue-600' : 'bg-gray-100 text-gray-500'}`}>
+                            {getRoleLabel(emp.role)}
+                          </span>
+                        </td>
+                      </>
+                    )}
+                    <td className="p-4 text-right">
+                      {!emp.isSeparator && <button onClick={() => { setEditingId(emp.id); setFormData(emp); }} className="text-blue-500 text-xs font-black mr-4">編輯</button>}
+                      <button onClick={() => setDeleteTarget(emp)} className="text-red-400 hover:text-red-600 transition-all"><Trash2 size={16}/></button>
+                    </td>
+                  </tr>
+                );
+              })}
             </tbody>
           </table>
         </div>
