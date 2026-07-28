@@ -2871,24 +2871,9 @@ useEffect(() => {
         if (snap.exists()) {
           const d = snap.data();
           
-          // 🛡️ 智慧防護：更新 employees 時，避免雲端舊資料覆蓋掉本地剛修改好的密碼
+          // 🛑 【暫時安全寫法】直接讀取雲端名單，不要做複雜的智慧比對，避免再次白屏！
           if (d.employees && Array.isArray(d.employees)) {
-            setEmployees(prevEmployees => {
-              // 建立一個本地密碼對照表 (id -> password)
-              const localPasswordMap = {};
-              prevEmployees.forEach(emp => {
-                if (emp.password) localPasswordMap[emp.id] = emp.password;
-              });
-
-              // 將雲端抓下來的名單與本地密碼進行智慧合併
-              return d.employees.map(cloudEmp => {
-                // 如果雲端密碼是空的，但本地剛好有改過、有密碼，就優先保留本地的密碼！
-                if (!cloudEmp.password && localPasswordMap[cloudEmp.id]) {
-                  return { ...cloudEmp, password: localPasswordMap[cloudEmp.id] };
-                }
-                return cloudEmp;
-              });
-            });
+            setEmployees(d.employees);
           }
 
           if (d.shifts) setShifts(d.shifts);
@@ -2898,7 +2883,6 @@ useEffect(() => {
           if (d.cellColors) setCellColors(d.cellColors);
           if (d.preLeaveData) setPreLeaveData(d.preLeaveData); 
 
-          // ✨ 盾牌二：在儲存到 React State 之前，自動將每一筆舊資料清洗、就地升級！
           if (d.swapRequests && Array.isArray(d.swapRequests)) {
             const cleanRequests = d.swapRequests.map(req => cleanBundleData(req));
             setSwapRequests(cleanRequests);
@@ -2906,7 +2890,7 @@ useEffect(() => {
         }
       }, (error) => console.error("雲端監聽失敗:", error));
       
-      return () => unsubData(); // 記得要 return 卸載監聽
+      return () => unsubData();
     }, [appId]);
     
   const daysInMonth = useMemo(() => {
