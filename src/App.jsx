@@ -2862,7 +2862,7 @@ const App = () => {
       updates.swapRequests = updates.swapRequests.map(req => cleanBundleData(req));
     }
 
-    const docRef = doc(db, 'artifacts', 'appId', 'public', 'data', 'roster', 'main');
+    const docRef = doc(db, 'artifacts', appId, 'public', 'data', 'roster', 'main');
     try {
       await setDoc(docRef, updates, { merge: true });
     } catch (error) {
@@ -2871,7 +2871,7 @@ const App = () => {
   };
 
 useEffect(() => {
-      const docRef = doc(db, 'artifacts', 'appId', 'public', 'data', 'roster', 'main');
+      const docRef = doc(db, 'artifacts', appId, 'public', 'data', 'roster', 'main');
       const unsubData = onSnapshot(docRef, (snap) => {
         if (snap.exists()) {
           const d = snap.data();
