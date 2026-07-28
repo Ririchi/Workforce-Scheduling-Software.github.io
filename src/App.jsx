@@ -29,6 +29,7 @@ const INITIAL_EMPLOYEES = [
   { id: "Y00243", name: "黃永成", role: "1", labor: "N", password: "" },
   { id: "SEP2", isSeparator: true },
   { id: "Y08215", name: "王玟璇", role: "1", labor: "Y", password: "" },
+  { id: "Y00326", name: "沈倩如", role: "1", labor: "Y", password: "" },
   { id: "SEP_NC", isSeparator: true },
   { id: "E1", name: "夜診18", role: "2", labor: "N", password: "", isNightClinic: true },
   { id: "E2", name: "夜診18.5", role: "2", labor: "N", password: "", isNightClinic: true },
@@ -2861,7 +2862,7 @@ const App = () => {
       updates.swapRequests = updates.swapRequests.map(req => cleanBundleData(req));
     }
 
-    const docRef = doc(db, 'artifacts', appId, 'public', 'data', 'roster', 'main');
+    const docRef = doc(db, 'artifacts', 'appId', 'public', 'data', 'roster', 'main');
     try {
       await setDoc(docRef, updates, { merge: true });
     } catch (error) {
@@ -2870,7 +2871,7 @@ const App = () => {
   };
 
 useEffect(() => {
-      const docRef = doc(db, 'artifacts', appId, 'public', 'data', 'roster', 'main');
+      const docRef = doc(db, 'artifacts', 'appId', 'public', 'data', 'roster', 'main');
       const unsubData = onSnapshot(docRef, (snap) => {
         if (snap.exists()) {
           const d = snap.data();
