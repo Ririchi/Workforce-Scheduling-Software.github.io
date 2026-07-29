@@ -1,7 +1,7 @@
 import React, { useState, useEffect, useMemo, useRef } from 'react';
 import { initializeApp } from 'firebase/app';
 import { getAuth, signInWithCustomToken, signInAnonymously, onAuthStateChanged } from 'firebase/auth';
-import { getFirestore, doc, setDoc, getDoc, onSnapshot, collection, query, updateDoc, deleteDoc } from 'firebase/firestore';
+import { getFirestore, doc, setDoc, getDoc, onSnapshot, collection, query, updateDoc, deleteDoc, getDocs } from 'firebase/firestore';
 import {
 Home, UserCog, CalendarRange, ArrowLeftRight, Clock, LayoutGrid, Download, Upload, LogIn, LogOut,
 GripVertical, Plus, Trash2, Save, UserPlus, AlertCircle, Calendar as CalendarIcon, CheckCircle2,
@@ -140,8 +140,8 @@ const NavButton = ({ id, label, icon: Icon, colorClass, active, onClick, hasDot 
 <button
 onClick={() => onClick(id)}
 className={`relative flex items-center px-3 py-1.5 text-xs font-bold transition-all shadow-sm ${
-     active ? `${colorClass} text-black ring-1 ring-black scale-105` : 'bg-gray-100 text-gray-700 hover:bg-gray-200'
-   } rounded-md`}
+    active ? `${colorClass} text-black ring-1 ring-black scale-105` : 'bg-gray-100 text-gray-700 hover:bg-gray-200'
+  } rounded-md`}
 >
 <Icon className="w-3 h-3 mr-1" />
 {label}
@@ -458,8 +458,8 @@ const leaveMsg = (parts[1] && !isNaN(parts[1])) ? `假:${parts[1]}h` : null;
 return (
 <td key={d.day} 
 className={`border p-0 ${isNC ? 'h-[32px]' : 'h-10'} ${bgClass} ${
-                         onCellClick && !isNC ? 'cursor-pointer hover:bg-blue-50 shadow-inner' : 'cursor-default'
-                       } transition-all relative ${cycleEnd ? 'border-r-4 border-r-gray-400' : ''}`} 
+                        onCellClick && !isNC ? 'cursor-pointer hover:bg-blue-50 shadow-inner' : 'cursor-default'
+                      } transition-all relative ${cycleEnd ? 'border-r-4 border-r-gray-400' : ''}`} 
 onClick={() => onCellClick && !isNC && onCellClick(emp, d)}
 >
 <div className={`flex flex-col items-center justify-center h-full relative`}>
@@ -732,51 +732,41 @@ style={{ fieldSizing: 'content', minHeight: '1.5em' }}
 </tr>
 <tr className="bg-[#E0F2F1] border-b">
 <td className="sticky left-0 z-40 bg-[#E0F2F1] border p-1 font-bold text-teal-700 text-[10px]">可休人數</td>
-              {daysInMonth.map(d => (
-                <td key={d.day} className={`border p-1 font-bold text-teal-800 ${isCycleEnd(d.fullDate) ? 'border-r-4 border-r-gray-400' : ''}`}>
-                  <input 
-                    type="text" 
-                    value={preLeaveData.dailyLimits?.[currentMonth]?.[d.day] || (d.rawDay === 0 || d.rawDay === 6 || d.holiday ? preLeaveData.weekendLimit : preLeaveData.weekdayLimit)} 
-                    onChange={e => { const next = deepClone(preLeaveData);  if(!next.dailyLimits) next.dailyLimits = {};if(!next.dailyLimits[currentMonth]) next.dailyLimits[currentMonth] = {};  next.dailyLimits[currentMonth][d.day] = e.target.value; setPreLeaveData(next);}}
-                    className={`w-full bg-transparent text-center font-bold text-teal-800 outline-none ${(!isAdmin || isMonthDrawn) ? 'cursor-not-allowed' : ''}`}
-                  />
-                </td>
-              ))}
-              {daysInMonth.map(d => {
-                // 💡 1. 嚴謹判斷：只有當該天明確有被設定過（且不是 undefined/null），才讀取個別設定
-                const hasDailyLimit = preLeaveData.dailyLimits?.[currentMonth]?.[d.day] !== undefined && 
-                                       preLeaveData.dailyLimits?.[currentMonth]?.[d.day] !== null;
-                
-                // 💡 2. 使用 ?? 確保 0 也能被正確顯示，不會被誤判為 false
-                const displayValue = hasDailyLimit 
-                  ? preLeaveData.dailyLimits[currentMonth][d.day] 
-                  : (d.rawDay === 0 || d.rawDay === 6 || d.holiday ? (preLeaveData.weekendLimit ?? 10) : (preLeaveData.weekdayLimit ?? 3));
-            
-                return (
-                  <td key={d.day} className={`border p-1 font-bold text-teal-800 ${isCycleEnd(d.fullDate) ? 'border-r-4 border-r-gray-400' : ''}`}>
-                    <input 
-                      type="number" 
-                      value={displayValue} 
-                      disabled={!isAdmin || isMonthDrawn}
-                      onChange={e => { 
-                        // 💡 3. 強制轉為整數，避免字串相加或型別錯誤
-                        const val = parseInt(e.target.value) || 0;
-                        const next = deepClone(preLeaveData); 
-                        if(!next.dailyLimits) next.dailyLimits = {};
-                        if(!next.dailyLimits[currentMonth]) next.dailyLimits[currentMonth] = {}; 
-                        
-                        // 寫入該日期的特別名額
-                        next.dailyLimits[currentMonth][d.day] = val; 
-                        
-                        setPreLeaveData(next);
-                        // 💡 4. 關鍵：每次修改都要觸發雲端存檔，防止資料不同步或消失
-                        saveData({ preLeaveData: next }); 
-                      }}
-                      className={`w-full bg-transparent text-center font-bold text-teal-800 outline-none ${(!isAdmin || isMonthDrawn) ? 'cursor-not-allowed opacity-70' : 'cursor-text'}`}
-                    />
-                  </td>
-                );
-              })}
+{daysInMonth.map(d => {
+// 💡 1. 嚴謹判斷：只有當該天明確有被設定過（且不是 undefined/null），才讀取個別設定
+const hasDailyLimit = preLeaveData.dailyLimits?.[currentMonth]?.[d.day] !== undefined && 
+preLeaveData.dailyLimits?.[currentMonth]?.[d.day] !== null;
+
+// 💡 2. 使用 ?? 確保 0 也能被正確顯示，不會被誤判為 false
+const displayValue = hasDailyLimit 
+? preLeaveData.dailyLimits[currentMonth][d.day] 
+: (d.rawDay === 0 || d.rawDay === 6 || d.holiday ? (preLeaveData.weekendLimit ?? 10) : (preLeaveData.weekdayLimit ?? 3));
+
+return (
+<td key={d.day} className={`border p-1 font-bold text-teal-800 ${isCycleEnd(d.fullDate) ? 'border-r-4 border-r-gray-400' : ''}`}>
+<input 
+type="number" 
+value={displayValue} 
+disabled={!isAdmin || isMonthDrawn}
+onChange={e => { 
+// 💡 3. 強制轉為整數，避免字串相加或型別錯誤
+const val = parseInt(e.target.value) || 0;
+const next = deepClone(preLeaveData); 
+if(!next.dailyLimits) next.dailyLimits = {};
+if(!next.dailyLimits[currentMonth]) next.dailyLimits[currentMonth] = {}; 
+
+// 寫入該日期的特別名額
+next.dailyLimits[currentMonth][d.day] = val; 
+
+setPreLeaveData(next);
+// 💡 4. 關鍵：每次修改都要觸發雲端存檔，防止資料不同步或消失
+saveData({ preLeaveData: next }); 
+}}
+className={`w-full bg-transparent text-center font-bold text-teal-800 outline-none ${(!isAdmin || isMonthDrawn) ? 'cursor-not-allowed opacity-70' : 'cursor-text'}`}
+/>
+</td>
+);
+})}
 </tr>
 <tr className="bg-blue-50 border-b">
 <td className="sticky left-0 z-40 bg-blue-50 border p-1 font-bold text-blue-600 text-[10px]">已預人數</td>
@@ -842,10 +832,10 @@ const isWinner = schedule[currentMonth]?.[name]?.[d.day] === "休";
 return (
 /* 💡 修正後：抽籤前，大家的名字都是原本美麗的藍字白底。抽籤後，沒中的人才會優雅地變成灰字刪除線，對照超直覺！ */
 <div key={i} className={`text-[9px] font-black text-center leading-none truncate border rounded py-1 shadow-sm ${
-                           isWinner 
-                             ? 'bg-green-700 text-white border-green-800' 
-                             : (isMonthDrawn ? 'bg-white text-gray-400 border-gray-200 line-through decoration-gray-300' : 'bg-white text-blue-500 border-blue-100')
-                         }`}>
+                          isWinner 
+                            ? 'bg-green-700 text-white border-green-800' 
+                            : (isMonthDrawn ? 'bg-white text-gray-400 border-gray-200 line-through decoration-gray-300' : 'bg-white text-blue-500 border-blue-100')
+                        }`}>
 {name}
 </div>
 );
@@ -1404,6 +1394,12 @@ reader.readAsText(file);
 
 return (
 <div className="p-4 max-w-6xl mx-auto grid grid-cols-1 lg:grid-cols-12 gap-6 font-sans">
+<button 
+onClick={handleFullBackup}
+className="bg-purple-600 text-white px-4 py-2 rounded-xl text-xs font-black shadow hover:bg-purple-700 transition-all"
+>
+下載完整備份 (JSON)
+</button>
 <div className="lg:col-span-4 bg-white p-5 rounded-3xl shadow border h-fit">
 <h2 className="text-lg font-black mb-4 flex items-center gap-2 text-gray-800"><UserCog size={20}/> 人員管理</h2>
 <form className="space-y-3" onSubmit={(e) => {
@@ -1934,11 +1930,11 @@ else if (exportType === 'excel') {
 let xmlRows = "";
 
 xmlRows += `
-       <tr style="height:35px;">
-         <td colspan="${headers.length}" style="font-family:Microsoft JhengHei;font-size:16px;font-weight:bold;align:center;vertical-align:middle;background-color:#F3F4F6;">
-           ${titleHeader} (${typeLabel})
-         </td>
-       </tr>`;
+      <tr style="height:35px;">
+        <td colspan="${headers.length}" style="font-family:Microsoft JhengHei;font-size:16px;font-weight:bold;align:center;vertical-align:middle;background-color:#F3F4F6;">
+          ${titleHeader} (${typeLabel})
+        </td>
+      </tr>`;
 
 xmlRows += `<tr style="height:28px;font-family:Microsoft JhengHei;font-size:12px;font-weight:bold;align:center;vertical-align:middle;">`;
 headers.forEach(h => xmlRows += `<td style="background-color:#E5E7EB;border:0.5pt solid #D1D5DB;align:center;">${h.replace(/\n/g, " ")}</td>`);
@@ -1979,10 +1975,10 @@ xmlRows += `</tr>`;
 });
 
 const excelTemplate = `
-       <html xmlns:o="urn:schemas-microsoft-com:office:office" xmlns:x="urn:schemas-microsoft-com:office:excel" xmlns="http://www.w3.org/TR/REC-html40">
-       <head></head>
-       <body><table border="1">${xmlRows}</table></body>
-       </html>`;
+      <html xmlns:o="urn:schemas-microsoft-com:office:office" xmlns:x="urn:schemas-microsoft-com:office:excel" xmlns="http://www.w3.org/TR/REC-html40">
+      <head></head>
+      <body><table border="1">${xmlRows}</table></body>
+      </html>`;
 
 const blob = new Blob([excelTemplate], { type: 'application/vnd.ms-excel;charset=utf-8;' });
 const link = document.createElement("a");
@@ -2485,11 +2481,11 @@ return null;
 
 let xmlRows = "";
 xmlRows += `
-                     <tr style="height:35px;">
-                       <td colspan="33" style="font-family:Microsoft JhengHei;font-size:16px;font-weight:bold;align:center;vertical-align:middle;background-color:#F3F4F6;">
-                         ${titleHeader}
-                       </td>
-                     </tr>`;
+                    <tr style="height:35px;">
+                      <td colspan="33" style="font-family:Microsoft JhengHei;font-size:16px;font-weight:bold;align:center;vertical-align:middle;background-color:#F3F4F6;">
+                        ${titleHeader}
+                      </td>
+                    </tr>`;
 
 xmlRows += `<tr style="height:25px;font-family:Microsoft JhengHei;font-size:11px;font-weight:bold;align:center;background-color:#E5E7EB;">`;
 xmlRows += `<td style="border:0.5pt solid #D1D5DB;width:60pt;">員工編號</td>`;
@@ -2531,10 +2527,10 @@ xmlRows += `</tr>`;
 });
 
 const excelTemplate = `
-                     <html xmlns:o="urn:schemas-microsoft-com:office:office" xmlns:x="urn:schemas-microsoft-com:office:excel" xmlns="http://www.w3.org/TR/REC-html40">
-                     <head></head>
-                     <body><table border="1">${xmlRows}</table></body>
-                     </html>`;
+                    <html xmlns:o="urn:schemas-microsoft-com:office:office" xmlns:x="urn:schemas-microsoft-com:office:excel" xmlns="http://www.w3.org/TR/REC-html40">
+                    <head></head>
+                    <body><table border="1">${xmlRows}</table></body>
+                    </html>`;
 
 const blob = new Blob([excelTemplate], { type: 'application/vnd.ms-excel;charset=utf-8;' });
 const link = document.createElement("a");
@@ -2616,8 +2612,8 @@ const isViolated = showLaborWarning && detail?.hasViolation;
 return (
 <tr key={emp.id} className="hover:bg-blue-50 border-b group transition-colors">
 <td className={`sticky left-0 z-[50] bg-white border p-2 shadow-[2px_0_5px_rgba(0,0,0,0.1)] align-middle w-[80px] min-w-[80px]
-                   ${isViolated ? 'bg-red-50 border-r-4 border-r-red-500' : 'group-hover:bg-blue-50'}
-                 `}>
+                  ${isViolated ? 'bg-red-50 border-r-4 border-r-red-500' : 'group-hover:bg-blue-50'}
+                `}>
 <div className="flex flex-col items-center justify-center gap-1 w-full text-center">
 <span className={`font-black text-[13px] w-full truncate ${isViolated ? 'text-red-800' : 'text-gray-800'}`}>
 {emp.name}
@@ -2713,12 +2709,12 @@ type="text"
 value={displayVal} 
 disabled={!!importPreview} 
 className={`w-full h-full text-center bg-transparent focus:bg-white outline-none font-normal font-mono cursor-text relative z-10 whitespace-nowrap ${
-                           importPreview ? 'pointer-events-none opacity-80' : ''
-                         } ${
-                           (!isNC && displayVal !== "" && !["-", "#", "例", "休", "公", "國"].includes(displayVal) && !(shifts || []).some(s => s.name === displayVal))
-                             ? 'text-red-500 font-black' 
-                             : (displayVal === "-" ? 'text-gray-300' : 'text-gray-800')
-                         }`}
+                          importPreview ? 'pointer-events-none opacity-80' : ''
+                        } ${
+                          (!isNC && displayVal !== "" && !["-", "#", "例", "休", "公", "國"].includes(displayVal) && !(shifts || []).some(s => s.name === displayVal))
+                            ? 'text-red-500 font-black' 
+                            : (displayVal === "-" ? 'text-gray-300' : 'text-gray-800')
+                        }`}
 onChange={(e) => { 
 if (!importPreview) { 
 setEditSched(prev => ({ ...prev, [emp.name]: { ...prev[emp.name], [d.day]: e.target.value } })); 
@@ -2806,6 +2802,37 @@ const [showExitConfirm, setShowExitConfirm] = useState(false);
 const [targetPage, setTargetPage] = useState(null);
 const [preLeaveData, setPreLeaveData] = useState({apps: {},dailyLimits: {},remarks: {},weekendLimit: 10,weekdayLimit: 3,lotteryDay: 15,drawnMonths: []});
 const [isModalOpen, setIsModalOpen] = useState(false);
+
+const handleFullBackup = async () => {
+try {
+// 1. 抓取 roster 路徑下的所有文件 (包含 main 與各月份文件)
+const rosterRef = collection(db, 'artifacts/pharmacy-system-v1-8/public/data/roster');
+const querySnapshot = await getDocs(rosterRef);
+
+const backupData = {};
+querySnapshot.forEach((doc) => {
+backupData[doc.id] = doc.data();
+});
+
+// 2. 轉換成 JSON 字串
+const jsonString = JSON.stringify(backupData, null, 2);
+
+// 3. 建立下載連結
+const blob = new Blob([jsonString], { type: 'application/json' });
+const url = URL.createObjectURL(blob);
+const link = document.createElement('a');
+link.href = url;
+link.download = `pharmacy-backup-${new Date().toISOString().slice(0, 10)}.json`;
+document.body.appendChild(link);
+link.click();
+document.body.removeChild(link);
+
+alert("備份已成功下載！");
+} catch (error) {
+console.error("備份失敗:", error);
+alert("備份失敗，請檢查權限或連線。");
+}
+};
 
 const saveData = async (updates) => {
 if (!auth.currentUser) return;
@@ -3252,17 +3279,17 @@ default: return null;
 
 {/* 💡 這是臨時加的緊急解鎖按鈕，清空舊資料後就可以整段刪除 */}
 {/*<button
-       onClick={() => {
-         const nextEmps = employees.map(e => ({ ...e, applyingDates: [] }));
-         setEmployees(nextEmps);
-         if (currentUser) setCurrentUser(prev => ({ ...prev, applyingDates: [] }));
-         saveData({ employees: nextEmps });
-         alert("✅ 系統中所有卡住的日期鎖已全面解除！請重新測試。");
-       }}
-       className="bg-red-500 text-white px-3 py-1 rounded-lg text-sm font-bold shadow-md hover:bg-red-600 transition-all z-50 mb-4 ml-4"
-     >
-       🚨 緊急強制解鎖
-     </button> */}
+      onClick={() => {
+        const nextEmps = employees.map(e => ({ ...e, applyingDates: [] }));
+        setEmployees(nextEmps);
+        if (currentUser) setCurrentUser(prev => ({ ...prev, applyingDates: [] }));
+        saveData({ employees: nextEmps });
+        alert("✅ 系統中所有卡住的日期鎖已全面解除！請重新測試。");
+      }}
+      className="bg-red-500 text-white px-3 py-1 rounded-lg text-sm font-bold shadow-md hover:bg-red-600 transition-all z-50 mb-4 ml-4"
+    >
+      🚨 緊急強制解鎖
+    </button> */}
 
 <SwapRequestModal 
 // 1. 狀態與基礎資料 (確保 isOpen 只出現一次)
