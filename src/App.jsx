@@ -1,7 +1,7 @@
 import React, { useState, useEffect, useMemo, useRef } from 'react';
 import { initializeApp } from 'firebase/app';
 import { getAuth, signInWithCustomToken, signInAnonymously, onAuthStateChanged } from 'firebase/auth';
-import { getFirestore, doc, setDoc, getDoc, onSnapshot, collection, query, updateDoc, deleteDoc, getDocs } from 'firebase/firestore';
+import { getFirestore, doc, setDoc, getDoc, onSnapshot, collection, query, updateDoc, deleteDoc } from 'firebase/firestore';
 import {
 Home, UserCog, CalendarRange, ArrowLeftRight, Clock, LayoutGrid, Download, Upload, LogIn, LogOut,
 GripVertical, Plus, Trash2, Save, UserPlus, AlertCircle, Calendar as CalendarIcon, CheckCircle2,
@@ -28,6 +28,7 @@ const INITIAL_EMPLOYEES = [
 { id: "Y06100", name: "陳麗珺", role: "0", labor: "N", password: "123" },
 { id: "Y00243", name: "黃永成", role: "1", labor: "N", password: "" },
 { id: "SEP2", isSeparator: true },
+{ id: "Y00326", name: "沈倩如", role: "1", labor: "Y", password: "" },
 { id: "Y08215", name: "王玟璇", role: "1", labor: "Y", password: "" },
 { id: "SEP_NC", isSeparator: true },
 { id: "E1", name: "夜診18", role: "2", labor: "N", password: "", isNightClinic: true },
@@ -731,41 +732,51 @@ style={{ fieldSizing: 'content', minHeight: '1.5em' }}
 </tr>
 <tr className="bg-[#E0F2F1] border-b">
 <td className="sticky left-0 z-40 bg-[#E0F2F1] border p-1 font-bold text-teal-700 text-[10px]">可休人數</td>
-{daysInMonth.map(d => {
-// 💡 1. 嚴謹判斷：只有當該天明確有被設定過（且不是 undefined/null），才讀取個別設定
-const hasDailyLimit = preLeaveData.dailyLimits?.[currentMonth]?.[d.day] !== undefined && 
-preLeaveData.dailyLimits?.[currentMonth]?.[d.day] !== null;
-
-// 💡 2. 使用 ?? 確保 0 也能被正確顯示，不會被誤判為 false
-const displayValue = hasDailyLimit 
-? preLeaveData.dailyLimits[currentMonth][d.day] 
-: (d.rawDay === 0 || d.rawDay === 6 || d.holiday ? (preLeaveData.weekendLimit ?? 10) : (preLeaveData.weekdayLimit ?? 3));
-
-return (
-<td key={d.day} className={`border p-1 font-bold text-teal-800 ${isCycleEnd(d.fullDate) ? 'border-r-4 border-r-gray-400' : ''}`}>
-<input 
-type="number" 
-value={displayValue} 
-disabled={!isAdmin || isMonthDrawn}
-onChange={e => { 
-// 💡 3. 強制轉為整數，避免字串相加或型別錯誤
-const val = parseInt(e.target.value) || 0;
-const next = deepClone(preLeaveData); 
-if(!next.dailyLimits) next.dailyLimits = {};
-if(!next.dailyLimits[currentMonth]) next.dailyLimits[currentMonth] = {}; 
-
-// 寫入該日期的特別名額
-next.dailyLimits[currentMonth][d.day] = val; 
-
-setPreLeaveData(next);
-// 💡 4. 關鍵：每次修改都要觸發雲端存檔，防止資料不同步或消失
-saveData({ preLeaveData: next }); 
-}}
-className={`w-full bg-transparent text-center font-bold text-teal-800 outline-none ${(!isAdmin || isMonthDrawn) ? 'cursor-not-allowed opacity-70' : 'cursor-text'}`}
-/>
-</td>
-);
-})}
+              {daysInMonth.map(d => (
+                <td key={d.day} className={`border p-1 font-bold text-teal-800 ${isCycleEnd(d.fullDate) ? 'border-r-4 border-r-gray-400' : ''}`}>
+                  <input 
+                    type="text" 
+                    value={preLeaveData.dailyLimits?.[currentMonth]?.[d.day] || (d.rawDay === 0 || d.rawDay === 6 || d.holiday ? preLeaveData.weekendLimit : preLeaveData.weekdayLimit)} 
+                    onChange={e => { const next = deepClone(preLeaveData);  if(!next.dailyLimits) next.dailyLimits = {};if(!next.dailyLimits[currentMonth]) next.dailyLimits[currentMonth] = {};  next.dailyLimits[currentMonth][d.day] = e.target.value; setPreLeaveData(next);}}
+                    className={`w-full bg-transparent text-center font-bold text-teal-800 outline-none ${(!isAdmin || isMonthDrawn) ? 'cursor-not-allowed' : ''}`}
+                  />
+                </td>
+              ))}
+              {daysInMonth.map(d => {
+                // 💡 1. 嚴謹判斷：只有當該天明確有被設定過（且不是 undefined/null），才讀取個別設定
+                const hasDailyLimit = preLeaveData.dailyLimits?.[currentMonth]?.[d.day] !== undefined && 
+                                       preLeaveData.dailyLimits?.[currentMonth]?.[d.day] !== null;
+                
+                // 💡 2. 使用 ?? 確保 0 也能被正確顯示，不會被誤判為 false
+                const displayValue = hasDailyLimit 
+                  ? preLeaveData.dailyLimits[currentMonth][d.day] 
+                  : (d.rawDay === 0 || d.rawDay === 6 || d.holiday ? (preLeaveData.weekendLimit ?? 10) : (preLeaveData.weekdayLimit ?? 3));
+            
+                return (
+                  <td key={d.day} className={`border p-1 font-bold text-teal-800 ${isCycleEnd(d.fullDate) ? 'border-r-4 border-r-gray-400' : ''}`}>
+                    <input 
+                      type="number" 
+                      value={displayValue} 
+                      disabled={!isAdmin || isMonthDrawn}
+                      onChange={e => { 
+                        // 💡 3. 強制轉為整數，避免字串相加或型別錯誤
+                        const val = parseInt(e.target.value) || 0;
+                        const next = deepClone(preLeaveData); 
+                        if(!next.dailyLimits) next.dailyLimits = {};
+                        if(!next.dailyLimits[currentMonth]) next.dailyLimits[currentMonth] = {}; 
+                        
+                        // 寫入該日期的特別名額
+                        next.dailyLimits[currentMonth][d.day] = val; 
+                        
+                        setPreLeaveData(next);
+                        // 💡 4. 關鍵：每次修改都要觸發雲端存檔，防止資料不同步或消失
+                        saveData({ preLeaveData: next }); 
+                      }}
+                      className={`w-full bg-transparent text-center font-bold text-teal-800 outline-none ${(!isAdmin || isMonthDrawn) ? 'cursor-not-allowed opacity-70' : 'cursor-text'}`}
+                    />
+                  </td>
+                );
+              })}
 </tr>
 <tr className="bg-blue-50 border-b">
 <td className="sticky left-0 z-40 bg-blue-50 border p-1 font-bold text-blue-600 text-[10px]">已預人數</td>
@@ -1393,12 +1404,6 @@ reader.readAsText(file);
 
 return (
 <div className="p-4 max-w-6xl mx-auto grid grid-cols-1 lg:grid-cols-12 gap-6 font-sans">
-      <button 
-        onClick={handleFullBackup}
-        className="bg-purple-600 text-white px-4 py-2 rounded-xl text-xs font-black shadow hover:bg-purple-700 transition-all"
-      >
-        下載完整備份 (JSON)
-      </button>
 <div className="lg:col-span-4 bg-white p-5 rounded-3xl shadow border h-fit">
 <h2 className="text-lg font-black mb-4 flex items-center gap-2 text-gray-800"><UserCog size={20}/> 人員管理</h2>
 <form className="space-y-3" onSubmit={(e) => {
@@ -2801,37 +2806,6 @@ const [showExitConfirm, setShowExitConfirm] = useState(false);
 const [targetPage, setTargetPage] = useState(null);
 const [preLeaveData, setPreLeaveData] = useState({apps: {},dailyLimits: {},remarks: {},weekendLimit: 10,weekdayLimit: 3,lotteryDay: 15,drawnMonths: []});
 const [isModalOpen, setIsModalOpen] = useState(false);
-
-const handleFullBackup = async () => {
-try {
-// 1. 抓取 roster 路徑下的所有文件 (包含 main 與各月份文件)
-const rosterRef = collection(db, 'artifacts/pharmacy-system-v1-8/public/data/roster');
-const querySnapshot = await getDocs(rosterRef);
-
-const backupData = {};
-querySnapshot.forEach((doc) => {
-backupData[doc.id] = doc.data();
-});
-
-// 2. 轉換成 JSON 字串
-const jsonString = JSON.stringify(backupData, null, 2);
-
-// 3. 建立下載連結
-const blob = new Blob([jsonString], { type: 'application/json' });
-const url = URL.createObjectURL(blob);
-const link = document.createElement('a');
-link.href = url;
-link.download = `pharmacy-backup-${new Date().toISOString().slice(0, 10)}.json`;
-document.body.appendChild(link);
-link.click();
-document.body.removeChild(link);
-
-alert("備份已成功下載！");
-} catch (error) {
-console.error("備份失敗:", error);
-alert("備份失敗，請檢查權限或連線。");
-}
-};
 
 const saveData = async (updates) => {
 if (!auth.currentUser) return;
