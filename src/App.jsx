@@ -1327,167 +1327,191 @@ message={confirmModal.action === 'Reject' ? "否決後該申請將失效，對�
 );
 };
 
-const AccountManagementView = ({ employees, setEmployees, setDeleteTarget }) => {
-const [formData, setFormData] = useState({ id: '', name: '', role: '1', labor: 'N', password: '' });
-const [editingId, setEditingId] = useState(null);
-const [draggedIdx, setDraggedIdx] = useState(null);
-const [dragOverIdx, setDragOverIdx] = useState(null);
-const importRef = useRef(null);
+import React, { useState, useRef } from 'react';
+import { UserCog, Upload, Download, GripVertical, Trash2 } from 'lucide-react'; // 💡 確保正確引入圖標
 
-const getRoleLabel = (role) => {
-const map = { '0': '管理員', '1': '一般藥師', '2': '書記', '3': '藥庫藥師' };
-return map[role] || '一般藥師';
+const AccountManagementView = ({ employees = [], setEmployees, setDeleteTarget, saveData }) => {
+  const [formData, setFormData] = useState({ id: '', name: '', role: '1', labor: 'N', password: '' });
+  const [editingId, setEditingId] = useState(null);
+  const [draggedIdx, setDraggedIdx] = useState(null);
+  const [dragOverIdx, setDragOverIdx] = useState(null);
+  const importRef = useRef(null);
+
+  const getRoleLabel = (role) => {
+    const map = { '0': '管理員', '1': '一般藥師', '2': '書記', '3': '藥庫藥師' };
+    return map[role] || '一般藥師';
+  };
+
+  const onDrop = (targetIdx) => {
+    if (draggedIdx === null) return;
+    const next = [...employees];
+    const item = next.splice(draggedIdx, 1)[0];
+    next.splice(targetIdx, 0, item);
+    setEmployees(next);
+    if (saveData) saveData({ employees: next });
+    setDraggedIdx(null);
+    setDragOverIdx(null);
+  };
+
+  const handleExport = () => {
+    let csv = "\ufeff員編,姓名,角色(0:管理1:藥師2:書記3:藥庫),適用勞基法(Y/N),密碼\n";
+    employees.filter(e => !e.isSeparator).forEach(emp => {
+      csv += `${emp.id},${emp.name},${emp.role},${emp.labor},${emp.password || ''}\n`;
+    });
+    const blob = new Blob([csv], { type: 'text/csv;charset=utf-8' });
+    const link = document.createElement("a");
+    link.href = URL.createObjectURL(blob);
+    link.download = `藥劑部人員名冊.csv`;
+    link.click();
+  };
+
+  const handleImport = (e) => {
+    const file = e.target.files[0];
+    if (!file) return;
+    const reader = new FileReader();
+    reader.onload = (ev) => {
+      const rows = ev.target.result.split(/\r?\n/).map(r => r.trim()).filter(Boolean).slice(1);
+      
+      let addedCount = 0;
+      let existingIds = new Set(employees.map(emp => emp.id));
+      let nextEmployees = [...employees];
+
+      rows.forEach(r => {
+        const [id, name, role, labor, pwd] = r.split(',');
+        if (id && name && !existingIds.has(id)) {
+          const isNC = (id === "E1" || id === "E2" || id === "E3" || name.includes("夜診"));
+          nextEmployees.push({ id, name, role: role || '1', labor: labor || 'N', password: pwd || "", isNightClinic: isNC });
+          existingIds.add(id);
+          addedCount++;
+        }
+      });
+
+      if (addedCount > 0) { 
+        setEmployees(nextEmployees); 
+        if (saveData) saveData({ employees: nextEmployees }); 
+        alert(`匯入完成！共新增 ${addedCount} 名新員工，已重複的員編已自動忽略。`); 
+      } else {
+        alert("匯入檔案中沒有新的人員資料。");
+      }
+    };
+    reader.readAsText(file);
+  };
+
+  return (
+    <div className="p-4 max-w-6xl mx-auto grid grid-cols-1 lg:grid-cols-12 gap-6 font-sans">
+      <div className="lg:col-span-4 bg-white p-5 rounded-3xl shadow border h-fit">
+        <h2 className="text-lg font-black mb-4 flex items-center gap-2 text-gray-800"><UserCog size={20}/> 人員管理</h2>
+        <form className="space-y-3" onSubmit={(e) => {
+          e.preventDefault();
+          let nextEmployees;
+          if (editingId) {
+            nextEmployees = employees.map(emp => emp.id === editingId ? formData : emp);
+            setEmployees(nextEmployees);
+            setEditingId(null);
+          } else {
+            const isDuplicate = employees.some(emp => emp.id === formData.id);
+            if (isDuplicate) {
+              alert("該員編已存在，系統已自動忽略。"); 
+              return;
+            } else {
+              nextEmployees = [...employees, formData];
+              setEmployees(nextEmployees);
+              alert("成功新增 1 名員工。");
+            }
+          }
+          
+          if (saveData && nextEmployees) {
+            saveData({ employees: nextEmployees });
+          }
+
+          setFormData({id: '', name: '', role: '1', labor: 'N', password: ''});
+        }}>
+          <div className="grid grid-cols-2 gap-2">
+            <input className="border p-2 rounded-xl text-sm font-mono outline-none" placeholder="員編" value={formData.id} onChange={e => setFormData({...formData, id: e.target.value})} disabled={!!editingId} />
+            <input className="border p-2 rounded-xl text-sm outline-none font-bold" placeholder="姓名" value={formData.name} onChange={e => setFormData({...formData, name: e.target.value})} />
+          </div>
+          <div className="grid grid-cols-1 gap-2">
+            <select className="border p-2 rounded-xl text-sm bg-white font-bold" value={formData.role} onChange={e => setFormData({...formData, role: e.target.value})}>
+              <option value="0">管理員 (0)</option>
+              <option value="1">一般藥師 (1)</option>
+              <option value="2">書記 (2)</option>
+              <option value="3">藥庫藥師 (3)</option>
+            </select>
+          </div>
+          <div className="grid grid-cols-1">
+            <select className="border p-2 rounded-xl text-sm bg-white font-bold" value={formData.labor} onChange={e => setFormData({...formData, labor: e.target.value})}>
+              <option value="Y">適用勞基法 (Y)</option>
+              <option value="N">不適用勞基法 (N)</option>
+            </select>
+          </div>
+          <input className="w-full border p-2 rounded-xl text-sm outline-none font-mono" placeholder="初始密碼/備註" value={formData.password} onChange={e => setFormData({...formData, password: e.target.value})} />
+          <button className={`w-full py-2 rounded-xl text-white font-bold shadow transition-all ${editingId ? 'bg-orange-500' : 'bg-blue-600'}`}>{editingId ? '更新帳號' : '新增帳號'}</button>
+          <hr className="my-2" />
+          <div className="grid grid-cols-2 gap-2">
+            <button type="button" onClick={() => importRef.current.click()} className="py-2 border rounded-xl text-xs font-black hover:bg-gray-50 flex items-center justify-center gap-1"><Upload size={14}/> 匯入名冊</button>
+            <input type="file" ref={importRef} className="hidden" accept=".csv" onChange={handleImport} />
+            <button type="button" onClick={handleExport} className="py-2 border rounded-xl text-xs font-black hover:bg-gray-50 flex items-center justify-center gap-1"><Download size={14}/> 匯出名冊</button>
+          </div>
+          <button type="button" onClick={() => {
+            const next = [...employees, { id: `SEP-${Date.now()}`, isSeparator: true }];
+            setEmployees(next);
+            if (saveData) saveData({ employees: next });
+          }} className="w-full mt-2 py-2 border-2 border-dashed rounded-xl text-[10px] font-black text-gray-400 hover:bg-gray-50 transition-all">插入分組分隔線</button>
+        </form>
+      </div>
+
+      <div className="lg:col-span-8 bg-white rounded-3xl shadow border flex flex-col h-[650px]"> 
+        <div className="flex-1 overflow-y-auto">
+          <table className="w-full text-sm border-collapse">
+          <thead className="bg-gray-50 border-b text-[10px] font-black uppercase text-gray-400 sticky top-0 z-10">
+            <tr>
+              <th className="p-4 w-10 bg-gray-50"></th>
+              <th className="p-4 text-left bg-gray-50">員編</th>
+              <th className="p-4 text-left bg-gray-50">姓名</th>
+              <th className="p-4 text-left bg-gray-50">角色</th>
+              <th className="p-4 text-right bg-gray-50">操作</th>
+            </tr>
+          </thead>
+            <tbody>
+              {Array.isArray(employees) && employees.map((emp, idx) => (
+                <tr 
+                  key={emp.id || idx} 
+                  draggable 
+                  onDragStart={() => setDraggedIdx(idx)} 
+                  onDragOver={e => { e.preventDefault(); setDragOverIdx(idx); }} 
+                  onDrop={() => onDrop(idx)} 
+                  className={`transition-all border-b last:border-0 group cursor-move ${emp.isSeparator ? 'bg-gray-100 h-[4px]' : 'hover:bg-blue-50'} ${dragOverIdx === idx ? 'border-t-4 border-t-blue-400' : ''}`}
+                >
+                  <td className="p-4 text-gray-300 group-hover:text-blue-500"><GripVertical size={16}/></td>
+                  {emp.isSeparator ? <td colSpan={3} className="p-4 italic text-[10px] text-gray-400">分組線</td> : (
+                    <>
+                      <td className="p-4 font-mono text-xs">{emp.id}</td>
+                      <td className="p-4 font-bold">{emp.name}</td>
+                      <td className="p-4">
+                        <span className={`px-2 py-0.5 rounded-full text-[10px] font-black ${emp.role === '0' ? 'bg-purple-100 text-purple-600' : emp.role === '1' ? 'bg-blue-100 text-blue-600' : 'bg-gray-100 text-gray-500'}`}>
+                          {getRoleLabel(emp.role)}
+                        </span>
+                      </td>
+                    </>
+                  )}
+                  <td className="p-4 text-right">
+                    {!emp.isSeparator && <button type="button" onClick={() => { setEditingId(emp.id); setFormData(emp); }} className="text-blue-500 text-xs font-black mr-4">編輯</button>}
+                    <button type="button" onClick={() => setDeleteTarget(emp)} className="text-red-400 hover:text-red-600 transition-all"><Trash2 size={16}/></button>
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+        <div className="p-3 bg-gray-50 border-t text-[10px] font-black text-gray-400 text-center rounded-b-3xl">
+          總計：{Array.isArray(employees) ? employees.filter(e => !e.isSeparator).length : 0} 位人員
+        </div>
+      </div>
+    </div>
+  );
 };
 
-const onDrop = (targetIdx) => {
-if (draggedIdx === null) return;
-const next = [...employees];
-const item = next.splice(draggedIdx, 1)[0];
-next.splice(targetIdx, 0, item);
-setEmployees(next);
-setDraggedIdx(null);
-setDragOverIdx(null);
-};
-
-const handleExport = () => {
-let csv = "\ufeff員編,姓名,角色(0:管理1:藥師2:書記3:藥庫),適用勞基法(Y/N),密碼\n";
-employees.filter(e => !e.isSeparator).forEach(emp => {
-csv += `${emp.id},${emp.name},${emp.role},${emp.labor},${emp.password || ''}\n`;
-});
-const blob = new Blob([csv], { type: 'text/csv;charset=utf-8' });
-const link = document.createElement("a");
-link.href = URL.createObjectURL(blob);
-link.download = `藥劑部人員名冊.csv`;
-link.click();
-};
-
-const handleImport = (e) => {
-const file = e.target.files[0];
-if (!file) return;
-const reader = new FileReader();
-reader.onload = (ev) => {
-const rows = ev.target.result.split(/\r?\n/).map(r => r.trim()).filter(Boolean).slice(1);
-
-let addedCount = 0;
-let existingIds = new Set(employees.map(emp => emp.id)); // 先取得目前所有員編
-let nextEmployees = [...employees];
-
-rows.forEach(r => {
-const [id, name, role, labor, pwd] = r.split(',');
-if (id && name && !existingIds.has(id)) {
-const isNC = (id === "E1" || id === "E2" || id === "E3" || name.includes("夜診"));
-nextEmployees.push({ id, name, role: role || '1', labor: labor || 'N', password: pwd || "", isNightClinic: isNC });
-existingIds.add(id); // 避免同一份 CSV 內有重複
-addedCount++;
-}
-});
-
-if (addedCount > 0) { 
-setEmployees(nextEmployees); 
-alert(`匯入完成！共新增 ${addedCount} 名新員工，已重複的員編已自動忽略。`); 
-} else {
-alert("匯入檔案中沒有新的人員資料。");
-}
-};
-reader.readAsText(file);
-};
-
-return (
-<div className="p-4 max-w-6xl mx-auto grid grid-cols-1 lg:grid-cols-12 gap-6 font-sans">
-<div className="lg:col-span-4 bg-white p-5 rounded-3xl shadow border h-fit">
-<h2 className="text-lg font-black mb-4 flex items-center gap-2 text-gray-800"><UserCog size={20}/> 人員管理</h2>
-<form className="space-y-3" onSubmit={(e) => {
-e.preventDefault();
-if (editingId) {setEmployees(employees.map(emp => emp.id === editingId ? formData : emp));setEditingId(null);
-} else {
-const isDuplicate = employees.some(emp => emp.id === formData.id);
-
-if (isDuplicate) {alert("該員編已存在，系統已自動忽略。"); 
-} else {setEmployees([...employees, formData]);alert("成功新增 1 名員工。");
-}
-}
-setFormData({id: '', name: '', role: '1', labor: 'N', password: ''});
-}}>
-<div className="grid grid-cols-2 gap-2">
-<input className="border p-2 rounded-xl text-sm font-mono outline-none" placeholder="員編" value={formData.id} onChange={e => setFormData({...formData, id: e.target.value})} disabled={!!editingId} />
-<input className="border p-2 rounded-xl text-sm outline-none font-bold" placeholder="姓名" value={formData.name} onChange={e => setFormData({...formData, name: e.target.value})} />
-</div>
-<div className="grid grid-cols-1 gap-2">
-<select className="border p-2 rounded-xl text-sm bg-white font-bold" value={formData.role} onChange={e => setFormData({...formData, role: e.target.value})}>
-<option value="0">管理員 (0)</option>
-<option value="1">一般藥師 (1)</option>
-<option value="2">書記 (2)</option>
-<option value="3">藥庫藥師 (3)</option>
-</select>
-</div>
-<div className="grid grid-cols-1">
-<select className="border p-2 rounded-xl text-sm bg-white font-bold" value={formData.labor} onChange={e => setFormData({...formData, labor: e.target.value})}>
-<option value="Y">適用勞基法 (Y)</option>
-<option value="N">不適用勞基法 (N)</option>
-</select>
-</div>
-<input className="w-full border p-2 rounded-xl text-sm outline-none font-mono" placeholder="初始密碼/備註" value={formData.password} onChange={e => setFormData({...formData, password: e.target.value})} />
-<button className={`w-full py-2 rounded-xl text-white font-bold shadow transition-all ${editingId ? 'bg-orange-500' : 'bg-blue-600'}`}>{editingId ? '更新帳號' : '新增帳號'}</button>
-<hr className="my-2" />
-<div className="grid grid-cols-2 gap-2">
-<button type="button" onClick={() => importRef.current.click()} className="py-2 border rounded-xl text-xs font-black hover:bg-gray-50 flex items-center justify-center gap-1"><Upload size={14}/> 匯入名冊</button>
-<input type="file" ref={importRef} className="hidden" accept=".csv" onChange={handleImport} />
-<button type="button" onClick={handleExport} className="py-2 border rounded-xl text-xs font-black hover:bg-gray-50 flex items-center justify-center gap-1"><Download size={14}/> 匯出名冊</button>
-</div>
-<button type="button" onClick={() => setEmployees([...employees, { id: `SEP-${Date.now()}`, isSeparator: true }])} className="w-full mt-2 py-2 border-2 border-dashed rounded-xl text-[10px] font-black text-gray-400 hover:bg-gray-50 transition-all">插入分組分隔線</button>
-</form>
-</div>
-<div className="lg:col-span-8 bg-white rounded-3xl shadow border flex flex-col h-[650px]"> 
-<div className="flex-1 overflow-y-auto"> {/* 💡 這是讓內容可以捲動的關鍵 */}
-<table className="w-full text-sm border-collapse">
-<thead className="bg-gray-50 border-b text-[10px] font-black uppercase text-gray-400 sticky top-0 z-10">
-<tr>
-<th className="p-4 w-10 bg-gray-50"></th>
-<th className="p-4 text-left bg-gray-50">員編</th>
-<th className="p-4 text-left bg-gray-50">姓名</th>
-<th className="p-4 text-left bg-gray-50">角色</th>
-<th className="p-4 text-right bg-gray-50">操作</th>
-</tr>
-</thead>
-<tbody>
-{employees.map((emp, idx) => (
-<tr 
-key={emp.id} 
-draggable 
-onDragStart={() => setDraggedIdx(idx)} 
-onDragOver={e => { e.preventDefault(); setDragOverIdx(idx); }} 
-onDrop={() => onDrop(idx)} 
-className={`transition-all border-b last:border-0 group cursor-move ${emp.isSeparator ? 'bg-gray-100 h-[4px]' : 'hover:bg-blue-50'} ${dragOverIdx === idx ? 'border-t-4 border-t-blue-400' : ''}`}
->
-<td className="p-4 text-gray-300 group-hover:text-blue-500"><GripVertical size={16}/></td>
-{emp.isSeparator ? <td colSpan={3} className="p-4 italic text-[10px] text-gray-400">分組線</td> : (
-<>
-<td className="p-4 font-mono text-xs">{emp.id}</td>
-<td className="p-4 font-bold">{emp.name}</td>
-<td className="p-4">
-<span className={`px-2 py-0.5 rounded-full text-[10px] font-black ${emp.role === '0' ? 'bg-purple-100 text-purple-600' : emp.role === '1' ? 'bg-blue-100 text-blue-600' : 'bg-gray-100 text-gray-500'}`}>
-{getRoleLabel(emp.role)}
-</span>
-</td>
-</>
-)}
-<td className="p-4 text-right">
-{!emp.isSeparator && <button onClick={() => { setEditingId(emp.id); setFormData(emp); }} className="text-blue-500 text-xs font-black mr-4">編輯</button>}
-<button onClick={() => setDeleteTarget(emp)} className="text-red-400 hover:text-red-600 transition-all"><Trash2 size={16}/></button>
-</td>
-</tr>
-))}
-</tbody>
-</table>
-</div>
-{/* 表格底部固定顯示統計 */}
-<div className="p-3 bg-gray-50 border-t text-[10px] font-black text-gray-400 text-center rounded-b-3xl">
-總計：{employees.filter(e => !e.isSeparator).length} 位人員
-</div>
-</div>
-</div>
-);
-};
+export default AccountManagementView;
 
 const ShiftsManagementView = ({ shifts, setShifts, holidays, setHolidays, setDeleteShiftTarget, personDayRules, setPersonDayRules }) => {
 const [formData, setFormData] = useState({ name: '', code: '', isRegular: 'N', regularDays: [] });
