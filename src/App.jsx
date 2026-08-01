@@ -1,16 +1,16 @@
 import React, { useState, useEffect, useMemo, useRef } from 'react';
 import { initializeApp } from 'firebase/app';
 import { getAuth, signInWithCustomToken, signInAnonymously, onAuthStateChanged } from 'firebase/auth';
-import { getFirestore, doc, setDoc, getDoc, onSnapshot, collection, query, updateDoc, deleteDoc } from 'firebase/firestore';
+import { getFirestore, doc, setDoc, getDoc, getDocs, onSnapshot, collection, query, updateDoc, deleteDoc, runTransaction, deleteField } from 'firebase/firestore';
 import {
   Home, UserCog, CalendarRange, ArrowLeftRight, Clock, LayoutGrid, Download, Upload, LogIn, LogOut,
   GripVertical, Plus, Trash2, Save, UserPlus, AlertCircle, Calendar as CalendarIcon, CheckCircle2,
   XCircle, Undo2, Redo2, Copy, FileText, SeparatorHorizontal, Info, ChevronLeft, ChevronRight, PaintBucket,
-  Eye, EyeOff, ShieldCheck, ShieldAlert, BarChart3, History, Search, Check, X, ClipboardList, MessageSquare, User, Circle, Settings, Dice5, Lock, TrendingUp, aCalculator
+  Eye, EyeOff, ShieldCheck, ShieldAlert, BarChart3, History, Search, Check, X, ClipboardList, MessageSquare, User, Circle, Settings, Dice5, Lock, TrendingUp, KeyRound as ResetPasswordIcon
 } from 'lucide-react';
 
 // --- 常數定義與初始資料 ---
-// 版本記錄：V1.8 - 深度重構連續換班校驗：僅校驗 Target 並相容 P#/P 變化
+// 版本記錄：V1.9 - 修正多人並發資料覆蓋問題、Firestore 依月份分文件儲存、員工自助改密碼
 const WEEKDAYS_MAP = ["日", "一", "二", "三", "四", "五", "六"];
 const PALETTE = [
   { name: '白', class: 'bg-white'},
@@ -71,7 +71,25 @@ const firebaseConfig = {
 const app = initializeApp(firebaseConfig);
 const auth = getAuth(app);
 const db = getFirestore(app);
-const appId = typeof __app_id !== 'undefined' ? __app_id : 'pharmacy-system-v1-8';
+// =====================================================================================
+// 💡 測試專用開關：
+//    - 留空字串 "" → 正式環境行為（optional __app_id 或固定 'pharmacy-system-v1-8'）
+//    - 填入例如 "pharmacy-system-TEST" → 不論在哪個環境測試，永遠固定使用這個路徑，
+//      跟正式資料(pharmacy-system-v1-8)完全隔開，也不會受測試平台隨機注入的 __app_id 影響，
+//      你可以直接去 Firebase Console 找 artifacts/pharmacy-system-TEST/... 這個固定路徑確認資料
+//    測試完成、準備上線前，記得改回空字串 "" 再推上 GitHub！
+// =====================================================================================
+const FORCE_APP_ID_FOR_TESTING = "pharmacy-system-test";
+
+const rawAppId = FORCE_APP_ID_FOR_TESTING || (typeof __app_id !== 'undefined' ? __app_id : 'pharmacy-system-v1-8');
+// 💡 修正：某些執行環境注入的 __app_id 本身可能帶有 "/" 或其他不能出現在 Firestore
+// 文件路徑中的字元（例如 "c_xxx_src/App.jsx-489"），若直接拿來當路徑片段，
+// Firestore 會把它誤判成多一層路徑，導致 "Invalid document reference... has 7" 之類的錯誤。
+// 這裡統一把危險字元換成底線，確保 appId 永遠只是「單一路徑片段」。
+const appId = rawAppId.replace(/[\/\s]+/g, '_');
+// 💡 方便除錯：打開瀏覽器 Console 就能立刻確認目前連到哪個路徑，
+// 若這裡顯示的不是你預期的 appId，代表資料寫到別的地方去了
+console.log('[藥劑部班表系統] 目前使用的 Firestore 資料路徑 appId =', appId);
 
 // --- 輔助函數 ---
 const cleanBundleData = (source) => {
@@ -313,34 +331,17 @@ const Header = ({ currentMonth, setCurrentMonth, currentPage, handlePageChange, 
       });
     }, [swapRequests, isLoggedIn, currentUser, isAdmin]);
 
-  // 💡 修正防線：控管全域月份切換，若在排班頁面編輯中，跳出警示
-  const handleMonthInputChange = (e) => {
-    const nextMonthVal = e.target.value;
-    if (!nextMonthVal) return;
-
-    if (currentPage === 'schedule' && isDirty) {
-      const confirmLeave = window.confirm("⚠️ 偵測到目前月份的班表已有編輯內容、尚未發佈！\n\n點擊「確定」將會放棄目前的修改並切換月份，點擊「取消」則留在原月份。");
-      if (!confirmLeave) return; // 使用者按取消，阻斷切換
-    }
-
-    // 💡 確定要切換月份：通知排班編輯器清空舊月份的鎖，並變更月份
-    if (typeof setEditSched === 'function') {
-      setEditSched({});
-    }
-    setCurrentMonth(nextMonthVal);
-  };
-
   return (
     <header className="bg-white border-b-2 border-gray-800 p-2 sm:p-3 sticky top-0 z-[100] shadow-md">
       <div className="max-w-full flex flex-col lg:flex-row lg:items-center justify-between gap-2">
         <div className="flex flex-wrap items-center gap-3">
-          <h1 className="text-xs font-black text-gray-800 border-r-2 border-gray-300 pr-4 leading-none cursor-pointer" onClick={() => handlePageChange('home')}>台大雲林藥劑部班表 <span className="text-[10px] text-gray-400 font-normal ml-1">V1.8</span></h1>
+          <h1 className="text-xs font-black text-gray-800 border-r-2 border-gray-300 pr-4 leading-none cursor-pointer" onClick={() => handlePageChange('home')}>台大雲林藥劑部班表 <span className="text-[10px] text-gray-400 font-normal ml-1">V1.9</span></h1>
           <div className="flex items-center gap-2">
             <input 
               type="month" 
               value={currentMonth} 
 
-              // 💡 修正點：利用妳原本就有的 currentPage 與 isDirty 進行防呆攔截
+              // 💡 利用 currentPage 與 isDirty 進行防呆攔截，避免排班編輯到一半被切走
               onChange={(e) => {
                 const nextMonthVal = e.target.value;
                 if (!nextMonthVal) return;
@@ -350,12 +351,16 @@ const Header = ({ currentMonth, setCurrentMonth, currentPage, handlePageChange, 
                   if (!confirmLeave) return; // 使用者按取消，直接阻斷月份切換
                 }
 
-                // 通過檢查，或是沒被更改過，直接切換月份
+                if (typeof setEditSched === 'function') setEditSched({});
                 setCurrentMonth(nextMonthVal);
               }} 
               className="border-2 border-gray-300 rounded px-1.5 py-0.5 text-xs font-bold focus:border-blue-500 outline-none" 
             />
-            {isLoggedIn && (<span className="text-[11px] font-black text-blue-600 bg-blue-50 px-2 py-0.5 rounded-lg border border-blue-100 flex items-center gap-1"><User size={12}/> 哈囉, {currentUser.name}</span>)}
+            {isLoggedIn && (
+              <span className="text-[11px] font-black text-blue-600 bg-blue-50 px-2 py-0.5 rounded-lg border border-blue-100 flex items-center gap-1">
+                <User size={12}/> 哈囉, {currentUser.name}
+              </span>
+            )}
           </div>
         </div>
         <div className="flex flex-wrap items-center gap-1">
@@ -375,7 +380,7 @@ const Header = ({ currentMonth, setCurrentMonth, currentPage, handlePageChange, 
               <NavButton id="report" label="管理報表" icon={BarChart3} colorClass="bg-emerald-200" active={currentPage==='report'} onClick={handlePageChange} />
             </>
           )}
-          <div className="ml-2 pl-2 border-l border-gray-300">
+          <div className="ml-2 pl-2 border-l border-gray-300 flex items-center gap-1">
             {!isLoggedIn ? <button onClick={() => handlePageChange('login')} className="bg-blue-600 text-white px-3 py-1 text-xs rounded font-bold hover:bg-blue-700 shadow transition">登入</button> : <button onClick={handleLogout} className="bg-gray-800 text-white px-2 py-1 text-xs rounded hover:bg-black flex items-center gap-1 shadow transition"><LogOut size={12}/> 登出</button>}
           </div>
         </div>
@@ -525,7 +530,7 @@ const ScheduleTableView = ({ currentMonth, employees, schedule, cellColors, days
   );
 };
 
- const PreLeaveView = ({ currentMonth, employees, daysInMonth, currentUser, schedule, setSchedule, preLeaveData, setPreLeaveData, saveData }) => {
+ const PreLeaveView = ({ currentMonth, employees, daysInMonth, currentUser, schedule, setSchedule, preLeaveData, setPreLeaveData, savePreLeaveMonth, saveMetaPreLeave, saveScheduleMonth }) => {
   const [defaultHolidayLimit, setDefaultHolidayLimit] = useState(10);
   const [defaultWeekdayLimit, setDefaultWeekdayLimit] = useState(3);
   const [lotteryDay, setLotteryDay] = useState(15);
@@ -533,7 +538,7 @@ const ScheduleTableView = ({ currentMonth, employees, schedule, cellColors, days
   const isMonthDrawn = (preLeaveData.drawnMonths || []).includes(currentMonth);
 
   // ========================================================
-  // 💡 完美修正：對齊「每月 X 號 00:00 抽出下個月預假結果」的月份邏輯
+  // 💡 對齊「每月 X 號 00:00 抽出下個月預假結果」的月份邏輯
   // ========================================================
   useEffect(() => {
     // 沒登入或還沒載入好預假資料就先不執行
@@ -546,26 +551,20 @@ const ScheduleTableView = ({ currentMonth, employees, schedule, cellColors, days
         // 1. 抽籤日綁定 preLeaveData.lotteryDay (例如：15)
         const targetDay = preLeaveData.lotteryDay || 15;
 
-        // 2. 💡 關鍵修正：currentMonth 是同仁當前畫面切換到、準備要抽籤的「目標月份」（例如 "2026-06"）
+        // 2. 💡 currentMonth 是同仁當前畫面切換到、準備要抽籤的「目標月份」（例如 "2026-06"）
         const [yearStr, monthStr] = currentMonth.split('-');
         const targetYear = parseInt(yearStr);
         const targetMonthNum = parseInt(monthStr); // 目標月份，例如 6
 
         // 3. 💡 往前推算「應該要執行抽籤的時間點」
-        // JS Date 的月份是 0~11 (0代表1月)。目標月份減 1 是它的 JS 月份，再減 1 就是「前一個月」
-        // 例如：目標 6 月 (JS 為 5)，計算出來的執行點就會精確落在 5 月的 targetDay 00:00:00
         const executionDate = new Date(targetYear, targetMonthNum - 2, targetDay, 0, 0, 0);
         const drawTimeTimestamp = executionDate.getTime();
 
         // 4. 核心判定：如果「該目標月份尚未抽籤(!isMonthDrawn)」且「目前時間已過設定的執行時間」
         if (!isMonthDrawn && now >= drawTimeTimestamp) {
           console.log(`⏰ 偵測到時間已過截止點 (${executionDate.toLocaleString()})，系統自動為 ${currentMonth} 月份執行預假抽籤...`);
-
-          // 5. 完美呼叫組件內原本就有的 handleLottery 函數
-          if (typeof handleLottery === 'function') {
-            await handleLottery({ isAuto: true });
-            console.log(`🎉 ${currentMonth} 月份自動抽籤執行並存檔成功！`);
-          }
+          await handleLottery({ isAuto: true });
+          console.log(`🎉 ${currentMonth} 月份自動抽籤執行並存檔成功！`);
         }
       } catch (error) {
         console.error("自動抽籤月份邏輯計算或執行失敗：", error);
@@ -592,7 +591,8 @@ const ScheduleTableView = ({ currentMonth, employees, schedule, cellColors, days
 
     if (changed) {
       setPreLeaveData(next);
-      saveData({ preLeaveData: next }); 
+      // 💡 修正：只存「這個月」的 apps 資料，不再整包月份物件覆寫，避免互相蓋掉其他月份
+      savePreLeaveMonth(currentMonth, { apps: next.apps[currentMonth] });
     }
   }, [currentMonth, schedule]);
 
@@ -607,7 +607,7 @@ const ScheduleTableView = ({ currentMonth, employees, schedule, cellColors, days
     if (!next.apps[currentMonth][empName]) next.apps[currentMonth][empName] = {};
     next.apps[currentMonth][empName][day] = next.apps[currentMonth][empName][day] === "預假" ? null : "預假";
     setPreLeaveData(next);
-    saveData({ preLeaveData: next }); 
+    savePreLeaveMonth(currentMonth, { apps: next.apps[currentMonth] });
   };
 
   const getLeaveList = (day) => {
@@ -637,15 +637,18 @@ const ScheduleTableView = ({ currentMonth, employees, schedule, cellColors, days
   };
 
   const handleAdminSettingChange = (type, value) => {
-  if (!isAdmin) return;
-  const next = deepClone(preLeaveData);
-  if (type === 'holiday') next.weekendLimit = value;
-  else if (type === 'weekday') next.weekdayLimit = value;
-  else if (type === 'lotteryDay') next.lotteryDay = value; setPreLeaveData(next);saveData({ preLeaveData: next }); 
+    if (!isAdmin) return;
+    const next = deepClone(preLeaveData);
+    if (type === 'holiday') next.weekendLimit = value;
+    else if (type === 'weekday') next.weekdayLimit = value;
+    else if (type === 'lotteryDay') next.lotteryDay = value;
+    setPreLeaveData(next);
+    // 💡 修正：這些是「全域設定」（不分月份），存到 meta 文件，不要跟著整包月份資料一起覆寫
+    saveMetaPreLeave({ weekendLimit: next.weekendLimit, weekdayLimit: next.weekdayLimit, lotteryDay: next.lotteryDay });
   };
 
 
-  // 💡 修正後：安全防白屏、支援手動與自動抽籤的 handleLottery
+  // 💡 安全防白屏、支援手動與自動抽籤的 handleLottery
   const handleLottery = async (e) => {
     if (isMonthDrawn) return;
 
@@ -658,31 +661,30 @@ const ScheduleTableView = ({ currentMonth, employees, schedule, cellColors, days
       if (!confirmDraw) return;
     }
 
-    const nextSched = deepClone(schedule);
-    if (!nextSched[currentMonth]) nextSched[currentMonth] = {};
+    const nextMonthSched = { ...(schedule[currentMonth] || {}) };
 
     daysInMonth.forEach(d => {
       const candidates = getLeaveList(d.day);
       const limit = parseInt(preLeaveData.dailyLimits?.[currentMonth]?.[d.day] || (d.rawDay === 0 || d.rawDay === 6 || d.holiday ? defaultHolidayLimit : defaultWeekdayLimit));
       const winners = [...candidates].sort(() => 0.5 - Math.random()).slice(0, limit);
       winners.forEach(name => {
-        if (!nextSched[currentMonth][name]) nextSched[currentMonth][name] = {};
-        nextSched[currentMonth][name][d.day] = "休"; 
+        if (!nextMonthSched[name]) nextMonthSched[name] = {};
+        nextMonthSched[name][d.day] = "休"; 
       });
     });
 
-    const nextPreLeave = {
-      ...preLeaveData,
-      drawnMonths: [...(preLeaveData.drawnMonths || []), currentMonth]
-    };
+    const nextSchedule = { ...schedule, [currentMonth]: nextMonthSched };
+    const nextDrawnMonths = [...(preLeaveData.drawnMonths || []), currentMonth];
+    const nextPreLeave = { ...preLeaveData, drawnMonths: nextDrawnMonths };
 
-    setSchedule(nextSched);
+    setSchedule(nextSchedule);
     setPreLeaveData(nextPreLeave);
 
-    // 💡 加上 await 確保安全存檔完畢
-    await saveData({ schedule: nextSched, preLeaveData: nextPreLeave });
+    // 💡 修正：只把「當月」的 schedule 存到該月份文件；drawnMonths 是全域清單，存到 meta
+    await saveScheduleMonth(currentMonth, { schedule: nextMonthSched });
+    await saveMetaPreLeave({ drawnMonths: nextDrawnMonths });
 
-    // 2️⃣ 🔥 關鍵修正點：只有在「手動按下按鈕(!isAuto)」時，才允許執行彈窗提示！
+    // 2️⃣ 只有在「手動按下按鈕(!isAuto)」時，才允許執行彈窗提示！
     if (!isAuto) {
       setTimeout(() => {
         alert(`${currentMonth} 手動抽籤完成！結果已同步至班表。`);
@@ -722,7 +724,7 @@ const ScheduleTableView = ({ currentMonth, employees, schedule, cellColors, days
                   if(!next.remarks[currentMonth]) next.remarks[currentMonth] = {}; 
                   next.remarks[currentMonth][d.day] = e.target.value;   
                   setPreLeaveData(next);
-                  saveData({ preLeaveData: next }); 
+                  savePreLeaveMonth(currentMonth, { remarks: next.remarks[currentMonth] });
                 }}
               className={`w-full bg-transparent text-[11px] font-bold text-purple-600 text-center outline-none resize-none overflow-hidden block ${(!isAdmin || isMonthDrawn) ? 'cursor-not-allowed opacity-70' : 'cursor-text'}`}
               style={{ fieldSizing: 'content', minHeight: '1.5em' }}
@@ -732,22 +734,12 @@ const ScheduleTableView = ({ currentMonth, employees, schedule, cellColors, days
             </tr>
             <tr className="bg-[#E0F2F1] border-b">
               <td className="sticky left-0 z-40 bg-[#E0F2F1] border p-1 font-bold text-teal-700 text-[10px]">可休人數</td>
-              {daysInMonth.map(d => (
-                <td key={d.day} className={`border p-1 font-bold text-teal-800 ${isCycleEnd(d.fullDate) ? 'border-r-4 border-r-gray-400' : ''}`}>
-                  <input 
-                    type="text" 
-                    value={preLeaveData.dailyLimits?.[currentMonth]?.[d.day] || (d.rawDay === 0 || d.rawDay === 6 || d.holiday ? preLeaveData.weekendLimit : preLeaveData.weekdayLimit)} 
-                    onChange={e => { const next = deepClone(preLeaveData);  if(!next.dailyLimits) next.dailyLimits = {};if(!next.dailyLimits[currentMonth]) next.dailyLimits[currentMonth] = {};  next.dailyLimits[currentMonth][d.day] = e.target.value; setPreLeaveData(next);}}
-                    className={`w-full bg-transparent text-center font-bold text-teal-800 outline-none ${(!isAdmin || isMonthDrawn) ? 'cursor-not-allowed' : ''}`}
-                  />
-                </td>
-              ))}
               {daysInMonth.map(d => {
-                // 💡 1. 嚴謹判斷：只有當該天明確有被設定過（且不是 undefined/null），才讀取個別設定
+                // 💡 嚴謹判斷：只有當該天明確有被設定過（且不是 undefined/null），才讀取個別設定
                 const hasDailyLimit = preLeaveData.dailyLimits?.[currentMonth]?.[d.day] !== undefined && 
                                        preLeaveData.dailyLimits?.[currentMonth]?.[d.day] !== null;
                 
-                // 💡 2. 使用 ?? 確保 0 也能被正確顯示，不會被誤判為 false
+                // 💡 使用 ?? 確保 0 也能被正確顯示，不會被誤判為 false
                 const displayValue = hasDailyLimit 
                   ? preLeaveData.dailyLimits[currentMonth][d.day] 
                   : (d.rawDay === 0 || d.rawDay === 6 || d.holiday ? (preLeaveData.weekendLimit ?? 10) : (preLeaveData.weekdayLimit ?? 3));
@@ -759,7 +751,7 @@ const ScheduleTableView = ({ currentMonth, employees, schedule, cellColors, days
                       value={displayValue} 
                       disabled={!isAdmin || isMonthDrawn}
                       onChange={e => { 
-                        // 💡 3. 強制轉為整數，避免字串相加或型別錯誤
+                        // 💡 強制轉為整數，避免字串相加或型別錯誤
                         const val = parseInt(e.target.value) || 0;
                         const next = deepClone(preLeaveData); 
                         if(!next.dailyLimits) next.dailyLimits = {};
@@ -769,8 +761,8 @@ const ScheduleTableView = ({ currentMonth, employees, schedule, cellColors, days
                         next.dailyLimits[currentMonth][d.day] = val; 
                         
                         setPreLeaveData(next);
-                        // 💡 4. 關鍵：每次修改都要觸發雲端存檔，防止資料不同步或消失
-                        saveData({ preLeaveData: next }); 
+                        // 💡 修正：只存這個月的 dailyLimits，避免整包覆寫
+                        savePreLeaveMonth(currentMonth, { dailyLimits: next.dailyLimits[currentMonth] });
                       }}
                       className={`w-full bg-transparent text-center font-bold text-teal-800 outline-none ${(!isAdmin || isMonthDrawn) ? 'cursor-not-allowed opacity-70' : 'cursor-text'}`}
                     />
@@ -813,7 +805,7 @@ const ScheduleTableView = ({ currentMonth, employees, schedule, cellColors, days
                       <div className="flex flex-col items-center justify-center h-full">
                         {isFixed ? <span className="text-gray-500 font-bold opacity-60 text-xs">{sVal}</span> :
                          isWinner ? <span className="text-green-800 font-black text-[13px] bg-green-50 px-1 rounded">休</span> :
-                         /* 💡 修正後：只有在『已完成抽籤(isMonthDrawn)』且『沒抽中』時才顯示『預假(未中)』；抽籤前一律顯示原本乾淨的『預假』 */
+                         /* 💡 只有在『已完成抽籤』且『沒抽中』時才顯示『預假(未中)』；抽籤前一律顯示乾淨的『預假』 */
                          isApplied ? (
                            isMonthDrawn ? (
                              <span className="text-orange-600/70 font-bold text-[10px] bg-orange-50/60 px-1 rounded border border-dashed border-orange-200">預假(未中)</span>
@@ -830,7 +822,6 @@ const ScheduleTableView = ({ currentMonth, employees, schedule, cellColors, days
           </tbody>
           <tfoot className="bg-white border-t-2 shadow-[0_-2px_5px_rgba(0,0,0,0.05)]">
             <tr className="bg-white border-b">
-              {/* 💡 修正後：完全拿掉僅供對照提示，100% 回歸妳原本最乾淨的「預假名單」標題 */}
               <td className="sticky left-0 z-40 bg-white border p-1 font-bold text-gray-400 text-[10px]">預假名單</td>
               {daysInMonth.map(d => {
                 const list = getLeaveList(d.day);
@@ -840,7 +831,6 @@ const ScheduleTableView = ({ currentMonth, employees, schedule, cellColors, days
                       {list.map((name, i) => {
                         const isWinner = schedule[currentMonth]?.[name]?.[d.day] === "休";
                         return (
-                          /* 💡 修正後：抽籤前，大家的名字都是原本美麗的藍字白底。抽籤後，沒中的人才會優雅地變成灰字刪除線，對照超直覺！ */
                           <div key={i} className={`text-[9px] font-black text-center leading-none truncate border rounded py-1 shadow-sm ${
                             isWinner 
                               ? 'bg-green-700 text-white border-green-800' 
@@ -860,14 +850,14 @@ const ScheduleTableView = ({ currentMonth, employees, schedule, cellColors, days
       </div>
 
       <div className="border-t bg-gray-50 shadow-inner relative">
-        {/* 1. 抽籤鎖定提示 (保留原本的絕對定位樣式) */}
+        {/* 1. 抽籤鎖定提示 */}
         {isMonthDrawn && (
           <div className="absolute top-[-20px] left-1/2 transform -translate-x-1/2 bg-red-600 text-white px-6 py-1 rounded-t-xl font-black text-xs shadow-lg flex items-center gap-2 z-10 whitespace-nowrap">
             <Lock size={14}/> 本月已抽籤完畢，功能已鎖定
           </div>
         )}
 
-        {/* 2. 標題列：點擊展開/收合 (加入折疊邏輯) */}
+        {/* 2. 標題列：點擊展開/收合 */}
         <div 
           className="p-3 flex items-center justify-between cursor-pointer hover:bg-gray-100 transition-colors"
           onClick={() => setIsRulesExpanded(!isRulesExpanded)}
@@ -881,11 +871,10 @@ const ScheduleTableView = ({ currentMonth, employees, schedule, cellColors, days
           </span>
         </div>
 
-        {/* 3. 展開內容區 (包含原本所有 Input 與按鈕) */}
+        {/* 3. 展開內容區 */}
         {isRulesExpanded && (
           <div className="p-3 pt-0 border-t border-gray-200 bg-white">
             <div className="flex flex-wrap gap-2 mt-3">
-              {/* 輸入框群組 */}
               <div className="flex-1 flex gap-2">
                 <div className="flex-1 bg-gray-50 p-2 rounded-lg border border-gray-200">
                   <div className="text-[9px] font-black text-gray-400 mb-1">假日名額</div>
@@ -901,7 +890,6 @@ const ScheduleTableView = ({ currentMonth, employees, schedule, cellColors, days
                 </div>
               </div>
 
-              {/* 操作按鈕群組 */}
               <div className="flex w-full gap-2 mt-1">
                 {!isMonthDrawn && isAdmin && (
                   <button onClick={handleLottery} className="flex-1 py-2 bg-red-500 text-white rounded-lg text-xs font-black shadow-sm active:scale-95 transition-transform">
@@ -928,42 +916,33 @@ const RecordsView = ({ currentUser, swapRequests, onAction, onApprove, setReject
   const [confirmModal, setConfirmModal] = useState({ isOpen: false, req: null, action: '' });
   const isAdmin = currentUser?.role === '0';
 
-// 💡 補在這邊：安全的時間格式化工具，防止出現 Invalid Date
-// 💡 終極相容版：徹底掃描物件中所有可能的時間欄位
   const formatSafeDate = (req) => {
     if (!req) return "未知時間";
 
-    // 1. 自動偵測物件中所有可能存放時間的變數名稱（相容各種大小寫與拼法）
     const ts = req.timestamp || 
                req.timeStamp || 
                req.time || 
                req.createdAt || 
-               req.date; // 萬一時間被存在 date 欄位
+               req.date;
 
     if (!ts) {
-      // 2. 防呆：如果第一層沒找到，直接看看 req 物件有沒有內建 toDate 屬性 (Firebase 原生)
       if (typeof req.toDate === 'function') return req.toDate().toLocaleString();
       return "未知時間";
     }
 
-    // 情況 A：如果是數字 (毫秒數，如 Date.now())
     if (typeof ts === 'number') return new Date(ts).toLocaleString();
 
-    // 情況 B：如果是 Firebase Timestamp 物件 (含有 seconds 屬性)
     if (typeof ts === 'object' && ts.seconds) {
       return new Date(ts.seconds * 1000).toLocaleString();
     }
 
-    // 情況 C：如果是 Firestore 原生帶有 toDate 函式的物件
     if (typeof ts === 'object' && typeof ts.toDate === 'function') {
       return ts.toDate().toLocaleString();
     }
 
-    // 情況 D：如果是常規時間字串 (如 "2026-05-15T14:20:00")
     const parsed = new Date(ts);
     if (!isNaN(parsed.getTime())) return parsed.toLocaleString();
 
-    // 情況 E：萬一原本存進去的就是已經格式化好的中文字串 (如 "2026/5/15 下午 9:56:23")
     if (typeof ts === 'string' && ts.trim() !== "") return ts;
 
     return "未知時間";
@@ -971,39 +950,30 @@ const RecordsView = ({ currentUser, swapRequests, onAction, onApprove, setReject
 
   const pendingList = useMemo(() => {
       return swapRequests.filter(req => {
-        // 判斷是否已結案 (過濾掉已核定、否決或撤回的)
         const isClosed = req.status === 'Approved' || req.status === 'Rejected' || req.status === 'Deleted';
         if (isClosed) return false;
 
-        // 判斷我是否為參與者 (包含發起人、被申請人、及參與名單內所有人)
         const isParticipant = 
           req.creatorId === currentUser.id || 
           req.targetId === currentUser.id || 
           (req.participants && req.participants.some(p => p.id === currentUser.id));
 
         if (isAdmin) {
-          // 主管看到的待處理：
-          // A. 與自己有關的換班
-          // B. 狀態為 'PendingAdmin' (代表同仁簽完了，輪到主管核定)
           return isParticipant || req.status === 'PendingAdmin';
         }
 
-        // 一般同仁看到的待處理：只要跟我有關就顯示
         return isParticipant;
       }).sort((a, b) => a.timestamp - b.timestamp);
     }, [swapRequests, isAdmin, currentUser]);  
 
     const historyList = useMemo(() => {
         return swapRequests.filter(req => {
-          // 判斷是否為結案狀態
           const isClosed = req.status === 'Approved' || req.status === 'Rejected' || req.status === 'Deleted';
           if (!isClosed) return false;
 
-          // 判斷日期範圍
           const isInRange = req.date >= dateRange.start && req.date <= dateRange.end;
           if (!isInRange) return false;
 
-          // 判斷權限：主管看全部，同仁只看與自己有關的
           const isParticipant = 
             req.creatorId === currentUser.id || 
             req.targetId === currentUser.id || 
@@ -1037,7 +1007,6 @@ const RecordsView = ({ currentUser, swapRequests, onAction, onApprove, setReject
   const StatusProgress = ({ req }) => {
     const isRejected = req.status === 'Rejected';
 
-    // 💡 邏輯修正：定義各階段是否打勾
     const isStep2Completed = req.status === 'PendingAdmin' || req.status === 'Approved' || (isRejected && !req.adminNote);
     const isStep3Completed = req.status === 'Approved' || (isRejected && req.adminNote);
 
@@ -1046,7 +1015,6 @@ const RecordsView = ({ currentUser, swapRequests, onAction, onApprove, setReject
       { 
         id: '2', 
         label: '同仁核定', 
-        // 💡 修正：只有當狀態不再是 WaitingParticipants，且不是初始狀態時才打勾
         active: isStep2Completed, 
         color: (isRejected && !req.adminNote) ? 'bg-red-500' : 'bg-green-500' 
       },
@@ -1093,18 +1061,14 @@ const RecordsView = ({ currentUser, swapRequests, onAction, onApprove, setReject
           <h3 className="text-xs font-black text-indigo-400 border-l-4 border-indigo-400 pl-2 uppercase tracking-widest">待處理流程 ({pendingList.length})</h3>
           {pendingList.length === 0 ? <div className="bg-white p-10 rounded-2xl border border-dashed text-center text-gray-300 italic font-bold">目前無待核定資料</div> :
             pendingList.map(req => {
-              // 核心修正：不要直接用全域的 currentMonth，要抓取該筆申請資料的月份
               const reqMonthKey = req.date ? req.date.substring(0, 7) : currentMonth;
               const checkDays = req.isBundle ? req.daysToSwap : [req.day];
 
               const isShiftMismatched = checkDays.some(d => {
-                // 💡 關鍵修正：判斷 d 是完整字串 (新格式) 還是純數字/舊格式
-                // 如果是新格式 "YYYY-MM-DD"，動態切出正確的月份與純數字日期
                 const isFullDate = String(d).includes('-');
                 const targetMonth = isFullDate ? d.substring(0, 7) : reqMonthKey;
                 const dayKey = isFullDate ? Number(d.split('-')[2]) : d;
 
-                // 這裡改用動態的 targetMonth 與 dayKey，確保跨月與純數字結構能精準對上
                 const rawCurTarget = schedule[targetMonth]?.[req.targetName]?.[dayKey];
 
                 const normalize = (v) => {
@@ -1119,7 +1083,6 @@ const RecordsView = ({ currentUser, swapRequests, onAction, onApprove, setReject
 
               return (
                 <div key={req.id} className="bg-white p-5 rounded-3xl shadow-sm border border-l-8 border-l-indigo-400 space-y-4">
-                  {/* 標題與時間 */}
                   <div className="flex justify-between items-start">
                     <div className="flex items-center gap-2">
                       <span className="font-black text-indigo-600 text-lg">{req.isBundle ? `${req.startDate}~${req.endDate}` : req.date}</span>
@@ -1128,20 +1091,16 @@ const RecordsView = ({ currentUser, swapRequests, onAction, onApprove, setReject
                   <span className="text-[10px] text-gray-400 font-bold bg-gray-50 px-2 py-1 rounded-lg">🕒 {formatSafeDate(req)}</span>
                   </div>
 
-                  {/* 核心修正：多人連鎖明細區 (對應需求 4) */}
                   <div className="bg-indigo-50/50 p-4 rounded-2xl border border-indigo-100/50 space-y-3">
                     <div className="text-[11px] font-black text-indigo-800 flex items-center gap-1 opacity-70 uppercase tracking-widest">
                       <ArrowLeftRight size={12} /> 參與同仁與班別更動：
                     </div>
 
                     <div className="grid grid-cols-1 gap-2">
-                      {/* 如果有 participants 陣列就跑迴圈，沒有就顯示原本的 A ⇄ B (相容舊資料) */}
                       {req.participants ? (
                         req.participants.map((p, idx) => {
                           const nextP = req.participants[(idx + 1) % req.participants.length];
 
-                          // 💡 邏輯新增：判斷簽核狀態
-                          // 發起人 (creatorId) 不需要簽核，其他人的狀態從 req.approvals 找
                           const isCreator = p.id === req.creatorId;
                           const approval = req.approvals?.find(a => a.id === p.id);
 
@@ -1153,7 +1112,6 @@ const RecordsView = ({ currentUser, swapRequests, onAction, onApprove, setReject
                                   <div className="flex items-center gap-1.5">
                                     <span className="font-black text-sm text-gray-700">{p.name}</span>
 
-                                    {/* 💡 狀態圖示：讓大家知道誰還沒簽 */}
                                     {isCreator ? (
                                       <span className="text-[10px] bg-blue-100 text-blue-600 px-1.5 py-0.5 rounded-md font-bold italic">發起</span>
                                     ) : (
@@ -1167,7 +1125,6 @@ const RecordsView = ({ currentUser, swapRequests, onAction, onApprove, setReject
                                 </div>
                               </div>
 
-                              {/* 原有換班資訊留存 */}
                               <div className="flex items-center gap-2">
                                 <span className="text-gray-400 text-xs font-bold">({p.oldShift})</span>
                                 <span className="text-indigo-400 text-xs">→</span>
@@ -1179,7 +1136,6 @@ const RecordsView = ({ currentUser, swapRequests, onAction, onApprove, setReject
                           );
                         })
                       ) : (
-                        /* 原有舊資料相容邏輯留存 */
                         <div className="flex items-center justify-between bg-white px-3 py-2.5 rounded-xl shadow-sm">
                           <span className="font-black text-sm">{req.creatorName} ⇄ {req.targetName}</span>
                           <span className="text-xs text-indigo-600 font-bold">({req.creatorShift} ⇄ {req.targetShift})</span>
@@ -1188,14 +1144,11 @@ const RecordsView = ({ currentUser, swapRequests, onAction, onApprove, setReject
                     </div>
                   </div>
 
-                  {/* 進度條與按鈕 (這部分維持您原本的邏輯，但版面稍微優化) */}
                   <div className="flex flex-col sm:flex-row justify-between items-end sm:items-center gap-4 pt-2 border-t border-gray-50">
                     <StatusProgress req={req}/>
 
-                    {/* 💡 修改點：這是位於 RecordsView 內部的操作按鈕區塊 */}
                   <div className="flex flex-wrap gap-2 pt-2 border-t border-dashed border-gray-100 w-full">
 
-                    {/* 情況 A：參與者操作 (同仁簽核) */}
                     {req.status === 'WaitingParticipants' && 
                     req.participants?.some(p => p.id === currentUser.id) && 
                     req.creatorId !== currentUser.id &&
@@ -1217,7 +1170,6 @@ const RecordsView = ({ currentUser, swapRequests, onAction, onApprove, setReject
                       </div>
                     )}
 
-                    {/* 情況 B：發起人撤回 */}
                     {req.creatorId === currentUser.id && (req.status === 'WaitingParticipants' || req.status === 'PendingAdmin') && (
                       <button
                         onClick={() => triggerAction(req, 'Delete')}
@@ -1227,7 +1179,6 @@ const RecordsView = ({ currentUser, swapRequests, onAction, onApprove, setReject
                       </button>
                     )}
 
-                    {/* 情況 C：管理員(組長)核定 */}
                     {isAdmin && req.status === 'PendingAdmin' && (
                       <div className="flex flex-row flex-wrap gap-2 w-full">
                         <button
@@ -1247,7 +1198,6 @@ const RecordsView = ({ currentUser, swapRequests, onAction, onApprove, setReject
                   </div>
                   </div>
 
-                  {/* 班別失效警示 */}
                   {isShiftMismatched && (
                     <div className="mt-2 text-[10px] bg-red-50 text-red-600 p-3 rounded-2xl font-black border border-red-100 flex items-center gap-2 animate-pulse">
                       <AlertCircle size={16}/> 警告：系統偵測到原始班別已更動，請再次確認！
@@ -1284,11 +1234,9 @@ const RecordsView = ({ currentUser, swapRequests, onAction, onApprove, setReject
                         {req.participants ? (
                           <div className="flex flex-col gap-0.5">
                             <div className="text-blue-700">
-                              {/* 需求 4：顯示所有參與者的路徑 */}
                               {req.participants.map(p => p.name).join(' → ')}
                             </div>
                             <div className="text-[10px] text-gray-400 font-normal">
-                              {/* 顯示詳細班別變動 */}
                               {req.participants.map((p, idx) => {
                                 const nextP = req.participants[(idx + 1) % req.participants.length];
                                 return `${p.name}(${p.oldShift}→${nextP.oldShift})`;
@@ -1296,7 +1244,6 @@ const RecordsView = ({ currentUser, swapRequests, onAction, onApprove, setReject
                             </div>
                           </div>
                         ) : (
-                          // 相容舊有的兩位人員換班資料
                           `${req.creatorName}(${req.creatorShift}) ⇄ ${req.targetName}(${req.targetShift})`
                         )}
                       </td>
@@ -1306,7 +1253,6 @@ const RecordsView = ({ currentUser, swapRequests, onAction, onApprove, setReject
                             {req.status==='Approved'?'已完成':req.status==='Rejected'?'已否決':'已撤回'}
                           </span>
 
-                          {/* 💡 新增：若有否決原因，顯示極簡點擊展開查看 */}
                           {req.status === 'Rejected' && req.adminNote && (
                             <details className="text-[10px] text-left max-w-[150px] cursor-pointer mt-1">
                               <summary className="text-gray-400 font-bold hover:text-red-500 transition-colors select-none">查看原因</summary>
@@ -1337,24 +1283,38 @@ const RecordsView = ({ currentUser, swapRequests, onAction, onApprove, setReject
   );
 };
 
-const AccountManagementView = ({ employees, setEmployees, setDeleteTarget }) => {
+const AccountManagementView = ({ employees, updateEmployees, setDeleteTarget, onExportFullBackup, onImportFullBackup }) => {
   const [formData, setFormData] = useState({ id: '', name: '', role: '1', labor: 'N', password: '' });
   const [editingId, setEditingId] = useState(null);
   const [draggedIdx, setDraggedIdx] = useState(null);
   const [dragOverIdx, setDragOverIdx] = useState(null);
   const importRef = useRef(null);
+  const backupRef = useRef(null);
 
   const getRoleLabel = (role) => {
     const map = { '0': '管理員', '1': '一般藥師', '2': '書記', '3': '藥庫藥師' };
     return map[role] || '一般藥師';
   };
 
+  // 💡 修正核心：拖曳排序不再直接覆寫本地陣列，而是透過 Firestore transaction
+  // 以「雲端最新資料」為基礎進行操作，避免跟其他人同時編輯時互相蓋掉
   const onDrop = (targetIdx) => {
     if (draggedIdx === null) return;
-    const next = [...employees];
-    const item = next.splice(draggedIdx, 1)[0];
-    next.splice(targetIdx, 0, item);
-    setEmployees(next);
+    const fromIdx = draggedIdx;
+    updateEmployees(latest => {
+      // 用「目前畫面上的順序(本地 employees)」對照「雲端最新清單」做順序重排
+      // 因為排序是視覺操作，用本地順序去重排雲端最新資料是最直覺的方式
+      const localOrderIds = employees.map(e => e.id);
+      const latestById = new Map(latest.map(e => [e.id, e]));
+      // 以本地順序為主排序，若雲端有本地沒有的新資料(代表別人剛新增)，一律補在最後面
+      const ordered = localOrderIds.filter(id => latestById.has(id)).map(id => latestById.get(id));
+      latest.forEach(e => { if (!localOrderIds.includes(e.id)) ordered.push(e); });
+
+      const next = [...ordered];
+      const item = next.splice(fromIdx, 1)[0];
+      next.splice(targetIdx, 0, item);
+      return next;
+    });
     setDraggedIdx(null);
     setDragOverIdx(null);
   };
@@ -1371,36 +1331,39 @@ const AccountManagementView = ({ employees, setEmployees, setDeleteTarget }) => 
     link.click();
   };
 
-const handleImport = (e) => {
-  const file = e.target.files[0];
-  if (!file) return;
-  const reader = new FileReader();
-  reader.onload = (ev) => {
-    const rows = ev.target.result.split(/\r?\n/).map(r => r.trim()).filter(Boolean).slice(1);
+  const handleImport = (e) => {
+    const file = e.target.files[0];
+    if (!file) return;
+    const reader = new FileReader();
+    reader.onload = (ev) => {
+      const rows = ev.target.result.split(/\r?\n/).map(r => r.trim()).filter(Boolean).slice(1);
+      const parsedRows = rows.map(r => {
+        const [id, name, role, labor, pwd] = r.split(',');
+        return { id, name, role, labor, pwd };
+      }).filter(r => r.id && r.name);
 
-    let addedCount = 0;
-    let existingIds = new Set(employees.map(emp => emp.id)); // 先取得目前所有員編
-    let nextEmployees = [...employees];
-
-    rows.forEach(r => {
-      const [id, name, role, labor, pwd] = r.split(',');
-      if (id && name && !existingIds.has(id)) {
-        const isNC = (id === "E1" || id === "E2" || id === "E3" || name.includes("夜診"));
-        nextEmployees.push({ id, name, role: role || '1', labor: labor || 'N', password: pwd || "", isNightClinic: isNC });
-        existingIds.add(id); // 避免同一份 CSV 內有重複
-        addedCount++;
-      }
-    });
-
-    if (addedCount > 0) { 
-      setEmployees(nextEmployees); 
-      alert(`匯入完成！共新增 ${addedCount} 名新員工，已重複的員編已自動忽略。`); 
-    } else {
-      alert("匯入檔案中沒有新的人員資料。");
-    }
+      // 💡 修正：以 Firestore 最新清單為基礎新增，避免匯入時把別人剛新增/編輯的人員蓋掉
+      updateEmployees(latest => {
+        let addedCount = 0;
+        const existingIds = new Set(latest.map(emp => emp.id));
+        const nextEmployees = [...latest];
+        parsedRows.forEach(({ id, name, role, labor, pwd }) => {
+          if (!existingIds.has(id)) {
+            const isNC = (id === "E1" || id === "E2" || id === "E3" || name.includes("夜診"));
+            nextEmployees.push({ id, name, role: role || '1', labor: labor || 'N', password: pwd || "", isNightClinic: isNC });
+            existingIds.add(id);
+            addedCount++;
+          }
+        });
+        setTimeout(() => {
+          if (addedCount > 0) alert(`匯入完成！共新增 ${addedCount} 名新員工，已重複的員編已自動忽略。`);
+          else alert("匯入檔案中沒有新的人員資料。");
+        }, 0);
+        return nextEmployees;
+      });
+    };
+    reader.readAsText(file);
   };
-  reader.readAsText(file);
-};
 
   return (
     <div className="p-4 max-w-6xl mx-auto grid grid-cols-1 lg:grid-cols-12 gap-6 font-sans">
@@ -1408,14 +1371,23 @@ const handleImport = (e) => {
         <h2 className="text-lg font-black mb-4 flex items-center gap-2 text-gray-800"><UserCog size={20}/> 人員管理</h2>
         <form className="space-y-3" onSubmit={(e) => {
           e.preventDefault();
-          if (editingId) {setEmployees(employees.map(emp => emp.id === editingId ? formData : emp));setEditingId(null);
-          } else {
-          const isDuplicate = employees.some(emp => emp.id === formData.id);
-
-          if (isDuplicate) {alert("該員編已存在，系統已自動忽略。"); 
-        } else {setEmployees([...employees, formData]);alert("成功新增 1 名員工。");
-      }
-    }
+          const submittedData = { ...formData };
+          const isEditing = !!editingId;
+          // 💡 修正核心：新增/編輯人員一律以 Firestore 「當下最新」的清單為基礎操作
+          // 不再使用本地(可能過時)的 employees 陣列直接覆寫，杜絕「剛新增的人被別人洗掉」的問題
+          updateEmployees(latest => {
+            if (isEditing) {
+              return latest.map(emp => emp.id === editingId ? { ...emp, ...submittedData } : emp);
+            }
+            const isDuplicate = latest.some(emp => emp.id === submittedData.id);
+            if (isDuplicate) {
+              setTimeout(() => alert("該員編已存在，系統已自動忽略。"), 0);
+              return latest;
+            }
+            setTimeout(() => alert("成功新增 1 名員工。"), 0);
+            return [...latest, submittedData];
+          });
+          setEditingId(null);
           setFormData({id: '', name: '', role: '1', labor: 'N', password: ''});
         }}>
           <div className="grid grid-cols-2 gap-2">
@@ -1444,8 +1416,19 @@ const handleImport = (e) => {
             <input type="file" ref={importRef} className="hidden" accept=".csv" onChange={handleImport} />
             <button type="button" onClick={handleExport} className="py-2 border rounded-xl text-xs font-black hover:bg-gray-50 flex items-center justify-center gap-1"><Download size={14}/> 匯出名冊</button>
           </div>
-          <button type="button" onClick={() => setEmployees([...employees, { id: `SEP-${Date.now()}`, isSeparator: true }])} className="w-full mt-2 py-2 border-2 border-dashed rounded-xl text-[10px] font-black text-gray-400 hover:bg-gray-50 transition-all">插入分組分隔線</button>
+          <button type="button" onClick={() => updateEmployees(latest => [...latest, { id: `SEP-${Date.now()}`, isSeparator: true }])} className="w-full mt-2 py-2 border-2 border-dashed rounded-xl text-[10px] font-black text-gray-400 hover:bg-gray-50 transition-all">插入分組分隔線</button>
         </form>
+
+        {/* 💡 全系統備份 / 還原：因應 Firestore 單一文件欄位數上限，提供完整 JSON 備份下載與還原 */}
+        <div className="mt-4 pt-4 border-t border-dashed">
+          <div className="text-[10px] font-black text-gray-400 mb-2 uppercase tracking-widest">系統完整備份 (含所有月份班表/預假/顏色)</div>
+          <div className="grid grid-cols-2 gap-2">
+            <button type="button" onClick={onExportFullBackup} className="py-2 border-2 border-emerald-200 bg-emerald-50 text-emerald-700 rounded-xl text-xs font-black hover:bg-emerald-100 flex items-center justify-center gap-1"><Download size={14}/> 下載完整備份</button>
+            <button type="button" onClick={() => backupRef.current.click()} className="py-2 border-2 border-amber-200 bg-amber-50 text-amber-700 rounded-xl text-xs font-black hover:bg-amber-100 flex items-center justify-center gap-1"><Upload size={14}/> 上傳並還原</button>
+            <input type="file" ref={backupRef} className="hidden" accept=".json" onChange={(e) => { const f = e.target.files[0]; if (f) onImportFullBackup(f); e.target.value = ''; }} />
+          </div>
+          <p className="text-[9px] text-gray-400 mt-2 leading-relaxed">建議定期下載備份保存在自己的電腦；若雲端資料異常，可用備份檔還原。還原前系統會再次跟您確認。</p>
+        </div>
       </div>
       <div className="lg:col-span-8 bg-white rounded-3xl shadow border flex flex-col h-[650px]"> 
         <div className="flex-1 overflow-y-auto"> {/* 💡 這是讓內容可以捲動的關鍵 */}
@@ -1482,7 +1465,21 @@ const handleImport = (e) => {
                     </>
                   )}
                   <td className="p-4 text-right">
-                    {!emp.isSeparator && <button onClick={() => { setEditingId(emp.id); setFormData(emp); }} className="text-blue-500 text-xs font-black mr-4">編輯</button>}
+                    {!emp.isSeparator && (
+                      <>
+                        <button onClick={() => { setEditingId(emp.id); setFormData(emp); }} className="text-blue-500 text-xs font-black mr-3">編輯</button>
+                        <button
+                          onClick={() => {
+                            if (!window.confirm(`確定要重設「${emp.name}」的密碼嗎？\n重設後該員工下次登入時，輸入的任何密碼都會被設為新密碼。`)) return;
+                            updateEmployees(latest => latest.map(e => e.id === emp.id ? { ...e, password: "" } : e));
+                          }}
+                          title="重設密碼（清空，下次登入自動設定新密碼）"
+                          className="text-amber-500 text-xs font-black mr-3 hover:text-amber-700 inline-flex items-center gap-1"
+                        >
+                          <ResetPasswordIcon size={12}/> 重設密碼
+                        </button>
+                      </>
+                    )}
                     <button onClick={() => setDeleteTarget(emp)} className="text-red-400 hover:text-red-600 transition-all"><Trash2 size={16}/></button>
                   </td>
                 </tr>
@@ -1499,7 +1496,7 @@ const handleImport = (e) => {
   );
 };
 
-const ShiftsManagementView = ({ shifts, setShifts, holidays, setHolidays, setDeleteShiftTarget, personDayRules, setPersonDayRules }) => {
+const ShiftsManagementView = ({ shifts, updateShifts, holidays, updateHolidays, setDeleteShiftTarget, personDayRules, updatePersonDayRules }) => {
   const [formData, setFormData] = useState({ name: '', code: '', isRegular: 'N', regularDays: [] });
   const [editingId, setEditingId] = useState(null);
   const [ruleFormData, setRuleFormData] = useState({ pattern: '', value: '0.5', mode: 'exact' });
@@ -1546,7 +1543,7 @@ const ShiftsManagementView = ({ shifts, setShifts, holidays, setHolidays, setDel
         }
         return null;
       }).filter(Boolean);
-      if (next.length > 0) { setShifts(next); alert(`匯入完成，已載入 ${next.length} 個班別。`); }
+      if (next.length > 0) { updateShifts(() => next); alert(`匯入完成，已載入 ${next.length} 個班別。`); }
     };
     reader.readAsText(file); e.target.value = '';
   };
@@ -1574,7 +1571,7 @@ const ShiftsManagementView = ({ shifts, setShifts, holidays, setHolidays, setDel
         if (mode && pattern) return { id: Date.now() + i, mode, pattern, value: value || '0.5' };
         return null;
       }).filter(Boolean);
-      if (next.length > 0) { setPersonDayRules(next); alert(`匯入成功，已載入 ${next.length} 筆規則。`); }
+      if (next.length > 0) { updatePersonDayRules(() => next); alert(`匯入成功，已載入 ${next.length} 筆規則。`); }
     };
     reader.readAsText(file); e.target.value = '';
   };
@@ -1583,9 +1580,9 @@ const ShiftsManagementView = ({ shifts, setShifts, holidays, setHolidays, setDel
     e.preventDefault();
     if (!ruleFormData.pattern) return;
     if (editingRuleId) {
-      setPersonDayRules(personDayRules.map(r => r.id === editingRuleId ? { ...ruleFormData, id: editingRuleId } : r));
+      updatePersonDayRules(latest => latest.map(r => r.id === editingRuleId ? { ...ruleFormData, id: editingRuleId } : r));
     } else {
-      setPersonDayRules([...personDayRules, { ...ruleFormData, id: Date.now() }]);
+      updatePersonDayRules(latest => [...latest, { ...ruleFormData, id: Date.now() }]);
     }
     setEditingRuleId(null);
     setRuleFormData({ pattern: '', value: '0.5', mode: 'exact' });
@@ -1603,8 +1600,8 @@ const ShiftsManagementView = ({ shifts, setShifts, holidays, setHolidays, setDel
 
           <form className="bg-gray-50 p-4 rounded-2xl border mb-5 space-y-4 shadow-inner" onSubmit={(e) => {
             e.preventDefault();
-            if (editingId) setShifts(shifts.map(s => s.id === editingId ? { ...formData, id: editingId } : s));
-            else setShifts([...shifts, { ...formData, id: Date.now() }]);
+            if (editingId) updateShifts(latest => latest.map(s => s.id === editingId ? { ...formData, id: editingId } : s));
+            else updateShifts(latest => [...latest, { ...formData, id: Date.now() }]);
             setEditingId(null); setFormData({ name: '', code: '', isRegular: 'N', regularDays: [] });
           }}>
             <div className="grid grid-cols-3 gap-2">
@@ -1631,7 +1628,7 @@ const ShiftsManagementView = ({ shifts, setShifts, holidays, setHolidays, setDel
             </div>
           </form>
 
-          {/* 💡 修正點：自適應滾動表格高度，隨內容多寡自動長高，最多不超過視窗的 45%，不會沈到底部 */}
+          {/* 💡 自適應滾動表格高度，隨內容多寡自動長高，最多不超過視窗的 45%，不會沈到底部 */}
           <div className="flex-1 overflow-y-auto min-h-[150px] max-h-[45vh] rounded-xl border border-gray-100">
             <table className="w-full text-xs text-left border-collapse">
               <thead className="bg-gray-50 border-b sticky top-0 z-10 font-black text-gray-400 uppercase tracking-tighter shadow-sm">
@@ -1661,10 +1658,10 @@ const ShiftsManagementView = ({ shifts, setShifts, holidays, setHolidays, setDel
             <div className="flex gap-2 mb-4">
               <input type="date" className="flex-grow border-2 p-2 rounded-xl text-sm outline-none focus:border-pink-300 bg-white" id="h_date" />
               <input type="text" className="flex-grow border-2 p-2 rounded-xl text-sm outline-none font-bold" placeholder="假日備註" id="h_note" />
-              <button onClick={() => { const d = document.getElementById('h_date').value, n = document.getElementById('h_note').value; if (d && n) setHolidays({ ...holidays, [d]: n }); }} className="bg-pink-600 text-white px-4 py-2 rounded-xl font-bold shadow hover:bg-pink-700 active:scale-95 transition-all whitespace-nowrap">新增</button>
+              <button onClick={() => { const d = document.getElementById('h_date').value, n = document.getElementById('h_note').value; if (d && n) updateHolidays(latest => ({ ...latest, [d]: n })); }} className="bg-pink-600 text-white px-4 py-2 rounded-xl font-bold shadow hover:bg-pink-700 active:scale-95 transition-all whitespace-nowrap">新增</button>
             </div>
 
-            {/* 💡 修正點：改為自適應高度，可滑動 */}
+            {/* 💡 改為自適應高度，可滑動 */}
             <div className="flex-1 overflow-y-auto min-h-[100px] rounded-xl border border-pink-100">
               <table className="w-full text-xs text-left border-collapse">
                 <thead className="bg-pink-50 border-b sticky top-0 z-10 text-[10px] text-pink-700 font-black uppercase tracking-tighter shadow-sm">
@@ -1676,7 +1673,7 @@ const ShiftsManagementView = ({ shifts, setShifts, holidays, setHolidays, setDel
                       <td className="p-3 font-mono text-gray-500">{date}</td>
                       <td className="p-3 font-black text-gray-700">{holidays[date]}</td>
                       <td className="p-3 text-right">
-                        <button onClick={() => { const next = { ...holidays }; delete next[date]; setHolidays(next); }} className="text-red-300 hover:text-red-600 transition-all">
+                        <button onClick={() => { updateHolidays(latest => { const next = { ...latest }; delete next[date]; return next; }); }} className="text-red-300 hover:text-red-600 transition-all">
                           <Trash2 size={14}/>
                         </button>
                       </td>
@@ -1717,7 +1714,7 @@ const ShiftsManagementView = ({ shifts, setShifts, holidays, setHolidays, setDel
               <button className={`w-full py-2 rounded-xl text-white font-bold shadow transition-all ${editingRuleId ? 'bg-orange-500' : 'bg-teal-600 hover:bg-teal-700'}`}>{editingRuleId ? '規則更新' : '新增對照規則'}</button>
             </form>
 
-            {/* 💡 修正點：改為自適應高度，可滑動 */}
+            {/* 💡 改為自適應高度，可滑動 */}
             <div className="flex-1 overflow-y-auto min-h-[100px] rounded-xl border border-teal-100">
               <table className="w-full text-xs text-left border-collapse">
                 <thead className="bg-teal-50 border-b sticky top-0 z-10 text-[10px] text-teal-700 font-black uppercase tracking-tighter shadow-sm">
@@ -1741,7 +1738,7 @@ const ShiftsManagementView = ({ shifts, setShifts, holidays, setHolidays, setDel
             <Modal 
               isOpen={!!deleteRuleTarget} 
               onClose={() => setDeleteRuleTarget(null)} 
-              onConfirm={() => { setPersonDayRules(personDayRules.filter(r => r.id !== deleteRuleTarget.id)); setDeleteRuleTarget(null); }} 
+              onConfirm={() => { updatePersonDayRules(latest => latest.filter(r => r.id !== deleteRuleTarget.id)); setDeleteRuleTarget(null); }} 
               title="確定刪除班別？" 
               message={`確定刪除班別？移除 ${deleteRuleTarget?.pattern} 將影響人日數計算。`} 
             />
@@ -1771,12 +1768,12 @@ const ManagementReportView = ({ currentMonth, employees, schedule, personDayRule
     if (!isFourWeekMode) {
       const [year, month] = currentMonth.split('-').map(Number);
 
-      // 💡 修正點：明確使用 year 和 month (JavaScript 月份從 0 開始，所以這裡用 month 就剛好代表下個月的第 0 天)
+      // 💡 明確使用 year 和 month (JavaScript 月份從 0 開始，這裡用 month 就剛好代表下個月的第 0 天)
       const lastDay = new Date(year, month, 0).getDate(); 
       const days = [];
 
       for (let i = 1; i <= lastDay; i++) {
-        // 💡 修正點：明確使用 month - 1 來對應正確月份
+        // 💡 明確使用 month - 1 來對應正確月份
         const d = new Date(year, month - 1, i);
         const fullDate = `${currentMonth}-${String(i).padStart(2, '0')}`;
 
@@ -2077,7 +2074,7 @@ const ManagementReportView = ({ currentMonth, employees, schedule, personDayRule
   );
 };
 
-const SchedulingView = ({ currentMonth, employees, daysInMonth, schedule, setSchedule, cellColors, setCellColors, shifts, exportScheduleCSV, setCurrentPage, setIsDirty, saveData, preLeaveData, setPreLeaveData, isAdmin, isMonthDrawn }) => {
+const SchedulingView = ({ currentMonth, employees, daysInMonth, schedule, setSchedule, cellColors, setCellColors, shifts, exportScheduleCSV, setCurrentPage, setIsDirty, saveScheduleMonth, saveCellColorsMonth, preLeaveData, setPreLeaveData, savePreLeaveMonth, isAdmin, isMonthDrawn }) => {
   const [editSched, setEditSched] = useState({});
   const [activeColor, setActiveColor] = useState('bg-white');
   const [importPreview, setImportPreview] = useState(null);
@@ -2087,7 +2084,7 @@ const SchedulingView = ({ currentMonth, employees, daysInMonth, schedule, setSch
   const [cycleStartDate, setCycleStartDate] = useState(`${currentMonth}-01`); // 預設使用當月1號作為四周週期起點
   const prevMonthRef = useRef(currentMonth);
 
-  // 💡 修正 1：自動對齊月份切換，保護手動輸入不洗檔
+  // 💡 自動對齊月份切換，保護手動輸入不洗檔
   useEffect(() => {
     // 讓系統自己去對比，是不是真的換月份了
     const isMonthChanged = prevMonthRef.current !== currentMonth;
@@ -2133,16 +2130,13 @@ const SchedulingView = ({ currentMonth, employees, daysInMonth, schedule, setSch
     if (!file) return;
 
     const reader = new FileReader();
-    // 1. 整個讀取流程用 try 包起來
     reader.onload = (ev) => {
       try {
         const arrayBuffer = ev.target.result;
 
-        // 2. 編碼轉換的 try-catch (處理亂碼風險)
         let text;
         try {
           text = new TextDecoder('big5').decode(arrayBuffer);
-          // 如果發現沒有中文字，代表這可能是 UTF-8，則重新解碼
           if (!text.includes('藥劑部')) {
             text = new TextDecoder('utf-8').decode(arrayBuffer);
           }
@@ -2150,8 +2144,6 @@ const SchedulingView = ({ currentMonth, employees, daysInMonth, schedule, setSch
           text = new TextDecoder('utf-8').decode(arrayBuffer);
         }
 
-        // 拆解 CSV 資料
-        // 3. 處理與檢核的 try-catch (處理格式錯誤風險)
         const rows = text.split(/\r?\n/).map(r => r.split(',').map(c => c.trim().replace(/^"|"$/g, '')));
 
         const topRowsText = rows.slice(0, 5)
@@ -2171,14 +2163,11 @@ const SchedulingView = ({ currentMonth, employees, daysInMonth, schedule, setSch
           throw new Error(`月份不符: 偵測到 ${fileMonth}，系統要求 ${currentMonth}`);
         }
 
-        // =================== 【 2. 動態尋找「姓名」與「員編」欄位 】 ===================
         let idIdx = -1, nameIdx = -1, dataStartRow = -1;
 
-        // 1. 搜尋邏輯：直接尋找「包含員編」或「以 Y 開頭的字串」作為基準
         for (let i = 0; i < Math.min(rows.length, 20); i++) {
           const row = rows[i];
 
-          // 找到「員編」文字，或是直接找到 Y 開頭的字串（這是您的員編識別碼）
           const foundIdIdx = row.findIndex(c => 
             (c && c.includes("員編")) || 
             (c && c.length >= 5 && c.startsWith("Y"))
@@ -2186,11 +2175,9 @@ const SchedulingView = ({ currentMonth, employees, daysInMonth, schedule, setSch
 
           if (foundIdIdx !== -1) {
             idIdx = foundIdIdx;
-            // 2. 直接鎖定下一欄為姓名 (這是最穩定、不受表頭排版影響的抓法)
             nameIdx = idIdx + 1;
-            dataStartRow = i; // 從這一列開始讀取資料
+            dataStartRow = i;
 
-            // 3. 檢查：若該列剛好是標題列（裡面有「員編」二字），則資料列需再下一行
             if (row[idIdx].includes("員編")) {
               dataStartRow = i + 1;
             }
@@ -2198,13 +2185,11 @@ const SchedulingView = ({ currentMonth, employees, daysInMonth, schedule, setSch
           }
         }
 
-        // 4. 最後確認
         if (idIdx === -1 || nameIdx === -1 || nameIdx >= rows[dataStartRow]?.length) {
           alert("定位失敗：找不到員編欄位或姓名欄位異常。");
           return;
         }
 
-        // =================== 【 3. 彈性抓取班別資料 (以員編比對) 】 ===================
         const nextImportData = {};
 
         for (let i = dataStartRow; i < rows.length; i++) {
@@ -2212,26 +2197,21 @@ const SchedulingView = ({ currentMonth, employees, daysInMonth, schedule, setSch
           const empId = r[idIdx] ? r[idIdx].trim() : "";
           if (!empId) continue;
 
-          // 1. 透過員編找到正確的員工物件 (這保證了姓名的一致性)
           const emp = employees.find(e => String(e.id).trim() === empId);
           if (!emp) continue;
 
           for (let day = 1; day <= 31; day++) {
-            // 2. 獲取新值 (CSV)
             let finalValue = (r[nameIdx + day] === undefined || r[nameIdx + day] === null || String(r[nameIdx + day]).trim() === "") 
                              ? "-" 
                              : String(r[nameIdx + day]).trim();
             if (finalValue === "例假") finalValue = "例";
             else if (finalValue === "休假") finalValue = "休";
 
-            // 3. 【員編導向撈取】：強制使用 emp.name (系統標準名) 撈取舊值
-            // 因為 emp 已經是透過員編匹配出來的，所以 emp.name 一定是系統內正確的名字
             const currentRaw = schedule[currentMonth]?.[emp.name]?.[day];
             const currentVal = (currentRaw === null || currentRaw === undefined || String(currentRaw).trim() === "") 
                                ? "-" 
                                : String(currentRaw).trim();
 
-            // 4. 比對差異
             if (finalValue !== currentVal) {
               if (!nextImportData[emp.name]) nextImportData[emp.name] = {};
               nextImportData[emp.name][day] = finalValue;
@@ -2252,7 +2232,6 @@ const SchedulingView = ({ currentMonth, employees, daysInMonth, schedule, setSch
       }
     };
 
-    // 💡 關鍵：讀取為 ArrayBuffer 才能手動處理編碼
     reader.readAsArrayBuffer(file);
   };
 
@@ -2278,7 +2257,6 @@ const SchedulingView = ({ currentMonth, employees, daysInMonth, schedule, setSch
     Object.values(editSched).forEach(empSched => {
       Object.values(empSched).forEach(v => { if (v && !["-", "#", "例", ""].includes(v)) allScheduledThisMonth.add(String(v)); });
     });
-    // 💡 修正點：加上 (shifts || []) 防止白屏
     const monthlyRules = (shifts || []).filter(s => s.isRegular === 'Y' && s.regularDays.includes("月"));
     daysInMonth.forEach(d => {
       const scheduledOnDay = Object.values(editSched).map(u => u?.[d.day]);
@@ -2293,10 +2271,12 @@ const SchedulingView = ({ currentMonth, employees, daysInMonth, schedule, setSch
     return data;
   };
 
-  const handlePublishSchedule = () => {
+  const handlePublishSchedule = async () => {
     const nextSchedule = { ...schedule, [currentMonth]: deepClone(editSched) };
     setSchedule(nextSchedule);
-    saveData({ schedule: nextSchedule }); 
+    // 💡 修正核心：只把「當月」的班表寫進「當月自己的文件」，絕對不會動到其他月份的資料，
+    // 也不會因為本地端 schedule 過期而把別的月份/別人剛發佈的班表覆蓋掉
+    await saveScheduleMonth(currentMonth, deepClone(editSched));
     if (exportScheduleCSV) {
       exportScheduleCSV("發佈自動備份");
     }
@@ -2318,7 +2298,6 @@ const SchedulingView = ({ currentMonth, employees, daysInMonth, schedule, setSch
       analysis.codes[emp.name] = {};
       const fourWeeksCodes = [];
 
-      // 產生 28 天的完整跨月代碼陣列
       for (let i = 0; i < 28; i++) {
         const targetDate = new Date(startObj.getTime() + i * dayMs);
         const yKey = targetDate.getFullYear();
@@ -2326,7 +2305,6 @@ const SchedulingView = ({ currentMonth, employees, daysInMonth, schedule, setSch
         const dKey = String(targetDate.getDate());
         const targetMonthStr = `${yKey}-${mKey}`;
 
-        // 當月抓編輯中的 editSched，非當月抓已儲存的 schedule
         let rawVal = "-";
         if (targetMonthStr === currentMonth) {
           rawVal = editSched[emp.name]?.[dKey] || "-";
@@ -2345,13 +2323,11 @@ const SchedulingView = ({ currentMonth, employees, daysInMonth, schedule, setSch
 
         fourWeeksCodes.push(code);
 
-        // 如果是當月，存入 codes 供格子右下角顯示
         if (targetMonthStr === currentMonth) {
           analysis.codes[emp.name][dKey] = code;
         }
       }
 
-      // 統計例與休 (0 與 -2 皆視為休)
       let firstBiweekLi = 0, firstBiweekXiu = 0;
       let secondBiweekLi = 0, secondBiweekXiu = 0;
 
@@ -2364,7 +2340,6 @@ const SchedulingView = ({ currentMonth, employees, daysInMonth, schedule, setSch
         else if (fourWeeksCodes[i] === "0" || fourWeeksCodes[i] === "-2") secondBiweekXiu++;
       }
 
-      // 判斷是否違規
       const isLabor = emp.labor === 'Y';
       let w1Violation = false, w2Violation = false;
 
@@ -2384,7 +2359,6 @@ const SchedulingView = ({ currentMonth, employees, daysInMonth, schedule, setSch
       };
     });
 
-    // 補齊本月其餘日期
     employees.forEach(emp => {
       if (emp.isSeparator || !analysis.codes[emp.name]) return;
       daysInMonth.forEach(d => {
@@ -2458,7 +2432,6 @@ const SchedulingView = ({ currentMonth, employees, daysInMonth, schedule, setSch
         <div className="flex gap-2">
           {!importPreview && (
             <>
-              {/* 💡 新增：排班頁面的 Excel/CSV 下載功能，自動帶有標準民國年大標題 */}
               <button 
                 onClick={() => {
                   try {
@@ -2579,7 +2552,7 @@ const SchedulingView = ({ currentMonth, employees, daysInMonth, schedule, setSch
               {daysInMonth.map(d => {
                 const cycleEnd = isCycleEnd(d.fullDate);
 
-                // 💡 修正：取消 isMonthDrawn 的限制。只要是管理員 (!isAdmin 為 false)，就永遠可以編輯備註！
+                // 💡 只要是管理員 (!isAdmin 為 false)，就永遠可以編輯備註！
                 const isDisabled = !isAdmin; 
 
                 return (
@@ -2594,9 +2567,8 @@ const SchedulingView = ({ currentMonth, employees, daysInMonth, schedule, setSch
                         if(!next.remarks[currentMonth]) next.remarks[currentMonth] = {}; 
                         next.remarks[currentMonth][d.day] = e.target.value;   
                         setPreLeaveData(next);
-                        saveData({ preLeaveData: next }); 
+                        savePreLeaveMonth(currentMonth, { remarks: next.remarks[currentMonth] });
                       }}
-                      // 💡 樣式同步更新：當 isDisabled 時才顯示游標禁止 (cursor-not-allowed)
                       className={`w-full h-full bg-transparent text-[11px] font-bold text-purple-600 text-center outline-none resize-none overflow-hidden block ${isDisabled ? 'cursor-not-allowed opacity-70' : 'cursor-text'}`}
                       style={{ fieldSizing: 'content', minHeight: '1.5em' }}
                     />
@@ -2688,20 +2660,17 @@ const SchedulingView = ({ currentMonth, employees, daysInMonth, schedule, setSch
                             nc[currentMonth][emp.name][d.day] = activeColor;
                           }
 
-                          // 2. 【新增】清理空物件邏輯 (防止空架構遺留在資料庫)
-
-                          // 如果該人員當月沒有任何顏色設定，刪除該人員的 key
+                          // 2. 清理空物件邏輯 (防止空架構遺留在資料庫)
                           if (Object.keys(nc[currentMonth][emp.name]).length === 0) {
                             delete nc[currentMonth][emp.name];
                           }
-
-                          // 如果該月份連任何人員都沒有顏色設定，刪除該月份的 key
                           if (Object.keys(nc[currentMonth]).length === 0) {
                             delete nc[currentMonth];
                           }
 
                           setCellColors(nc);
-                          saveData({ cellColors: nc }); 
+                          // 💡 修正核心：只存「當月」的 cellColors 到當月自己的文件
+                          saveCellColorsMonth(currentMonth, nc[currentMonth] || {});
                         }
                         }}
                       >
@@ -2769,6 +2738,17 @@ const SchedulingView = ({ currentMonth, employees, daysInMonth, schedule, setSch
   );
 };
 
+// =====================================================================================
+// 💡 Firestore 資料層 V1.9：
+//    - meta 文件 (main)：employees / shifts / holidays / personDayRules / swapRequests / preLeaveMeta
+//    - monthlyData 子集合：每個年月各自一份文件，內含 { schedule, cellColors, apps, dailyLimits, remarks }
+//    這樣設計可以讓「編輯 A 月份」與「編輯 B 月份」完全不會互相覆蓋，
+//    也不會因為某個人瀏覽器裡的資料比較舊，就把雲端最新的其他月份資料洗掉。
+// =====================================================================================
+const mainDocRef = doc(db, 'artifacts', appId, 'public', 'data', 'roster', 'main');
+const monthlyColRef = collection(mainDocRef, 'monthlyData');
+const getMonthDocRef = (monthKey) => doc(monthlyColRef, monthKey);
+
 const App = () => {
   const [currentPage, setCurrentPage] = useState('home');
   const [pendingPage, setPendingPage] = useState(null); 
@@ -2795,7 +2775,11 @@ const App = () => {
   const [personDayRules, setPersonDayRules] = useState(INITIAL_PERSON_DAY_RULES);
   const [schedule, setSchedule] = useState({});
   const [cellColors, setCellColors] = useState({});
-  const [swapRequests, setSwapRequests] = useState([]); 
+  // 💡 換班紀錄改為「按月份分組」儲存 ({ '2026-06': [...], '2026-07': [...] })，
+  // 對外仍用 swapRequests 這個攤平後的陣列，元件端完全不用改
+  const [swapRequestsByMonth, setSwapRequestsByMonth] = useState({});
+  const swapRequests = useMemo(() => Object.values(swapRequestsByMonth).flat(), [swapRequestsByMonth]);
+  const getReqMonthKey = (req) => (req?.date ? req.date.substring(0, 7) : currentMonth);
   const [swapTarget, setSwapTarget] = useState(null); 
   const [deleteTarget, setDeleteTarget] = useState(null);
   const [deleteShiftTarget, setDeleteShiftTarget] = useState(null);
@@ -2806,49 +2790,230 @@ const App = () => {
   const [targetPage, setTargetPage] = useState(null);
   const [preLeaveData, setPreLeaveData] = useState({apps: {},dailyLimits: {},remarks: {},weekendLimit: 10,weekdayLimit: 3,lotteryDay: 15,drawnMonths: []});
   const [isModalOpen, setIsModalOpen] = useState(false);
+  const [loadedMonths, setLoadedMonths] = useState(new Set());
+  const migrationDoneRef = useRef(false);
 
-  const saveData = async (updates) => {
-    if (!auth.currentUser) return;
-
-    // ✨ 終極盾牌一：只要有人丟資料進來存，發現裡面有 swapRequests，立刻全面強制清洗！
-    if (updates && updates.swapRequests && Array.isArray(updates.swapRequests)) {
-      updates.swapRequests = updates.swapRequests.map(req => cleanBundleData(req));
-    }
-
-    const docRef = doc(db, 'artifacts', appId, 'public', 'data', 'roster', 'main');
+  // ---------------------------------------------------------------------------------
+  // 存「共用/非月份」資料 (員工、班別代碼、假日、人日規則、換班紀錄、預假全域設定)
+  // ---------------------------------------------------------------------------------
+  const saveMeta = async (updates) => {
+    if (!auth.currentUser || !updates) return;
     try {
-      await setDoc(docRef, updates, { merge: true });
+      await setDoc(mainDocRef, updates, { merge: true });
     } catch (error) {
-      console.error("雲端儲存失敗:", error);
+      console.error("雲端儲存失敗(meta):", error);
     }
+  };
+
+  // ---------------------------------------------------------------------------------
+  // 💡 換班紀錄：只寫入該筆申請「所屬月份」的文件，不會動到其他月份的換班紀錄
+  // mutatorFn 接收「該月份目前的換班紀錄陣列」，回傳新的陣列
+  // ---------------------------------------------------------------------------------
+  const patchSwapRequestsMonth = (monthKey, mutatorFn) => {
+    const current = swapRequestsByMonth[monthKey] || [];
+    const next = mutatorFn(current).map(req => cleanBundleData(req));
+    setSwapRequestsByMonth(prev => ({ ...prev, [monthKey]: next }));
+    saveMonthDoc(monthKey, { swapRequests: next });
+  };
+
+  // ---------------------------------------------------------------------------------
+  // 存「單一月份」資料：schedule / cellColors / apps / dailyLimits / remarks
+  // 關鍵：只會寫入該月份自己的文件，絕不動到其他月份，杜絕「不同月份互相覆蓋、資料消失」的問題
+  // ---------------------------------------------------------------------------------
+  const saveMonthDoc = async (monthKey, updates) => {
+    if (!auth.currentUser || !monthKey || !updates) return;
+    try {
+      await setDoc(getMonthDocRef(monthKey), updates, { merge: true });
+    } catch (error) {
+      console.error(`雲端儲存失敗(月份 ${monthKey}):`, error);
+    }
+  };
+
+  const saveScheduleMonth = (monthKey, monthScheduleObj) => saveMonthDoc(monthKey, { schedule: monthScheduleObj });
+  const saveCellColorsMonth = (monthKey, monthColorObj) => saveMonthDoc(monthKey, { cellColors: monthColorObj });
+  const savePreLeaveMonth = (monthKey, partial) => saveMonthDoc(monthKey, partial); // partial: {apps} / {dailyLimits} / {remarks}
+  const saveMetaPreLeave = (partial) => saveMeta({ preLeaveMeta: partial });
+
+  // ---------------------------------------------------------------------------------
+  // 💡 Transaction 安全寫入：employees / shifts / holidays / personDayRules
+  // 每次寫入前，都會先讀取「雲端當下最新版本」，把 mutatorFn(latestArrayOrObj) 的結果
+  // 寫回去，而不是盲目地把本地(可能過期)的整包資料覆蓋上去。
+  // 這是解決「員工被清空」「密碼被離奇改變」「剛新增的資料被別人洗掉」的根本作法。
+  // ---------------------------------------------------------------------------------
+  const runMetaTransaction = async (fieldName, mutatorFn, fallbackValue) => {
+    if (!auth.currentUser) return;
+    try {
+      await runTransaction(db, async (tx) => {
+        const snap = await tx.get(mainDocRef);
+        const cloudVal = snap.exists() && snap.data()[fieldName] !== undefined ? snap.data()[fieldName] : fallbackValue;
+        const nextVal = mutatorFn(deepClone(cloudVal));
+        tx.set(mainDocRef, { [fieldName]: nextVal }, { merge: true });
+      });
+    } catch (error) {
+      console.error(`Transaction 寫入失敗(${fieldName}):`, error);
+      alert("儲存失敗，可能是網路問題，請重新操作一次。");
+    }
+  };
+
+  // 員工異動一律走這裡：mutatorFn 接收「雲端最新員工陣列」，回傳新的員工陣列
+  const updateEmployees = (mutatorFn) => runMetaTransaction('employees', mutatorFn, INITIAL_EMPLOYEES);
+  const updateShifts = (mutatorFn) => runMetaTransaction('shifts', mutatorFn, INITIAL_SHIFTS);
+  const updateHolidays = (mutatorFn) => runMetaTransaction('holidays', mutatorFn, {});
+  const updatePersonDayRules = (mutatorFn) => runMetaTransaction('personDayRules', mutatorFn, INITIAL_PERSON_DAY_RULES);
+
+  // 舊版相容用：其餘地方若仍呼叫 saveData(...)，自動依 key 分流到正確的位置
+  const saveData = async (updates) => {
+    if (!updates) return;
+    if (updates.schedule) {
+      await Promise.all(Object.keys(updates.schedule).map(m => saveScheduleMonth(m, updates.schedule[m])));
+    }
+    if (updates.cellColors) {
+      await Promise.all(Object.keys(updates.cellColors).map(m => saveCellColorsMonth(m, updates.cellColors[m])));
+    }
+    if (updates.preLeaveData) {
+      const pld = updates.preLeaveData;
+      const monthKeys = new Set([...Object.keys(pld.apps || {}), ...Object.keys(pld.dailyLimits || {}), ...Object.keys(pld.remarks || {})]);
+      await Promise.all(Array.from(monthKeys).map(m => saveMonthDoc(m, {
+        apps: pld.apps?.[m] || {}, dailyLimits: pld.dailyLimits?.[m] || {}, remarks: pld.remarks?.[m] || {}
+      })));
+      await saveMetaPreLeave({ weekendLimit: pld.weekendLimit, weekdayLimit: pld.weekdayLimit, lotteryDay: pld.lotteryDay, drawnMonths: pld.drawnMonths || [] });
+    }
+    const metaUpdates = {};
+    let hasMeta = false;
+    ['employees', 'shifts', 'holidays', 'personDayRules', 'swapRequests'].forEach(k => {
+      if (updates[k] !== undefined) { metaUpdates[k] = updates[k]; hasMeta = true; }
+    });
+    if (hasMeta) await saveMeta(metaUpdates);
   };
 
   useEffect(() => {const initAuth = async () => { try {if (typeof __initial_auth_token !== 'undefined' && __initial_auth_token) {await signInWithCustomToken(auth, __initial_auth_token);} else {await signInAnonymously(auth);}} catch (err) {console.warn("驗證不匹配:", err);await signInAnonymously(auth);}};initAuth();
 }, []);
 
-    useEffect(() => {
-      const docRef = doc(db, 'artifacts', appId, 'public', 'data', 'roster', 'main');
-      const unsubData = onSnapshot(docRef, (snap) => {
-        if (snap.exists()) {
-          const d = snap.data();
-          if (d.employees) setEmployees(d.employees);
-          if (d.shifts) setShifts(d.shifts);
-          if (d.holidays) setHolidays(d.holidays);
-          if (d.personDayRules) setPersonDayRules(d.personDayRules);
-          if (d.schedule) setSchedule(d.schedule);
-          if (d.cellColors) setCellColors(d.cellColors);
-          if (d.preLeaveData) setPreLeaveData(d.preLeaveData); 
+  // 💡 監聽 meta 主文件 (員工/班別/假日/人日規則/換班紀錄/預假全域設定)
+  useEffect(() => {
+    const unsubMeta = onSnapshot(mainDocRef, async (snap) => {
+      if (!snap.exists()) return;
+      const d = snap.data();
+      if (d.employees) setEmployees(d.employees);
+      if (d.shifts) setShifts(d.shifts);
+      if (d.holidays) setHolidays(d.holidays);
+      if (d.personDayRules) setPersonDayRules(d.personDayRules);
+      if (d.preLeaveMeta) {
+        setPreLeaveData(prev => ({ ...prev, ...d.preLeaveMeta }));
+      }
 
-          // ✨ 盾牌二：在儲存到 React State 之前，自動將每一筆舊資料清洗、就地升級！
-          if (d.swapRequests && Array.isArray(d.swapRequests)) {
-            const cleanRequests = d.swapRequests.map(req => cleanBundleData(req));
-            setSwapRequests(cleanRequests);
+      // 💡 一次性資料遷移：如果偵測到舊版把 schedule / cellColors / preLeaveData / swapRequests
+      // 整包塞在主文件裡，自動依「所屬月份」搬到 monthlyData 子集合，並在主文件中清除，
+      // 避免舊資料繼續在「main」這一份文件裡越滾越大，也避免換班紀錄互相覆蓋的問題
+      const hasLegacySwap = d.swapRequests && Array.isArray(d.swapRequests) && d.swapRequests.length > 0;
+      if (!migrationDoneRef.current && (d.schedule || d.cellColors || hasLegacySwap || (d.preLeaveData && (d.preLeaveData.apps || d.preLeaveData.dailyLimits || d.preLeaveData.remarks)))) {
+        migrationDoneRef.current = true;
+        try {
+          const monthKeys = new Set([
+            ...Object.keys(d.schedule || {}),
+            ...Object.keys(d.cellColors || {}),
+            ...Object.keys(d.preLeaveData?.apps || {}),
+            ...Object.keys(d.preLeaveData?.dailyLimits || {}),
+            ...Object.keys(d.preLeaveData?.remarks || {})
+          ]);
+
+          // 舊版 swapRequests 是攤平陣列，依每筆申請的日期分組回各自月份
+          const legacySwapByMonth = {};
+          if (hasLegacySwap) {
+            d.swapRequests.forEach(req => {
+              const cleaned = cleanBundleData(req);
+              const m = getReqMonthKey(cleaned);
+              monthKeys.add(m);
+              if (!legacySwapByMonth[m]) legacySwapByMonth[m] = [];
+              legacySwapByMonth[m].push(cleaned);
+            });
           }
-        }
-      }, (error) => console.error("雲端監聽失敗:", error));
 
-      return () => unsubData(); // 記得要 return 卸載監聽
-    }, [appId]);
+          for (const m of monthKeys) {
+            await setDoc(getMonthDocRef(m), {
+              schedule: d.schedule?.[m] || {},
+              cellColors: d.cellColors?.[m] || {},
+              apps: d.preLeaveData?.apps?.[m] || {},
+              dailyLimits: d.preLeaveData?.dailyLimits?.[m] || {},
+              remarks: d.preLeaveData?.remarks?.[m] || {},
+              swapRequests: legacySwapByMonth[m] || []
+            }, { merge: true });
+          }
+          const legacyPreLeave = d.preLeaveData || {};
+          await setDoc(mainDocRef, {
+            schedule: deleteField(),
+            cellColors: deleteField(),
+            preLeaveData: deleteField(),
+            swapRequests: deleteField(),
+            preLeaveMeta: {
+              weekendLimit: legacyPreLeave.weekendLimit ?? 10,
+              weekdayLimit: legacyPreLeave.weekdayLimit ?? 3,
+              lotteryDay: legacyPreLeave.lotteryDay ?? 15,
+              drawnMonths: legacyPreLeave.drawnMonths || []
+            }
+          }, { merge: true });
+          console.log(`✅ 舊版資料已自動搬遷至 ${monthKeys.size} 份月份文件，並清除主文件內舊格式殘留。`);
+        } catch (err) {
+          console.error("舊資料自動搬遷失敗:", err);
+        }
+      }
+    }, (error) => console.error("雲端監聽失敗(meta):", error));
+
+    return () => unsubMeta();
+  }, []);
+
+  // 💡 監聽 monthlyData 子集合，把每份月份文件重組回本地熟悉的 {月份: {...}} 巢狀結構
+  // 這一步是保留舊有元件邏輯 (schedule[currentMonth]...) 完全不需要更動的關鍵
+  useEffect(() => {
+    const unsubMonths = onSnapshot(monthlyColRef, (snap) => {
+      setSchedule(prevSched => {
+        const next = { ...prevSched };
+        snap.docChanges().forEach(change => {
+          const m = change.doc.id;
+          const data = change.doc.data();
+          if (change.type === 'removed') { delete next[m]; return; }
+          next[m] = data.schedule || {};
+        });
+        return next;
+      });
+      setCellColors(prevColors => {
+        const next = { ...prevColors };
+        snap.docChanges().forEach(change => {
+          const m = change.doc.id;
+          const data = change.doc.data();
+          if (change.type === 'removed') { delete next[m]; return; }
+          next[m] = data.cellColors || {};
+        });
+        return next;
+      });
+      setPreLeaveData(prevPreLeave => {
+        const nextApps = { ...(prevPreLeave.apps || {}) };
+        const nextDailyLimits = { ...(prevPreLeave.dailyLimits || {}) };
+        const nextRemarks = { ...(prevPreLeave.remarks || {}) };
+        snap.docChanges().forEach(change => {
+          const m = change.doc.id;
+          const data = change.doc.data();
+          if (change.type === 'removed') { delete nextApps[m]; delete nextDailyLimits[m]; delete nextRemarks[m]; return; }
+          nextApps[m] = data.apps || {};
+          nextDailyLimits[m] = data.dailyLimits || {};
+          nextRemarks[m] = data.remarks || {};
+        });
+        return { ...prevPreLeave, apps: nextApps, dailyLimits: nextDailyLimits, remarks: nextRemarks };
+      });
+      setSwapRequestsByMonth(prev => {
+        const next = { ...prev };
+        snap.docChanges().forEach(change => {
+          const m = change.doc.id;
+          const data = change.doc.data();
+          if (change.type === 'removed') { delete next[m]; return; }
+          next[m] = (data.swapRequests || []).map(req => cleanBundleData(req));
+        });
+        return next;
+      });
+    }, (error) => console.error("雲端監聽失敗(monthlyData):", error));
+
+    return () => unsubMonths();
+  }, []);
 
   const daysInMonth = useMemo(() => {
     const [year, month] = currentMonth.split('-').map(Number);
@@ -2868,18 +3033,57 @@ const App = () => {
     if (res.includes(p) && !isLoggedIn) { setPendingPage(p); setCurrentPage('login'); } else setCurrentPage(p);
   };
 
-const handleLoginAction = (id, pwd) => {
+const handleLoginAction = async (id, pwd) => {
   const emp = employees.find(e => e.id === id);
   if (!emp) { alert("無此員編權限。"); return; }
-  if (emp.password === "" || emp.password === pwd) {
-    if (emp.password === "" && pwd !== "") {
-      const nextEmployees = employees.map(e => e.id === emp.id ? { ...e, password: pwd } : e); setEmployees(nextEmployees);saveData({ employees: nextEmployees });
-      const updatedEmp = { ...emp, password: pwd };setCurrentUser(updatedEmp);
-    } else {setCurrentUser(emp); } setIsLoggedIn(true);
-    if (pendingPage) { setCurrentPage(pendingPage);  setPendingPage(null); 
-    } else {setCurrentPage('home');}
-  } else {alert("密碼錯誤！");}
+
+  // 💡 修正核心：不再依賴「本地可能過期的 employees 陣列」判斷密碼，
+  // 一律用 transaction 讀取雲端當下最新的那一筆資料來驗證/設定密碼，
+  // 這樣即使有其他人剛好也在修改別的員工資料，也不會互相干擾、更不會讓密碼「無端變動」。
+  let loginResult = null;
+  try {
+    await runTransaction(db, async (tx) => {
+      const snap = await tx.get(mainDocRef);
+      const latestEmployees = (snap.exists() && snap.data().employees) ? snap.data().employees : employees;
+      const latestEmp = latestEmployees.find(e => e.id === id);
+      if (!latestEmp) { loginResult = { ok: false, msg: "無此員編權限。" }; return; }
+
+      if (latestEmp.password === "" || latestEmp.password === pwd) {
+        if (latestEmp.password === "" && pwd !== "") {
+          // 首次登入自動設定密碼：只更新這一位員工，其餘人完全不受影響
+          const nextEmployees = latestEmployees.map(e => e.id === latestEmp.id ? { ...e, password: pwd } : e);
+          tx.set(mainDocRef, { employees: nextEmployees }, { merge: true });
+          loginResult = { ok: true, emp: { ...latestEmp, password: pwd } };
+        } else {
+          loginResult = { ok: true, emp: latestEmp };
+        }
+      } else {
+        loginResult = { ok: false, msg: "密碼錯誤！" };
+      }
+    });
+  } catch (error) {
+    console.error("登入 Transaction 失敗:", error);
+    loginResult = { ok: false, msg: "登入時發生錯誤，請重新嘗試。" };
+  }
+
+  if (!loginResult || !loginResult.ok) { alert(loginResult?.msg || "登入失敗。"); return; }
+
+  setCurrentUser(loginResult.emp);
+  setIsLoggedIn(true);
+
+  // 💡 防呆：帳號/班別/排班/報表 僅限管理員(role 0)使用，即使是透過 pendingPage 導向也要再檢查一次
+  const adminOnlyPages = ['account', 'shifts', 'schedule', 'report'];
+  if (pendingPage) {
+    if (adminOnlyPages.includes(pendingPage) && loginResult.emp.role !== '0') {
+      alert("此功能僅限管理員使用。");
+      setCurrentPage('home');
+    } else {
+      setCurrentPage(pendingPage);
+    }
+    setPendingPage(null);
+  } else { setCurrentPage('home'); }
 };
+
 
 const handleSwapApply = (targetEmp, dayInfo) => {
   if (!currentUser || targetEmp.id === currentUser.id) return;
@@ -2899,7 +3103,6 @@ const handleSwapApply = (targetEmp, dayInfo) => {
   if (swapTarget && swapTarget.date === targetDateStr) {
     // 【連鎖模式】：已經選過人了，現在點選的是第 3, 4... 位參與者
 
-    // 檢查是否重複選點同一個人
     if (swapTarget.participants.some(p => p.id === targetEmp.id)) {
       alert("此人已在連鎖換班名單中。");
       return;
@@ -2907,28 +3110,18 @@ const handleSwapApply = (targetEmp, dayInfo) => {
 
     const newParticipants = [
       ...swapTarget.participants,
-      {
-        id: targetEmp.id,
-        name: targetEmp.name,
-        oldShift: targetShift
-      }
+      { id: targetEmp.id, name: targetEmp.name, oldShift: targetShift }
     ];
 
-    setSwapTarget({
-      ...swapTarget,
-      participants: newParticipants
-    });
-    setIsModalOpen(true); // 💡 開啟視窗確認
+    setSwapTarget({ ...swapTarget, participants: newParticipants });
+    setIsModalOpen(true);
     return;
   }
 
   // 【首選模式】：點選第一個換班對象
-  // 💡 修正 1：月份改由 fullDate 動態切出，避免跨月或跨年時用全域 currentMonth 抓錯班表
   const clickedMonth = dayInfo.fullDate.substring(0, 7);
   const myShift = normalize(schedule[clickedMonth]?.[currentUser.name]?.[dayInfo.day]);
 
-  // ... (您的整段換班判定邏輯 isBundle, daysToSwap 等維持不變) ...
-  // 💡 修正 2：將初始的 daysToSwap 從純數字 [dayInfo.day] 改為完整日期 [dayInfo.fullDate]
   let isBundle = false, startDate = dayInfo.fullDate, endDate = dayInfo.fullDate, daysToSwap = [dayInfo.fullDate];
   const targetDate = new Date(dayInfo.fullDate);
   const dOfW = targetDate.getDay(); 
@@ -2948,11 +3141,9 @@ const handleSwapApply = (targetEmp, dayInfo) => {
         const mon = new Date(targetDate); mon.setDate(targetDate.getDate() - (dOfW - 1));
         const fri = new Date(mon); fri.setDate(mon.getDate() + 4);
 
-        // 💡 修正：動態取得年、月、日，徹底解決跨月跨年 Bug
         startDate = `${mon.getFullYear()}-${String(mon.getMonth() + 1).padStart(2, '0')}-${String(mon.getDate()).padStart(2, '0')}`;
         endDate = `${fri.getFullYear()}-${String(fri.getMonth() + 1).padStart(2, '0')}-${String(fri.getDate()).padStart(2, '0')}`;
 
-        // 💡 修正：改存 YYYY-MM-DD 完整日期字串
         daysToSwap = []; 
         for (let i = 0; i < 5; i++) { 
           const d = new Date(mon); 
@@ -2969,11 +3160,9 @@ const handleSwapApply = (targetEmp, dayInfo) => {
         const mon = new Date(targetDate); mon.setDate(targetDate.getDate() - (dOfW - 1));
         const thu = new Date(mon); thu.setDate(mon.getDate() + 3);
 
-        // 💡 修正：動態取得年、月、日，徹底解決跨月跨年 Bug
         startDate = `${mon.getFullYear()}-${String(mon.getMonth() + 1).padStart(2, '0')}-${String(mon.getDate()).padStart(2, '0')}`;
         endDate = `${thu.getFullYear()}-${String(thu.getMonth() + 1).padStart(2, '0')}-${String(thu.getDate()).padStart(2, '0')}`;
 
-        // 💡 修正：改存 YYYY-MM-DD 完整日期字串
         daysToSwap = []; 
         for (let i = 0; i < 4; i++) { 
           const d = new Date(mon); 
@@ -2988,7 +3177,6 @@ const handleSwapApply = (targetEmp, dayInfo) => {
     if (dOfW === 6 || dOfW === 0 || (dOfW >= 1 && dOfW <= 4)) {
       isBundle = true;
 
-      // 1. 取得起始日物件 (正確處理日期回溯)
       const sat = new Date(targetDate);
       if (dOfW === 6) {
         // 週六：不變
@@ -2998,15 +3186,12 @@ const handleSwapApply = (targetEmp, dayInfo) => {
         sat.setDate(targetDate.getDate() - (dOfW + 1));
       }
 
-      // 2. 計算結束日
       const endDay = new Date(sat);
       endDay.setDate(sat.getDate() + 13);
 
-      // 直接在賦值時格式化，不再內部宣告 function，避免大括號衝突
       startDate = `${sat.getFullYear()}-${String(sat.getMonth() + 1).padStart(2, '0')}-${String(sat.getDate()).padStart(2, '0')}`;
       endDate = `${endDay.getFullYear()}-${String(endDay.getMonth() + 1).padStart(2, '0')}-${String(endDay.getDate()).padStart(2, '0')}`;
 
-      // 3. 產生連續 14 天的完整日期陣列
       daysToSwap = [];
       for (let i = 0; i < 14; i++) {
         const d = new Date(sat);
@@ -3020,9 +3205,6 @@ const handleSwapApply = (targetEmp, dayInfo) => {
       }
     }
 
-
-    // 檢查申請人與被申請人的鎖定清單中，是否包含這段區間的任何一天
-    // 💡 修正關鍵：直接將原本的 bundleDates 替換成最新的新格式變數 daysToSwap
     const isCreatorLocked = daysToSwap.some(d => currentUser.applyingDates?.includes(d));
     const isTargetLocked = daysToSwap.some(d => targetEmp.applyingDates?.includes(d));
 
@@ -3032,11 +3214,10 @@ const handleSwapApply = (targetEmp, dayInfo) => {
     }
   }
 
-  // 設置初始的兩位參與者
   setSwapTarget({
     date: dayInfo.fullDate,
     dayOfWeek: dayInfo.dayOfWeek,
-    day: dayInfo.day, // 保留原本的純數字日期（如 24），不破壞原本其他可能讀取 day 的小地方
+    day: dayInfo.day,
     creatorId: currentUser.id,
     creatorName: currentUser.name,
     creatorShift: myShift,
@@ -3047,74 +3228,50 @@ const handleSwapApply = (targetEmp, dayInfo) => {
       { id: currentUser.id, name: currentUser.name, oldShift: myShift },
       { id: targetEmp.id, name: targetEmp.name, oldShift: targetShift }
     ],
-    isBundle,     // 已在前面自動升級
-    startDate,    // 已在前面自動升級（YYYY-MM-DD）
-    endDate,      // 已在前面自動升級（YYYY-MM-DD）
-    daysToSwap    // 已在前面自動升級（["YYYY-MM-DD", ...])
+    isBundle, startDate, endDate, daysToSwap
   });
 
-  setIsModalOpen(true); // 💡 顯示申請框
+  setIsModalOpen(true);
 };
 
 const handleSwapBack = () => {
   if (!swapTarget || swapTarget.participants.length <= 2) return;
-
   const newParticipants = [...swapTarget.participants];
-  newParticipants.pop(); // 移除最後一位
-
-  setSwapTarget({
-    ...swapTarget,
-    participants: newParticipants
-  });
+  newParticipants.pop();
+  setSwapTarget({ ...swapTarget, participants: newParticipants });
 };
 
 const handleRecordAction = (req, action) => {
-  // 💡 修正 1：升級 unlockDate，讓它能同時解鎖名單內的所有人
-  const unlockDate = (participants, req) => {
-    const participantIds = participants ? participants.map(p => p.id) : [req.creatorId, req.targetId];
+  // 💡 解鎖名單內所有人的日期鎖：透過 transaction 對雲端最新員工資料操作，避免覆蓋其他人剛好也在做的變更
+  const unlockParticipantIds = req.participants ? req.participants.map(p => p.id) : [req.creatorId, req.targetId];
+  let datesToUnlock = req.date ? [req.date] : [];
+  if (req.isBundle && Array.isArray(req.daysToSwap)) {
+    datesToUnlock = [...req.daysToSwap];
+  }
 
-    // 計算需要解鎖的日期陣列 (預設至少解鎖單日)
-    let datesToUnlock = req.date ? [req.date] : [];
-    if (req.isBundle && Array.isArray(req.daysToSwap) && req.date) {
-      // 由於 req.daysToSwap 已經是完整的 ["YYYY-MM-DD", ...] 陣列
-      // 直接將其賦值給 datesToUnlock 即可，不需要再拼接月份
-      datesToUnlock = [...req.daysToSwap];
+  const doUnlock = () => {
+    updateEmployees(latest => latest.map(e => {
+      if (!unlockParticipantIds.includes(e.id)) return e;
+      const currentDates = e.applyingDates || [];
+      return { ...e, applyingDates: currentDates.filter(d => !datesToUnlock.includes(d)) };
+    }));
+    if (currentUser && unlockParticipantIds.includes(currentUser.id)) {
+      setCurrentUser(prev => ({ ...prev, applyingDates: (prev.applyingDates || []).filter(d => !datesToUnlock.includes(d)) }));
     }
-
-    const nextEmployees = employees.map(e => {
-      if (participantIds.includes(e.id)) {
-        const currentDates = e.applyingDates || [];
-        // 確保將解鎖陣列內的日期通通清空
-        return { ...e, applyingDates: currentDates.filter(d => !datesToUnlock.includes(d)) };
-      }
-      return e;
-    });
-    setEmployees(nextEmployees);
-
-    if (currentUser && participantIds.includes(currentUser.id)) {
-      setCurrentUser(prev => ({
-        ...prev,
-        applyingDates: (prev.applyingDates || []).filter(d => !datesToUnlock.includes(d))
-      }));
-    }
-    return nextEmployees;
   };
 
+  const reqMonthKey = getReqMonthKey(req);
+
   if (action === 'Approve') {
-    // 💡 情況 A：同仁全員簽完，轉 PendingAdmin
     if (req.status === 'WaitingParticipants') {
-      const nextRequests = swapRequests.map(r => r.id === req.id ? { ...r, status: 'PendingAdmin' } : r);
-      setSwapRequests(nextRequests);
-      saveData({ swapRequests: nextRequests });
+      patchSwapRequestsMonth(reqMonthKey, list => list.map(r => r.id === req.id ? { ...r, status: 'PendingAdmin' } : r));
     } 
-    // 💡 情況 B：組長核定 Approved
     else if (req.status === 'PendingAdmin') {
       const targetMonthKey = req.date ? req.date.substring(0, 7) : currentMonth;
 
       let isAllShiftsValid = true;
       let errorMsg = "";
 
-      // 💡 升級：只有「單日換班」才需要進行舊班別字串比對，整段換班跳過。
       if (req.participants && !req.isBundle) {
         req.participants.forEach(p => {
           const exactDay = p.day || req.day || (req.startDate ? req.startDate.split('-')[2] : null);
@@ -3140,83 +3297,63 @@ const handleRecordAction = (req, action) => {
       }
 
       const nextStatus = 'Approved';
-      const ns = deepClone(schedule);
-      if (!ns[targetMonthKey]) ns[targetMonthKey] = {};
+      const monthSchedBase = deepClone(schedule[targetMonthKey] || {});
 
       let daysArray = [];
         if (req.isBundle && req.daysToSwap) {
-          // 已經是完整字串陣列 ["YYYY-MM-DD", ...]，直接複製賦值
           daysArray = [...req.daysToSwap];
         } else {
-          // 💡 完全還原你原本舊程式碼的邏輯，不進行任何調整，確保下游安全：
           const exactDay = req.day || (req.date ? Number(req.date.split('-')[2]) : null);
           if (exactDay) daysArray = [exactDay];
         }
 
-      // 2. 針對每一天，進行班別交換
-      daysArray.forEach(d => {
+      daysArray.forEach(dRaw => {
+        // daysToSwap 可能是 "YYYY-MM-DD"（整段換班）或純數字（單日換班），統一換算成當月的「日」數字
+        const d = req.isBundle ? Number(String(dRaw).split('-')[2]) : dRaw;
         if (!req.participants || req.participants.length < 2) return;
 
         const originalShifts = req.participants.map(p => {
-          if (!ns[targetMonthKey][p.name]) ns[targetMonthKey][p.name] = {};
-          return ns[targetMonthKey][p.name][d] || "-";
+          if (!monthSchedBase[p.name]) monthSchedBase[p.name] = {};
+          return monthSchedBase[p.name][d] || "-";
         });
 
         req.participants.forEach((p, idx) => {
           const nextIdx = (idx + 1) % req.participants.length;
-          ns[targetMonthKey][p.name][d] = originalShifts[nextIdx];
+          monthSchedBase[p.name][d] = originalShifts[nextIdx];
         });
       });
 
-      const nextRequests = swapRequests.map(r => r.id === req.id ? { ...r, status: nextStatus } : r);
+      setSchedule(prev => ({ ...prev, [targetMonthKey]: monthSchedBase }));
 
-      // 💡 修正點 1：傳入完整的 req 物件，而不是舊的 req.date，這樣才能解鎖一整段！
-      const nextEmps = unlockDate(req.participants, req);
-
-      setSchedule(ns);
-      setSwapRequests(nextRequests);
-      saveData({ schedule: ns, swapRequests: nextRequests, employees: nextEmps });
+      // 💡 分流寫入：schedule 只存到「目標月份自己的文件」；換班紀錄只更新這一筆申請所屬的月份文件
+      saveScheduleMonth(targetMonthKey, monthSchedBase);
+      patchSwapRequestsMonth(reqMonthKey, list => list.map(r => r.id === req.id ? { ...r, status: nextStatus } : r));
+      doUnlock();
     }
   } 
   else if (action === 'Reject' || action === 'Delete') {
-    const nextRequests = (action === 'Delete') 
-      ? swapRequests.filter(r => r.id !== req.id)
-      : swapRequests.map(r => r.id === req.id ? { ...r, status: 'Rejected' } : r);
-
-    // 💡 修正點 2：撤回與刪除時，也一併呼叫升級版的 unlockDate 傳入完整的 req 進行整段解鎖！
-    const nextEmps = unlockDate(req.participants, req);
-
-    setSwapRequests(nextRequests);
-    saveData({ swapRequests: nextRequests, employees: nextEmps });
+    patchSwapRequestsMonth(reqMonthKey, list => (action === 'Delete')
+      ? list.filter(r => r.id !== req.id)
+      : list.map(r => r.id === req.id ? { ...r, status: 'Rejected' } : r));
+    doUnlock();
   }
 };
 
-// 💡 在 main 組件內部的 handle 函式區域新增
 const handleParticipantApprove = (reqId) => {
-  const nextRequests = swapRequests.map(req => {
-    if (req.id === reqId) {
-      // 1. 更新當前登入者的簽核狀態
-      const nextApprovals = (req.approvals || []).map(a => 
-        a.id === currentUser.id 
-          ? { ...a, status: 'Approved', updatedAt: new Date().toISOString() } 
-          : a
-      );
+  // 先找出這筆申請屬於哪個月份，才能只更新那個月份自己的文件
+  const monthKey = Object.keys(swapRequestsByMonth).find(m => (swapRequestsByMonth[m] || []).some(r => r.id === reqId));
+  if (!monthKey) return;
 
-      // 2. 檢查是否除了發起人以外的所有參與者都簽完了
-      const allOthersApproved = nextApprovals.every(a => a.status === 'Approved');
-
-      return {
-        ...req,
-        approvals: nextApprovals,
-        // 💡 如果全員簽完，狀態轉為 'PendingAdmin' 送交主管
-        status: allOthersApproved ? 'PendingAdmin' : 'WaitingParticipants'
-      };
-    }
-    return req;
-  });
-
-  setSwapRequests(nextRequests);
-  saveData({ swapRequests: nextRequests });
+  patchSwapRequestsMonth(monthKey, list => list.map(req => {
+    if (req.id !== reqId) return req;
+    const nextApprovals = (req.approvals || []).map(a => 
+      a.id === currentUser.id 
+        ? { ...a, status: 'Approved', updatedAt: new Date().toISOString() } 
+        : a
+    );
+    const allOthersApproved = nextApprovals.every(a => a.status === 'Approved');
+    return { ...req, approvals: nextApprovals, status: allOthersApproved ? 'PendingAdmin' : 'WaitingParticipants' };
+  }));
 };
 
     const exportScheduleCSV = (prefix = "") => {
@@ -3226,23 +3363,136 @@ const handleParticipantApprove = (reqId) => {
     const b = new Blob([csv], { type: 'text/csv;charset=utf-8' }), l = document.createElement("a"); l.href = URL.createObjectURL(b); l.download = `${fp}班表_${currentMonth}.csv`; l.click();
   };
 
+  // ---------------------------------------------------------------------------------
+  // 💡 系統完整備份 / 還原 (對應「Firestore 欄位數上限、想手動下載備份」需求)
+  // 下載：把 meta 文件 + 全部 monthlyData 子集合文件，打包成一份 JSON 讓管理員存在自己電腦
+  // 上傳：讀取 JSON，寫回 meta 文件與每一份月份文件 (逐一 setDoc，不受 20000 欄位限制影響)
+  // ---------------------------------------------------------------------------------
+  const handleExportFullBackup = async () => {
+    try {
+      const metaSnap = await getDoc(mainDocRef);
+      const meta = metaSnap.exists() ? metaSnap.data() : {};
+      const monthsSnap = await getDocs(monthlyColRef);
+      const monthlyData = {};
+      monthsSnap.forEach(docSnap => { monthlyData[docSnap.id] = docSnap.data(); });
+
+      const backup = {
+        exportedAt: new Date().toISOString(),
+        version: 'V1.9',
+        meta: {
+          employees: meta.employees || [],
+          shifts: meta.shifts || [],
+          holidays: meta.holidays || {},
+          personDayRules: meta.personDayRules || [],
+          // 💡 換班紀錄現在存在各月份文件裡（monthlyData 已包含），這裡不再重複備份
+          preLeaveMeta: meta.preLeaveMeta || { weekendLimit: 10, weekdayLimit: 3, lotteryDay: 15, drawnMonths: [] }
+        },
+        monthlyData
+      };
+
+      const blob = new Blob([JSON.stringify(backup, null, 2)], { type: 'application/json;charset=utf-8;' });
+      const link = document.createElement("a");
+      link.href = URL.createObjectURL(blob);
+      link.download = `藥劑部班表系統_完整備份_${new Date().toISOString().split('T')[0]}.json`;
+      link.click();
+    } catch (error) {
+      console.error("備份下載失敗:", error);
+      alert("備份下載失敗，請檢查網路連線後再試一次。");
+    }
+  };
+
+  const handleImportFullBackup = (file) => {
+    const reader = new FileReader();
+    reader.onload = async (ev) => {
+      try {
+        const backup = JSON.parse(ev.target.result);
+        if (!backup || !backup.meta) { alert("備份檔格式錯誤，找不到 meta 資料。"); return; }
+
+        const confirmRestore = window.confirm(
+          `⚠️ 即將用此備份檔(匯出時間: ${backup.exportedAt || '未知'})覆蓋雲端目前的所有資料！\n\n` +
+          `包含：人員名冊、班別代碼、假日設定、人日規則、換班紀錄，以及全部月份的班表/顏色/預假資料。\n\n` +
+          `此動作無法復原，確定要繼續嗎？`
+        );
+        if (!confirmRestore) return;
+
+        await setDoc(mainDocRef, {
+          employees: backup.meta.employees || [],
+          shifts: backup.meta.shifts || [],
+          holidays: backup.meta.holidays || {},
+          personDayRules: backup.meta.personDayRules || [],
+          preLeaveMeta: backup.meta.preLeaveMeta || { weekendLimit: 10, weekdayLimit: 3, lotteryDay: 15, drawnMonths: [] },
+          // 順手清掉舊版可能殘留在主文件裡的舊格式欄位（包含舊版把換班紀錄整包放在這裡的情況）
+          schedule: deleteField(),
+          cellColors: deleteField(),
+          preLeaveData: deleteField(),
+          swapRequests: deleteField()
+        }, { merge: true });
+
+        const monthlyData = deepClone(backup.monthlyData || {});
+
+        // 💡 相容舊版備份檔：如果備份是舊格式、換班紀錄整包放在 meta.swapRequests，
+        // 依每筆申請的日期分組，補進對應月份的 monthlyData 裡再一起寫回
+        if (backup.meta.swapRequests && Array.isArray(backup.meta.swapRequests)) {
+          backup.meta.swapRequests.forEach(req => {
+            const m = getReqMonthKey(req);
+            if (!monthlyData[m]) monthlyData[m] = {};
+            if (!Array.isArray(monthlyData[m].swapRequests)) monthlyData[m].swapRequests = [];
+            monthlyData[m].swapRequests.push(req);
+          });
+        }
+
+        for (const monthKey of Object.keys(monthlyData)) {
+          await setDoc(getMonthDocRef(monthKey), monthlyData[monthKey], { merge: true });
+        }
+
+        alert(`還原完成！已寫回 ${Object.keys(monthlyData).length} 個月份的資料。`);
+      } catch (error) {
+        console.error("還原失敗:", error);
+        alert("還原失敗，請確認上傳的是本系統匯出的備份 JSON 檔。");
+      }
+    };
+    reader.readAsText(file);
+  };
+
   return (
     <div className="flex flex-col h-screen bg-white font-sans text-gray-900 overflow-hidden">
-      <Header currentMonth={currentMonth} setCurrentMonth={setCurrentMonth} currentPage={currentPage} handlePageChange={handlePageChange} isLoggedIn={isLoggedIn} currentUser={currentUser} handleLogout={()=>{setIsLoggedIn(false); setCurrentUser(null); setCurrentPage('home');}} exportScheduleCSV={exportScheduleCSV} swapRequests={swapRequests} isDirty={isDirty} />
+      <Header 
+        currentMonth={currentMonth} 
+        setCurrentMonth={setCurrentMonth} 
+        currentPage={currentPage} 
+        handlePageChange={handlePageChange} 
+        isLoggedIn={isLoggedIn} 
+        currentUser={currentUser} 
+        handleLogout={()=>{setIsLoggedIn(false); setCurrentUser(null); setCurrentPage('home');}} 
+        exportScheduleCSV={exportScheduleCSV} 
+        swapRequests={swapRequests} 
+        isDirty={isDirty}
+      />
       <main className="flex-grow flex flex-col overflow-hidden">
         {(() => {
+          const isAdmin = currentUser?.role === '0';
+          const adminOnlyPages = ['account', 'shifts', 'schedule', 'report'];
+          // 💡 防呆：即使頁面被直接切換過去（例如網址列/重整），非管理員一律導回首頁
+          if (adminOnlyPages.includes(currentPage) && !isAdmin) {
+            return (
+              <div className="flex flex-col items-center justify-center h-full text-gray-400 gap-3">
+                <ShieldAlert size={40} />
+                <p className="font-black">此功能僅限管理員使用</p>
+              </div>
+            );
+          }
           switch (currentPage) {
             case 'home': return <ScheduleTableView currentMonth={currentMonth} employees={employees} schedule={schedule} cellColors={cellColors} daysInMonth={daysInMonth} swapRequests={swapRequests} currentPage={currentPage} currentUser={currentUser} />;
-            case 'account': return <AccountManagementView employees={employees} setEmployees={(val) => { setEmployees(val); saveData({ employees: val });}} setDeleteTarget={setDeleteTarget} />;
-            case 'shifts': return <ShiftsManagementView shifts={shifts} setShifts={(val) => { setShifts(val); saveData({ shifts: val }); }}  holidays={holidays} setHolidays={(val) => { setHolidays(val); saveData({ holidays: val }); }}  setDeleteShiftTarget={setDeleteShiftTarget} personDayRules={personDayRules}  setPersonDayRules={(val) => { setPersonDayRules(val); saveData({ personDayRules: val }); }} />;
+            case 'account': return <AccountManagementView employees={employees} updateEmployees={updateEmployees} setDeleteTarget={setDeleteTarget} onExportFullBackup={handleExportFullBackup} onImportFullBackup={handleImportFullBackup} />;
+            case 'shifts': return <ShiftsManagementView shifts={shifts} updateShifts={updateShifts} holidays={holidays} updateHolidays={updateHolidays} setDeleteShiftTarget={setDeleteShiftTarget} personDayRules={personDayRules} updatePersonDayRules={updatePersonDayRules} />;
             case 'swap': return <ScheduleTableView currentMonth={currentMonth} employees={employees} schedule={schedule} cellColors={cellColors} daysInMonth={daysInMonth} onCellClick={handleSwapApply} swapRequests={swapRequests} currentPage={currentPage} currentUser={currentUser} swapTarget={swapTarget} handleSwapBack={handleSwapBack} isCycleEnd={isCycleEnd}/>;
             case 'records': return <RecordsView currentUser={currentUser} swapRequests={swapRequests} onAction={handleRecordAction} onApprove={handleParticipantApprove} setRejectingReq={setRejectingReq} schedule={schedule} currentMonth={currentMonth} />;
-            case 'leave':  return  <PreLeaveView currentMonth={currentMonth} employees={employees} daysInMonth={daysInMonth} currentUser={currentUser} schedule={schedule} setSchedule={(val) => { setSchedule(val); saveData({ schedule: val }); }} preLeaveData={preLeaveData} setPreLeaveData={(val) => { setPreLeaveData(val); saveData({ preLeaveData: val }); }} saveData={saveData} />;
-            case 'schedule': return <SchedulingView currentMonth={currentMonth} employees={employees} daysInMonth={daysInMonth} schedule={schedule} setSchedule={setSchedule} cellColors={cellColors} setCellColors={setCellColors} shifts={shifts} exportScheduleCSV={exportScheduleCSV} setCurrentPage={setCurrentPage} setIsDirty={setIsDirty} saveData={saveData} preLeaveData={preLeaveData}  setPreLeaveData={setPreLeaveData}  isAdmin={currentUser?.role === '0'}/> ;
+            case 'leave':  return  <PreLeaveView currentMonth={currentMonth} employees={employees} daysInMonth={daysInMonth} currentUser={currentUser} schedule={schedule} setSchedule={setSchedule} preLeaveData={preLeaveData} setPreLeaveData={setPreLeaveData} savePreLeaveMonth={savePreLeaveMonth} saveMetaPreLeave={saveMetaPreLeave} saveScheduleMonth={saveScheduleMonth} />;
+            case 'schedule': return <SchedulingView currentMonth={currentMonth} employees={employees} daysInMonth={daysInMonth} schedule={schedule} setSchedule={setSchedule} cellColors={cellColors} setCellColors={setCellColors} shifts={shifts} exportScheduleCSV={exportScheduleCSV} setCurrentPage={setCurrentPage} setIsDirty={setIsDirty} saveScheduleMonth={saveScheduleMonth} saveCellColorsMonth={saveCellColorsMonth} preLeaveData={preLeaveData} setPreLeaveData={setPreLeaveData} savePreLeaveMonth={savePreLeaveMonth} isAdmin={currentUser?.role === '0'} isMonthDrawn={(preLeaveData.drawnMonths || []).includes(currentMonth)} /> ;
             case 'report': return <ManagementReportView currentMonth={currentMonth} employees={employees} schedule={schedule} personDayRules={personDayRules} holidays={holidays} shifts={shifts} cellColors={cellColors}/>;
             case 'login': {
               const triggerLogin = () => { const id = document.getElementById('uid')?.value.toUpperCase(); const pwd = document.getElementById('upwd')?.value; if (!pwd) { alert("請輸入密碼！"); return; } handleLoginAction(id, pwd); };
-              return (<div className="flex flex-col items-center justify-center min-h-[60vh] p-4"><div className="bg-white p-10 rounded-[2.5rem] shadow-2xl border max-w-sm w-full text-center"><h2 className="text-xl font-black mb-2 text-gray-800">藥劑部 班表系統登入</h2><div className="text-[10px] text-gray-400 font-bold mb-8">第一次輸入的密碼會自動設定為密碼</div><div className="space-y-4"><input className="w-full border-2 p-3 rounded-2xl outline-none font-mono text-center uppercase" placeholder="員編" id="uid" onInput={(e) => e.target.value = e.target.value.toUpperCase()} onKeyDown={(e) => e.key === 'Enter' && triggerLogin()} /><div className="relative"><input className="w-full border-2 p-3 rounded-2xl outline-none text-center" type={showPassword ? "text" : "password"} placeholder="密碼" id="upwd" onKeyDown={(e) => e.key === 'Enter' && triggerLogin()} /><button onClick={()=>setShowPassword(!showPassword)} className="absolute right-4 top-4 text-gray-400">{showPassword ? <Eye size={18}/> : <EyeOff size={18}/>}</button></div><button onClick={triggerLogin} className="w-full bg-blue-600 text-white p-3 rounded-2xl font-black shadow transition-all transform active:scale-95">進入系統</button></div></div><div className="mt-12 text-[11px] text-gray-400 font-bold tracking-wider">© 2026 NTUH Yunlin Pharmacy - V1.8</div></div>);
+              return (<div className="flex flex-col items-center justify-center min-h-[60vh] p-4"><div className="bg-white p-10 rounded-[2.5rem] shadow-2xl border max-w-sm w-full text-center"><h2 className="text-xl font-black mb-2 text-gray-800">藥劑部 班表系統登入</h2><div className="text-[10px] text-gray-400 font-bold mb-8">第一次輸入的密碼會自動設定為密碼</div><div className="space-y-4"><input className="w-full border-2 p-3 rounded-2xl outline-none font-mono text-center uppercase" placeholder="員編" id="uid" onInput={(e) => e.target.value = e.target.value.toUpperCase()} onKeyDown={(e) => e.key === 'Enter' && triggerLogin()} /><div className="relative"><input className="w-full border-2 p-3 rounded-2xl outline-none text-center" type={showPassword ? "text" : "password"} placeholder="密碼" id="upwd" onKeyDown={(e) => e.key === 'Enter' && triggerLogin()} /><button onClick={()=>setShowPassword(!showPassword)} className="absolute right-4 top-4 text-gray-400">{showPassword ? <Eye size={18}/> : <EyeOff size={18}/>}</button></div><button onClick={triggerLogin} className="w-full bg-blue-600 text-white p-3 rounded-2xl font-black shadow transition-all transform active:scale-95">進入系統</button></div></div><div className="mt-12 text-[11px] text-gray-400 font-bold tracking-wider">© 2026 NTUH Yunlin Pharmacy - V1.9</div></div>);
             }
             default: return null;
           }
@@ -3250,144 +3500,102 @@ const handleParticipantApprove = (reqId) => {
       </main>
       <Modal isOpen={showExitConfirm} onClose={() => { setShowExitConfirm(false); setTargetPage(null); }} onConfirm={confirmExit} title="班表尚未發佈" message="您有變更排班表，但尚未「發佈班表」。確定要離開嗎？" confirmText="仍要離開" cancelText="留在這裏" />
 
-      {/* 💡 這是臨時加的緊急解鎖按鈕，清空舊資料後就可以整段刪除 */}
-      {/*<button
-        onClick={() => {
-          const nextEmps = employees.map(e => ({ ...e, applyingDates: [] }));
-          setEmployees(nextEmps);
-          if (currentUser) setCurrentUser(prev => ({ ...prev, applyingDates: [] }));
-          saveData({ employees: nextEmps });
-          alert("✅ 系統中所有卡住的日期鎖已全面解除！請重新測試。");
-        }}
-        className="bg-red-500 text-white px-3 py-1 rounded-lg text-sm font-bold shadow-md hover:bg-red-600 transition-all z-50 mb-4 ml-4"
-      >
-        🚨 緊急強制解鎖
-      </button> */}
-
       <SwapRequestModal 
-        // 1. 狀態與基礎資料 (確保 isOpen 只出現一次)
         isOpen={isModalOpen && !!swapTarget}  
         data={swapTarget} 
         schedule={schedule} 
         currentMonth={currentMonth}
-
-        // 2. 視窗控制權限 (確保 setIsModalOpen 只出現一次)
         setIsModalOpen={setIsModalOpen}
-
-        // 3. 動作函式
         handleSwapBack={handleSwapBack} 
-
-        // 4. 取消/關閉邏輯
         onClose={() => { 
           setSwapTarget(null); 
           setIsModalOpen(false); 
         }} 
-
-        // 5. 確認/送出邏輯
         onConfirm={() => {
           const targetDateStr = swapTarget.date;
 
-          // 💡 建立參與者的簽核名單 (排除申請人自己)
           const approvalList = swapTarget.participants
             .filter(p => p.id !== currentUser.id)
-            .map(p => ({
-              id: p.id,
-              name: p.name,
-              status: 'Pending', // 預設為待簽核
-              updatedAt: null
-            }));
+            .map(p => ({ id: p.id, name: p.name, status: 'Pending', updatedAt: null }));
 
-          const nextRequests = [
-            {
-              id: Date.now().toString(),
-              type: swapTarget.isBundle ? 'Bundle' : 'Single',
-              status: 'WaitingParticipants', // 💡 狀態改為：等待參與者核定
-              date: targetDateStr,
-              participants: swapTarget.participants,
-              approvals: approvalList, // 💡 新增簽核進度追蹤
-              createdAt: new Date().toISOString(),
-              creatorId: swapTarget.creatorId,
-              creatorName: swapTarget.creatorName,
-              isBundle: swapTarget.isBundle,
-              startDate: swapTarget.startDate,
-              endDate: swapTarget.endDate,
-              daysToSwap: swapTarget.daysToSwap // 這裡安全承接新格式
-            },
-            ...swapRequests
-          ];
+          const newRequest = {
+            id: Date.now().toString(),
+            type: swapTarget.isBundle ? 'Bundle' : 'Single',
+            status: 'WaitingParticipants',
+            date: targetDateStr,
+            timestamp: Date.now(),
+            participants: swapTarget.participants,
+            approvals: approvalList,
+            createdAt: new Date().toISOString(),
+            creatorId: swapTarget.creatorId,
+            creatorName: swapTarget.creatorName,
+            creatorShift: swapTarget.creatorShift,
+            targetId: swapTarget.targetId,
+            targetName: swapTarget.targetName,
+            targetShift: swapTarget.targetShift,
+            isBundle: swapTarget.isBundle,
+            startDate: swapTarget.startDate,
+            endDate: swapTarget.endDate,
+            daysToSwap: swapTarget.daysToSwap
+          };
 
-          // 💡 1. 產生需要上鎖的完整日期陣列 (單日或整段)
           let datesToLock = [targetDateStr];
           if (swapTarget.isBundle && swapTarget.daysToSwap) {
-            // 💡 修正關鍵：因為 daysToSwap 已經是完整的 ["YYYY-MM-DD", ...] 陣列
-            // 我們完全保留原本的 datesToLock 賦值邏輯，移除會造成跨年 Bug 的月份拼接
             datesToLock = [...swapTarget.daysToSwap];
           }
 
-          // 💡 2. 將整組陣列寫入同仁狀態中上鎖
           const allParticipantIds = swapTarget.participants.map(p => p.id);
-          const nextEmps = employees.map(e => {
-            if (allParticipantIds.includes(e.id)) {
-              const dates = Array.isArray(e.applyingDates) ? e.applyingDates : [];
-              // 合併原本的鎖與新的鎖，並去除重複
-              const newDates = Array.from(new Set([...dates, ...datesToLock]));
-              return { ...e, applyingDates: newDates };
-            }
-            return e;
-          });
 
-          setSwapRequests(nextRequests);
-          setEmployees(nextEmps);
-          const updatedMe = nextEmps.find(e => e.id === currentUser.id);
-          if (updatedMe) setCurrentUser(updatedMe);
+          // 💡 新申請只會寫入「這筆申請所屬月份」自己的文件，不會動到其他月份的換班紀錄
+          patchSwapRequestsMonth(getReqMonthKey(newRequest), list => [newRequest, ...list]);
 
-          saveData({ swapRequests: nextRequests, employees: nextEmps });
+          // 💡 上鎖同樣走 transaction 安全更新，避免跟其他同時發生的員工異動互相覆蓋
+          updateEmployees(latest => latest.map(e => {
+            if (!allParticipantIds.includes(e.id)) return e;
+            const dates = Array.isArray(e.applyingDates) ? e.applyingDates : [];
+            return { ...e, applyingDates: Array.from(new Set([...dates, ...datesToLock])) };
+          }));
+
+          if (currentUser) {
+            setCurrentUser(prev => ({
+              ...prev,
+              applyingDates: Array.from(new Set([...(prev.applyingDates || []), ...datesToLock]))
+            }));
+          }
+
           setSwapTarget(null);
           setIsModalOpen(false);
         }}
       />
-      {/* 以下 Modal 維持不變 */}
+
       <Modal 
         isOpen={!!rejectingReq} 
         onClose={()=>setRejectingReq(null)} 
         onConfirm={()=>{ 
-          // 1. 更新單據狀態為被主管拒絕 (Rejected)
-          const nextRequests = swapRequests.map(r => r.id === rejectingReq.id ? { ...r, status: 'Rejected', adminNote: rejectNote || "管理員否決" } : r);
-
-          // 2. 💡 補上解鎖邏輯：找出這張單子的所有人與日期
           const participantsToUnlock = rejectingReq.participants 
             ? rejectingReq.participants.map(p => p.id) 
             : [rejectingReq.creatorId, rejectingReq.targetId];
 
-          // 💡 3. 產生需要解鎖的完整日期陣列
           let datesToUnlock = rejectingReq.date ? [rejectingReq.date] : [];
-          if (rejectingReq.isBundle && Array.isArray(rejectingReq.daysToSwap) && rejectingReq.date) {
-            const monthPrefix = rejectingReq.date.substring(0, 7);
-            datesToUnlock = rejectingReq.daysToSwap.map(d => `${monthPrefix}-${String(d).padStart(2, '0')}`);
+          if (rejectingReq.isBundle && Array.isArray(rejectingReq.daysToSwap)) {
+            datesToUnlock = [...rejectingReq.daysToSwap];
           }
 
-          // 💡 4. 產出解鎖後的全新 employees 陣列
-          const nextEmps = employees.map(e => {
-            if (participantsToUnlock.includes(e.id)) {
-              const currentDates = e.applyingDates || [];
-              return { ...e, applyingDates: currentDates.filter(d => !datesToUnlock.includes(d)) };
-            }
-            return e;
-          });
+          patchSwapRequestsMonth(getReqMonthKey(rejectingReq), list => list.map(r => r.id === rejectingReq.id ? { ...r, status: 'Rejected', adminNote: rejectNote || "管理員否決" } : r));
 
-          // 4. 同步更新所有狀態
-          setSwapRequests(nextRequests);
-          setEmployees(nextEmps); // 🔥 確保管理員點選時也更新全域同仁狀態
+          updateEmployees(latest => latest.map(e => {
+            if (!participantsToUnlock.includes(e.id)) return e;
+            const currentDates = e.applyingDates || [];
+            return { ...e, applyingDates: currentDates.filter(d => !datesToUnlock.includes(d)) };
+          }));
 
-          // 5. 同步更新目前登入者狀態（如果管理員自己也在換班名單內）
           if (currentUser && participantsToUnlock.includes(currentUser.id)) {
             setCurrentUser(prev => ({
               ...prev,
               applyingDates: (prev.applyingDates || []).filter(d => !datesToUnlock.includes(d))
             }));
           }
-          // 6. 寫入資料庫並關閉視窗
-          saveData({ swapRequests: nextRequests, employees: nextEmps }); // 🔥 這裡一定要把解鎖後的 nextEmps 存進去
+
           setRejectNote(""); 
           setRejectingReq(null); 
         }} 
@@ -3396,8 +3604,8 @@ const handleParticipantApprove = (reqId) => {
       >
         <textarea className="w-full border-2 rounded-2xl p-3 text-sm outline-none" placeholder="原因..." rows={3} value={rejectNote} onChange={(e) => setRejectNote(e.target.value)} />
       </Modal>
-      <Modal isOpen={!!deleteTarget} onClose={()=>setDeleteTarget(null)} onConfirm={()=>{const next = employees.filter(e=>e.id!==deleteTarget.id); setEmployees(next); saveData({ employees: next }); setDeleteTarget(null)}} title="確定刪除人員？" message="移除該人員將影響本期報表。" />
-      <Modal isOpen={!!deleteShiftTarget} onClose={()=>setDeleteShiftTarget(null)} onConfirm={()=>{const next = shifts.filter(s=>s.id!==deleteShiftTarget.id); setShifts(next); saveData({ shifts: next }); setDeleteShiftTarget(null)}} title="確定刪除班別？" message={`移除 ${deleteShiftTarget?.name}。`} />    
+      <Modal isOpen={!!deleteTarget} onClose={()=>setDeleteTarget(null)} onConfirm={()=>{ updateEmployees(latest => latest.filter(e=>e.id!==deleteTarget.id)); setDeleteTarget(null); }} title="確定刪除人員？" message="移除該人員將影響本期報表。" />
+      <Modal isOpen={!!deleteShiftTarget} onClose={()=>setDeleteShiftTarget(null)} onConfirm={()=>{ updateShifts(latest => latest.filter(s=>s.id!==deleteShiftTarget.id)); setDeleteShiftTarget(null); }} title="確定刪除班別？" message={`移除 ${deleteShiftTarget?.name}。`} />
     </div>
   );
 };
