@@ -530,7 +530,7 @@ const ScheduleTableView = ({ currentMonth, employees, schedule, cellColors, days
   );
 };
 
- const PreLeaveView = ({ currentMonth, employees, daysInMonth, currentUser, schedule, setSchedule, preLeaveData, setPreLeaveData, savePreLeaveMonth, saveMetaPreLeave, saveScheduleMonth }) => {
+ const PreLeaveView = ({ currentMonth, employees, daysInMonth, currentUser, schedule, setSchedule, preLeaveData, setPreLeaveData, savePreLeaveMonth, saveMetaPreLeave, saveScheduleMonth, runLotteryTransaction, resetMonthDraw }) => {
   const [defaultHolidayLimit, setDefaultHolidayLimit] = useState(10);
   const [defaultWeekdayLimit, setDefaultWeekdayLimit] = useState(3);
   const [lotteryDay, setLotteryDay] = useState(15);
@@ -648,43 +648,34 @@ const ScheduleTableView = ({ currentMonth, employees, schedule, cellColors, days
   };
 
 
-  // 💡 安全防白屏、支援手動與自動抽籤的 handleLottery
+  // 💡 修正版 handleLottery：整段抽籤邏輯已搬進 App 層的 runLotteryTransaction，
+  // 用 Firestore Transaction 保護，並以「讀取當下」的雲端最新資料計算，
+  // 不再用畫面上可能過期的本地 schedule / apps 去抽，也修正了先前把結果寫進
+  // 錯誤路徑（schedule.schedule.xxx）導致抽籤結果消失的 bug。
   const handleLottery = async (e) => {
     if (isMonthDrawn) return;
 
-    // 1️⃣ 檢查這個觸發是不是來自於自動抽籤
     const isAuto = e && e.isAuto;
 
     if (!isAuto) {
-      // 如果不是自動觸發（代表是管理員手動按下「立即手動抽籤」按鈕），才跳出確認詢問視窗
       const confirmDraw = window.confirm("確定要立即手動抽籤嗎？抽籤後將會鎖定本月班表。");
       if (!confirmDraw) return;
     }
 
-    const nextMonthSched = { ...(schedule[currentMonth] || {}) };
+    const result = await runLotteryTransaction(currentMonth, daysInMonth, defaultHolidayLimit, defaultWeekdayLimit);
 
-    daysInMonth.forEach(d => {
-      const candidates = getLeaveList(d.day);
-      const limit = parseInt(preLeaveData.dailyLimits?.[currentMonth]?.[d.day] || (d.rawDay === 0 || d.rawDay === 6 || d.holiday ? defaultHolidayLimit : defaultWeekdayLimit));
-      const winners = [...candidates].sort(() => 0.5 - Math.random()).slice(0, limit);
-      winners.forEach(name => {
-        if (!nextMonthSched[name]) nextMonthSched[name] = {};
-        nextMonthSched[name][d.day] = "休"; 
-      });
-    });
+    if (!result?.ok) {
+      if (result?.reason === 'already-drawn') {
+        // 💡 代表在你按下按鈕的同一時間，已經有別的裝置搶先完成抽籤了，這是正常、預期內的保護行為
+        if (!isAuto) alert(`${currentMonth} 剛好已被其他裝置完成抽籤，畫面即將自動更新結果，不會重複抽獎。`);
+      } else if (!isAuto) {
+        alert("抽籤失敗，請檢查網路連線後再試一次。");
+      }
+      return;
+    }
 
-    const nextSchedule = { ...schedule, [currentMonth]: nextMonthSched };
-    const nextDrawnMonths = [...(preLeaveData.drawnMonths || []), currentMonth];
-    const nextPreLeave = { ...preLeaveData, drawnMonths: nextDrawnMonths };
+    // 抽籤結果已經直接寫入雲端該月份文件，畫面會透過即時監聽自動更新，這裡不需要再手動 setSchedule/setPreLeaveData
 
-    setSchedule(nextSchedule);
-    setPreLeaveData(nextPreLeave);
-
-    // 💡 修正：只把「當月」的 schedule 存到該月份文件；drawnMonths 是全域清單，存到 meta
-    await saveScheduleMonth(currentMonth, { schedule: nextMonthSched });
-    await saveMetaPreLeave({ drawnMonths: nextDrawnMonths });
-
-    // 2️⃣ 只有在「手動按下按鈕(!isAuto)」時，才允許執行彈窗提示！
     if (!isAuto) {
       setTimeout(() => {
         alert(`${currentMonth} 手動抽籤完成！結果已同步至班表。`);
@@ -894,6 +885,22 @@ const ScheduleTableView = ({ currentMonth, employees, schedule, cellColors, days
                 {!isMonthDrawn && isAdmin && (
                   <button onClick={handleLottery} className="flex-1 py-2 bg-red-500 text-white rounded-lg text-xs font-black shadow-sm active:scale-95 transition-transform">
                     <Dice5 size={14} className="inline mr-1"/>立即抽籤
+                  </button>
+                )}
+                {isMonthDrawn && isAdmin && (
+                  <button
+                    onClick={() => {
+                      const ok = window.confirm(
+                        `⚠️ 即將解除「${currentMonth}」的抽籤鎖定，讓本月可以重新執行抽籤。\n\n` +
+                        `不會刪除同仁的預假申請紀錄，但目前班表上已經標記為「休」的人會維持原樣，\n` +
+                        `重新抽籤只會針對名額還沒抽滿的日期繼續抽出中籤者。\n\n` +
+                        `確定要解鎖嗎？`
+                      );
+                      if (ok) resetMonthDraw(currentMonth);
+                    }}
+                    className="flex-1 py-2 bg-amber-500 text-white rounded-lg text-xs font-black shadow-sm active:scale-95 transition-transform"
+                  >
+                    <Undo2 size={14} className="inline mr-1"/>解鎖並重新抽籤
                   </button>
                 )}
                 <button onClick={handleExportPreLeave} className="flex-1 py-2 bg-green-600 text-white rounded-lg text-xs font-bold shadow-sm active:scale-95 transition-transform">
@@ -1473,6 +1480,11 @@ const AccountManagementView = ({ employees, updateEmployees, setDeleteTarget, on
                         <span className={`px-2 py-0.5 rounded-full text-[10px] font-black ${emp.role === '0' ? 'bg-purple-100 text-purple-600' : emp.role === '1' ? 'bg-blue-100 text-blue-600' : 'bg-gray-100 text-gray-500'}`}>
                           {getRoleLabel(emp.role)}
                         </span>
+                        {emp.password === "" && (
+                          <span className="ml-1 px-2 py-0.5 rounded-full text-[10px] font-black bg-amber-100 text-amber-600" title="下次登入時需先設定新密碼">
+                            尚未設定密碼
+                          </span>
+                        )}
                       </td>
                     </>
                   )}
@@ -2780,7 +2792,6 @@ const App = () => {
   useEffect(() => {
     localStorage.setItem('lastMonth', currentMonth);
   }, [currentMonth]);
-  const [showPassword, setShowPassword] = useState(false);
   const [employees, setEmployees] = useState(INITIAL_EMPLOYEES);
   const [shifts, setShifts] = useState(INITIAL_SHIFTS);
   const [holidays, setHolidays] = useState({ "2026-05-01": "勞動節" });
@@ -2845,6 +2856,63 @@ const App = () => {
   const saveCellColorsMonth = (monthKey, monthColorObj) => saveMonthDoc(monthKey, { cellColors: monthColorObj });
   const savePreLeaveMonth = (monthKey, partial) => saveMonthDoc(monthKey, partial); // partial: {apps} / {dailyLimits} / {remarks}
   const saveMetaPreLeave = (partial) => saveMeta({ preLeaveMeta: partial });
+
+  // ---------------------------------------------------------------------------------
+  // 💡 預假抽籤：整個「讀取申請名單 → 抽出中籤者 → 寫回班表 → 標記本月已抽籤」
+  // 全部包在同一個 Firestore Transaction 裡，且一律以 Transaction 當下讀到的最新資料為準
+  // （不使用畫面上可能過期的本地 state），確保無論同時有幾台裝置觸發，
+  // 只會有一次真正生效，其餘會在 Transaction 內偵測到「已抽籤」而自動放棄，不會互相覆蓋。
+  // ---------------------------------------------------------------------------------
+  const runLotteryTransaction = async (monthKey, daysInMonthArr, defaultHolidayLimit, defaultWeekdayLimit) => {
+    let result = null;
+    try {
+      await runTransaction(db, async (tx) => {
+        const mDocRef = getMonthDocRef(monthKey);
+        const snap = await tx.get(mDocRef);
+        const data = snap.exists() ? snap.data() : {};
+
+        if (data.isDrawn === true) { result = { ok: false, reason: 'already-drawn' }; return; }
+
+        const nextMonthSched = deepClone(data.schedule || {});
+        const apps = data.apps || {};
+        const dailyLimits = data.dailyLimits || {};
+
+        const getLeaveListFresh = (day) => employees
+          .filter(e => !e.isSeparator && !getIsNightClinic(e) && e.role !== '2' && e.role !== '3' && apps?.[e.name]?.[day] === "預假")
+          .map(e => e.name);
+
+        daysInMonthArr.forEach(d => {
+          const limit = parseInt(dailyLimits?.[d.day] || (d.rawDay === 0 || d.rawDay === 6 || d.holiday ? defaultHolidayLimit : defaultWeekdayLimit));
+
+          // 💡 先算出這天目前已經有多少人是「休」（例如手動排班已排定、或救援重抽前的既有結果），
+          // 只補抽名額還沒滿的部分，避免解鎖重新抽籤時把既有結果洗掉或抽出超過名額的人數
+          const alreadyOffCount = Object.values(nextMonthSched).filter(empDays => empDays && empDays[d.day] === "休").length;
+          const remainingSlots = limit - alreadyOffCount;
+          if (remainingSlots <= 0) return;
+
+          const candidates = getLeaveListFresh(d.day).filter(name => nextMonthSched[name]?.[d.day] !== "休");
+          const winners = [...candidates].sort(() => 0.5 - Math.random()).slice(0, remainingSlots);
+          winners.forEach(name => {
+            if (!nextMonthSched[name]) nextMonthSched[name] = {};
+            nextMonthSched[name][d.day] = "休";
+          });
+        });
+
+        // 💡 只用單一 tx.set 一次寫入 schedule + isDrawn，確保「抽籤結果」與「已抽籤標記」原子性地同時生效
+        tx.set(mDocRef, { schedule: nextMonthSched, isDrawn: true }, { merge: true });
+        result = { ok: true };
+      });
+    } catch (error) {
+      console.error("抽籤 Transaction 失敗:", error);
+      result = { ok: false, reason: 'error', error };
+    }
+    return result;
+  };
+
+  // 💡 管理員救援用：強制解鎖某個月份的「已抽籤」狀態，讓該月可以重新執行抽籤或手動調整。
+  // 只清除 isDrawn 這個旗標，不會動到同仁的申請紀錄(apps)，也不會清除既有班表。
+  const resetMonthDraw = (monthKey) => saveMonthDoc(monthKey, { isDrawn: false });
+
 
   // ---------------------------------------------------------------------------------
   // 💡 Transaction 安全寫入：employees / shifts / holidays / personDayRules
@@ -2948,7 +3016,9 @@ const App = () => {
               apps: d.preLeaveData?.apps?.[m] || {},
               dailyLimits: d.preLeaveData?.dailyLimits?.[m] || {},
               remarks: d.preLeaveData?.remarks?.[m] || {},
-              swapRequests: legacySwapByMonth[m] || []
+              swapRequests: legacySwapByMonth[m] || [],
+              // 💡 是否已抽籤改成各月份自己記錄，依照舊資料裡的 drawnMonths 陣列還原
+              isDrawn: (d.preLeaveData?.drawnMonths || []).includes(m)
             }, { merge: true });
           }
           const legacyPreLeave = d.preLeaveData || {};
@@ -2960,13 +3030,26 @@ const App = () => {
             preLeaveMeta: {
               weekendLimit: legacyPreLeave.weekendLimit ?? 10,
               weekdayLimit: legacyPreLeave.weekdayLimit ?? 3,
-              lotteryDay: legacyPreLeave.lotteryDay ?? 15,
-              drawnMonths: legacyPreLeave.drawnMonths || []
+              lotteryDay: legacyPreLeave.lotteryDay ?? 15
             }
           }, { merge: true });
           console.log(`✅ 舊版資料已自動搬遷至 ${monthKeys.size} 份月份文件，並清除主文件內舊格式殘留。`);
         } catch (err) {
           console.error("舊資料自動搬遷失敗:", err);
+        }
+      }
+
+      // 💡 第二階段遷移：先前版本把「已抽籤月份清單」存在 preLeaveMeta.drawnMonths（全域共用陣列），
+      // 這正是造成不同月份抽籤結果互相覆蓋的風險之一，這裡自動把它拆成各月份自己的 isDrawn 欄位
+      if (d.preLeaveMeta?.drawnMonths && Array.isArray(d.preLeaveMeta.drawnMonths) && d.preLeaveMeta.drawnMonths.length > 0) {
+        try {
+          for (const m of d.preLeaveMeta.drawnMonths) {
+            await setDoc(getMonthDocRef(m), { isDrawn: true }, { merge: true });
+          }
+          await setDoc(mainDocRef, { 'preLeaveMeta.drawnMonths': deleteField() }, { merge: true });
+          console.log(`✅ 已抽籤月份清單搬遷完成，共 ${d.preLeaveMeta.drawnMonths.length} 個月份。`);
+        } catch (err) {
+          console.error("已抽籤月份清單搬遷失敗:", err);
         }
       }
     }, (error) => console.error("雲端監聽失敗(meta):", error));
@@ -3002,15 +3085,19 @@ const App = () => {
         const nextApps = { ...(prevPreLeave.apps || {}) };
         const nextDailyLimits = { ...(prevPreLeave.dailyLimits || {}) };
         const nextRemarks = { ...(prevPreLeave.remarks || {}) };
+        const nextDrawnSet = new Set(prevPreLeave.drawnMonths || []);
         snap.docChanges().forEach(change => {
           const m = change.doc.id;
           const data = change.doc.data();
-          if (change.type === 'removed') { delete nextApps[m]; delete nextDailyLimits[m]; delete nextRemarks[m]; return; }
+          if (change.type === 'removed') { delete nextApps[m]; delete nextDailyLimits[m]; delete nextRemarks[m]; nextDrawnSet.delete(m); return; }
           nextApps[m] = data.apps || {};
           nextDailyLimits[m] = data.dailyLimits || {};
           nextRemarks[m] = data.remarks || {};
+          // 💡 「本月是否已抽籤」改成看該月份自己的文件裡的 isDrawn 欄位，
+          // 不再共用一個全域陣列，避免不同月份的抽籤結果互相覆蓋
+          if (data.isDrawn === true) nextDrawnSet.add(m); else nextDrawnSet.delete(m);
         });
-        return { ...prevPreLeave, apps: nextApps, dailyLimits: nextDailyLimits, remarks: nextRemarks };
+        return { ...prevPreLeave, apps: nextApps, dailyLimits: nextDailyLimits, remarks: nextRemarks, drawnMonths: Array.from(nextDrawnSet) };
       });
       setSwapRequestsByMonth(prev => {
         const next = { ...prev };
@@ -3499,12 +3586,11 @@ const handleParticipantApprove = (reqId) => {
             case 'shifts': return <ShiftsManagementView shifts={shifts} updateShifts={updateShifts} holidays={holidays} updateHolidays={updateHolidays} setDeleteShiftTarget={setDeleteShiftTarget} personDayRules={personDayRules} updatePersonDayRules={updatePersonDayRules} />;
             case 'swap': return <ScheduleTableView currentMonth={currentMonth} employees={employees} schedule={schedule} cellColors={cellColors} daysInMonth={daysInMonth} onCellClick={handleSwapApply} swapRequests={swapRequests} currentPage={currentPage} currentUser={currentUser} swapTarget={swapTarget} handleSwapBack={handleSwapBack} isCycleEnd={isCycleEnd}/>;
             case 'records': return <RecordsView currentUser={currentUser} swapRequests={swapRequests} onAction={handleRecordAction} onApprove={handleParticipantApprove} setRejectingReq={setRejectingReq} schedule={schedule} currentMonth={currentMonth} />;
-            case 'leave':  return  <PreLeaveView currentMonth={currentMonth} employees={employees} daysInMonth={daysInMonth} currentUser={currentUser} schedule={schedule} setSchedule={setSchedule} preLeaveData={preLeaveData} setPreLeaveData={setPreLeaveData} savePreLeaveMonth={savePreLeaveMonth} saveMetaPreLeave={saveMetaPreLeave} saveScheduleMonth={saveScheduleMonth} />;
+            case 'leave':  return  <PreLeaveView currentMonth={currentMonth} employees={employees} daysInMonth={daysInMonth} currentUser={currentUser} schedule={schedule} setSchedule={setSchedule} preLeaveData={preLeaveData} setPreLeaveData={setPreLeaveData} savePreLeaveMonth={savePreLeaveMonth} saveMetaPreLeave={saveMetaPreLeave} saveScheduleMonth={saveScheduleMonth} runLotteryTransaction={runLotteryTransaction} resetMonthDraw={resetMonthDraw} />;
             case 'schedule': return <SchedulingView currentMonth={currentMonth} employees={employees} daysInMonth={daysInMonth} schedule={schedule} setSchedule={setSchedule} cellColors={cellColors} setCellColors={setCellColors} shifts={shifts} exportScheduleCSV={exportScheduleCSV} setCurrentPage={setCurrentPage} setIsDirty={setIsDirty} saveScheduleMonth={saveScheduleMonth} saveCellColorsMonth={saveCellColorsMonth} preLeaveData={preLeaveData} setPreLeaveData={setPreLeaveData} savePreLeaveMonth={savePreLeaveMonth} isAdmin={currentUser?.role === '0'} isMonthDrawn={(preLeaveData.drawnMonths || []).includes(currentMonth)} /> ;
             case 'report': return <ManagementReportView currentMonth={currentMonth} employees={employees} schedule={schedule} personDayRules={personDayRules} holidays={holidays} shifts={shifts} cellColors={cellColors}/>;
             case 'login': {
-              const triggerLogin = () => { const id = document.getElementById('uid')?.value.toUpperCase(); const pwd = document.getElementById('upwd')?.value; if (!pwd) { alert("請輸入密碼！"); return; } handleLoginAction(id, pwd); };
-              return (<div className="flex flex-col items-center justify-center min-h-[60vh] p-4"><div className="bg-white p-10 rounded-[2.5rem] shadow-2xl border max-w-sm w-full text-center"><h2 className="text-xl font-black mb-2 text-gray-800">藥劑部 班表系統登入</h2><div className="text-[10px] text-gray-400 font-bold mb-8">第一次輸入的密碼會自動設定為密碼</div><div className="space-y-4"><input className="w-full border-2 p-3 rounded-2xl outline-none font-mono text-center uppercase" placeholder="員編" id="uid" onInput={(e) => e.target.value = e.target.value.toUpperCase()} onKeyDown={(e) => e.key === 'Enter' && triggerLogin()} /><div className="relative"><input className="w-full border-2 p-3 rounded-2xl outline-none text-center" type={showPassword ? "text" : "password"} placeholder="密碼" id="upwd" onKeyDown={(e) => e.key === 'Enter' && triggerLogin()} /><button onClick={()=>setShowPassword(!showPassword)} className="absolute right-4 top-4 text-gray-400">{showPassword ? <Eye size={18}/> : <EyeOff size={18}/>}</button></div><button onClick={triggerLogin} className="w-full bg-blue-600 text-white p-3 rounded-2xl font-black shadow transition-all transform active:scale-95">進入系統</button></div></div><div className="mt-12 text-[11px] text-gray-400 font-bold tracking-wider">© 2026 NTUH Yunlin Pharmacy - V1.9</div></div>);
+              return <LoginPage employees={employees} onLogin={handleLoginAction} />;
             }
             default: return null;
           }
@@ -3619,6 +3705,137 @@ const handleParticipantApprove = (reqId) => {
       </Modal>
       <Modal isOpen={!!deleteTarget} onClose={()=>setDeleteTarget(null)} onConfirm={()=>{ updateEmployees(latest => latest.filter(e=>e.id!==deleteTarget.id)); setDeleteTarget(null); }} title="確定刪除人員？" message="移除該人員將影響本期報表。" />
       <Modal isOpen={!!deleteShiftTarget} onClose={()=>setDeleteShiftTarget(null)} onConfirm={()=>{ updateShifts(latest => latest.filter(s=>s.id!==deleteShiftTarget.id)); setDeleteShiftTarget(null); }} title="確定刪除班別？" message={`移除 ${deleteShiftTarget?.name}。`} />
+    </div>
+  );
+};
+
+// =====================================================================================
+// 💡 登入頁 V1.10：改為兩步驟，從根本解決「密碼被離奇改變」的真正成因
+//    真正的成因不是資料庫時間差，而是「密碼欄位是空的（新人或剛被重設）時，
+//    系統會把第一次輸入的任何內容直接當成新密碼」，一旦手滑打錯，
+//    那個打錯的內容就永久變成正式密碼。
+//    解法：輸入員編後，先判斷密碼是否為空 —
+//      - 空的 → 進入「設定新密碼」模式，強制輸入兩次且必須一致才能繼續
+//      - 不是空的 → 維持原本單一密碼欄位登入
+// =====================================================================================
+const LoginPage = ({ employees, onLogin }) => {
+  const [step, setStep] = useState('id'); // 'id' | 'setpass' | 'password'
+  const [id, setId] = useState('');
+  const [pwd, setPwd] = useState('');
+  const [pwd2, setPwd2] = useState('');
+  const [showPwd, setShowPwd] = useState(false);
+
+  const resetToIdStep = () => { setStep('id'); setPwd(''); setPwd2(''); setShowPwd(false); };
+
+  const handleContinue = () => {
+    const trimmedId = id.trim().toUpperCase();
+    if (!trimmedId) { alert("請輸入員編！"); return; }
+    const emp = employees.find(e => e.id === trimmedId);
+    if (!emp) { alert("無此員編權限。"); return; }
+    setId(trimmedId);
+    // 💡 防止裝置/瀏覽器自動填入殘留的舊值（例如共用裝置上一位同仁留下的自動填入密碼），
+    // 切換到下一步時強制清空密碼欄位，一定要讓同仁自己重新手動輸入
+    setPwd('');
+    setPwd2('');
+    if (emp.password === "") {
+      // 💡 設定新密碼時預設「顯示明碼」，讓同仁能親眼確認自己打的（或被自動填入的）內容是否正確，
+      // 而不是被遮住的圓點，看不出來是不是被瀏覽器自動帶入了錯誤/別人的密碼
+      setShowPwd(true);
+      setStep('setpass');
+    } else {
+      setShowPwd(false);
+      setStep('password');
+    }
+  };
+
+  const handleSubmitPassword = () => {
+    if (!pwd) { alert("請輸入密碼！"); return; }
+    onLogin(id, pwd);
+  };
+
+  const handleSubmitNewPassword = () => {
+    if (!pwd || !pwd2) { alert("請輸入兩次新密碼！"); return; }
+    if (pwd !== pwd2) { alert("兩次輸入的新密碼不一致，請重新輸入。"); setPwd(''); setPwd2(''); return; }
+    const confirmOk = window.confirm(`請再次確認畫面上顯示的新密碼是您自己要設定的內容：\n\n${pwd}\n\n（若這是共用裝置，密碼可能被瀏覽器自動填入錯誤內容，請仔細核對後再繼續）`);
+    if (!confirmOk) return;
+    onLogin(id, pwd);
+  };
+
+  return (
+    <div className="flex flex-col items-center justify-center min-h-[60vh] p-4">
+      <div className="bg-white p-10 rounded-[2.5rem] shadow-2xl border max-w-sm w-full text-center">
+        <h2 className="text-xl font-black mb-2 text-gray-800">藥劑部 班表系統登入</h2>
+
+        {step === 'id' && (
+          <>
+            <div className="text-[10px] text-gray-400 font-bold mb-8">請先輸入您的員編</div>
+            <div className="space-y-4">
+              <input
+                className="w-full border-2 p-3 rounded-2xl outline-none font-mono text-center uppercase"
+                placeholder="員編" value={id}
+                autoComplete="off"
+                onChange={e => setId(e.target.value.toUpperCase())}
+                onKeyDown={e => e.key === 'Enter' && handleContinue()}
+                autoFocus
+              />
+              <button onClick={handleContinue} className="w-full bg-blue-600 text-white p-3 rounded-2xl font-black shadow transition-all transform active:scale-95">下一步</button>
+            </div>
+          </>
+        )}
+
+        {step === 'password' && (
+          <>
+            <div className="text-[10px] text-gray-400 font-bold mb-6">員編：{id}</div>
+            <div className="space-y-4">
+              <div className="relative">
+                <input
+                  className="w-full border-2 p-3 rounded-2xl outline-none text-center"
+                  type={showPwd ? "text" : "password"} placeholder="密碼" value={pwd}
+                  autoComplete="current-password"
+                  onChange={e => setPwd(e.target.value)}
+                  onKeyDown={e => e.key === 'Enter' && handleSubmitPassword()}
+                  autoFocus
+                />
+                <button onClick={() => setShowPwd(!showPwd)} className="absolute right-4 top-4 text-gray-400">{showPwd ? <Eye size={18}/> : <EyeOff size={18}/>}</button>
+              </div>
+              <button onClick={handleSubmitPassword} className="w-full bg-blue-600 text-white p-3 rounded-2xl font-black shadow transition-all transform active:scale-95">進入系統</button>
+              <button onClick={resetToIdStep} className="w-full text-xs font-bold text-gray-400 hover:text-gray-600">重新輸入員編</button>
+            </div>
+          </>
+        )}
+
+        {step === 'setpass' && (
+          <>
+            <div className="bg-amber-50 border border-amber-200 text-amber-700 text-[11px] font-bold rounded-xl p-3 mb-6 leading-relaxed">
+              ⚠️ 偵測到「{id}」尚未設定密碼（可能是新帳號，或密碼已被管理員重設）。<br/>
+              請設定一組新密碼，並輸入兩次以確認沒有打錯。<br/>
+              <span className="text-amber-500">若是共用裝置，請留意欄位是否被自動填入非您本人輸入的內容。</span>
+            </div>
+            <div className="space-y-3">
+              <div className="relative">
+                <input
+                  className="w-full border-2 p-3 rounded-2xl outline-none text-center"
+                  type={showPwd ? "text" : "password"} placeholder="設定新密碼" value={pwd}
+                  autoComplete="new-password"
+                  onChange={e => setPwd(e.target.value)}
+                  autoFocus
+                />
+                <button onClick={() => setShowPwd(!showPwd)} className="absolute right-4 top-4 text-gray-400">{showPwd ? <Eye size={18}/> : <EyeOff size={18}/>}</button>
+              </div>
+              <input
+                className="w-full border-2 p-3 rounded-2xl outline-none text-center"
+                type={showPwd ? "text" : "password"} placeholder="再次輸入新密碼確認" value={pwd2}
+                autoComplete="new-password"
+                onChange={e => setPwd2(e.target.value)}
+                onKeyDown={e => e.key === 'Enter' && handleSubmitNewPassword()}
+              />
+              <button onClick={handleSubmitNewPassword} className="w-full bg-amber-500 text-white p-3 rounded-2xl font-black shadow transition-all transform active:scale-95">設定密碼並登入</button>
+              <button onClick={resetToIdStep} className="w-full text-xs font-bold text-gray-400 hover:text-gray-600">重新輸入員編</button>
+            </div>
+          </>
+        )}
+      </div>
+      <div className="mt-12 text-[11px] text-gray-400 font-bold tracking-wider">© 2026 NTUH Yunlin Pharmacy - V1.10</div>
     </div>
   );
 };
