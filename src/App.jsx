@@ -587,7 +587,7 @@ const ScheduleTableView = ({ currentMonth, employees, schedule, cellColors, days
   const handleToggle = (empName, day) => {
     if (isMonthDrawn) return;
     const sVal = schedule[currentMonth]?.[empName]?.[day];
-    if (['休', '公假', '例', 'P', 'P#'].includes(sVal)) return; 
+    if (['休', '公', '公#', '例', 'P', 'P#'].includes(sVal)) return; 
     if (!isAdmin && empName !== currentUser?.name) return;
     const next = deepClone(preLeaveData);
     if (!next.apps) next.apps = {};
@@ -612,7 +612,7 @@ const ScheduleTableView = ({ currentMonth, employees, schedule, cellColors, days
     employees.filter(e => !e.isSeparator).forEach(emp => {
       csv += `${emp.name},` + daysInMonth.map(d => {
         const sVal = schedule[currentMonth]?.[emp.name]?.[d.day];
-        if (['休', '公假', '例', '休假'].includes(sVal)) return sVal;
+        if (['休', '公', '公#', '例', '休假'].includes(sVal)) return sVal;
         // 💡 已抽籤的月份，優先匯出「抽籤結果快照」（休/未中），忠實反映抽籤當下結果，
         // 不受之後班表異動影響；沒有快照時（未抽籤，或極舊資料）才退回即時的申請狀態
         const lotteryResult = preLeaveData.lotteryResults?.[currentMonth]?.[emp.name]?.[d.day];
@@ -835,7 +835,7 @@ const ScheduleTableView = ({ currentMonth, employees, schedule, cellColors, days
                 {daysInMonth.map(d => {
                   const sVal = schedule[currentMonth]?.[emp.name]?.[d.day];
                   const isApplied = preLeaveData.apps?.[currentMonth]?.[emp.name]?.[d.day] === "預假";
-                  const isFixed = ['休', '公假', '例', 'P', 'P#'].includes(sVal);
+                  const isFixed = ['休', '公', '公#', '例', 'P', 'P#'].includes(sVal);
                   const isWinner = sVal === '休';
                   // 💡 優先使用「抽籤結果快照」：不受之後班表異動（換班/手動調整）影響，
                   // 忠實呈現抽籤當下的結果；沒有快照時（例如尚未抽籤、或舊資料沒有快照）才退回即時判斷
@@ -953,7 +953,8 @@ const ScheduleTableView = ({ currentMonth, employees, schedule, cellColors, days
                       const ok = window.confirm(
                         `⚠️ 即將解除「${currentMonth}」的抽籤鎖定。\n\n` +
                         `解鎖後：\n` +
-                        `・同仁可以重新調整/補填當月的預假申請\n` +
+                        `・系統會自動用上次的抽籤結果，把所有申請人的「預假」標記還原回去，同仁不需要重新申請\n` +
+                        `・同仁仍可以自行調整/補填申請\n` +
                         `・不會刪除既有的申請紀錄，班表上已經標記為「休」的人也會維持原樣\n` +
                         `・解鎖後「不會」自動重新抽籤，需要您確認名額與申請都調整好後，\n` +
                         `　再自行點擊「立即抽籤」手動執行（該按鈕解鎖後就會出現）\n\n` +
@@ -963,7 +964,7 @@ const ScheduleTableView = ({ currentMonth, employees, schedule, cellColors, days
                     }}
                     className="flex-1 py-2 bg-amber-500 text-white rounded-lg text-xs font-black shadow-sm active:scale-95 transition-transform"
                   >
-                    <Undo2 size={14} className="inline mr-1"/>解鎖本月（供同仁重填）
+                    <Undo2 size={14} className="inline mr-1"/>解鎖本月（自動還原申請）
                   </button>
                 )}
                 <button onClick={handleExportPreLeave} className="flex-1 py-2 bg-green-600 text-white rounded-lg text-xs font-bold shadow-sm active:scale-95 transition-transform">
@@ -2962,12 +2963,13 @@ const App = () => {
         daysInMonthArr.forEach(d => {
           const limit = parseInt(dailyLimits?.[d.day] || (d.rawDay === 0 || d.rawDay === 6 || d.holiday ? defaultHolidayLimit : defaultWeekdayLimit));
 
-          // 💡 先算出這天目前已經有多少人是「休」（例如手動排班已排定、或救援重抽前的既有結果），
-          // 只補抽名額還沒滿的部分，避免解鎖重新抽籤時把既有結果洗掉或抽出超過名額的人數
-          const alreadyOffCount = Object.values(nextMonthSched).filter(empDays => empDays && empDays[d.day] === "休").length;
-          const remainingSlots = limit - alreadyOffCount;
-
           const allApplicants = getLeaveListFresh(d.day);
+
+          // 💡 修正：名額只扣掉「有申請預假、且已經中籤(休)」的人數（例如救援重抽前的既有中籤結果），
+          // 跟預假申請完全無關的人（例如本來就因為其他原因排休），不應該佔用預假名額，
+          // 一律以「實際申請人數」為抽籤母體去抽
+          const alreadyWonApplicants = allApplicants.filter(name => nextMonthSched[name]?.[d.day] === "休");
+          const remainingSlots = limit - alreadyWonApplicants.length;
 
           if (remainingSlots > 0) {
             const candidates = allApplicants.filter(name => nextMonthSched[name]?.[d.day] !== "休");
@@ -3001,7 +3003,35 @@ const App = () => {
   // 只清除 isDrawn 這個旗標，不會動到同仁的申請紀錄(apps)，也不會清除既有班表。
   // 💡 解鎖時同步標記「本月自動抽籤已暫停」，避免因為抽籤截止時間已過，
   // 只要有同仁打開預假頁面就被自動偵測機制立刻重新觸發抽籤，搶在管理員手動確認前跑掉
-  const resetMonthDraw = (monthKey) => saveMonthDoc(monthKey, { isDrawn: false, autoLotterySuspended: true });
+  // 💡 解鎖時同步標記「本月自動抽籤已暫停」，避免因為抽籤截止時間已過，
+  // 只要有同仁打開預假頁面就被自動偵測機制立刻重新觸發抽籤，搶在管理員手動確認前跑掉。
+  // 另外用 Transaction 讀取「抽籤結果快照(lotteryResults)」，把當初所有申請人（不管中籤與否）
+  // 的「預假」標記自動補回 apps，這樣同仁完全不需要重新點選申請。
+  const resetMonthDraw = async (monthKey) => {
+    try {
+      await runTransaction(db, async (tx) => {
+        const mDocRef = getMonthDocRef(monthKey);
+        const snap = await tx.get(mDocRef);
+        const data = snap.exists() ? snap.data() : {};
+
+        const nextApps = deepClone(data.apps || {});
+        const results = data.lotteryResults || {};
+        Object.keys(results).forEach(name => {
+          Object.keys(results[name]).forEach(day => {
+            // 只要抽籤快照裡有紀錄（不管當初是「休」還是「未中」），代表這個人當初確實申請過，
+            // 一律補回「預假」標記，讓申請紀錄回到抽籤前的狀態
+            if (!nextApps[name]) nextApps[name] = {};
+            nextApps[name][day] = "預假";
+          });
+        });
+
+        tx.set(mDocRef, { isDrawn: false, autoLotterySuspended: true, apps: nextApps }, { merge: true });
+      });
+    } catch (error) {
+      console.error("解鎖並還原申請紀錄失敗:", error);
+      alert("解鎖失敗，請檢查網路連線後再試一次。");
+    }
+  };
 
 
   // ---------------------------------------------------------------------------------
