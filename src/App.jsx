@@ -673,9 +673,9 @@ const ScheduleTableView = ({ currentMonth, employees, schedule, cellColors, days
   };
 
   // 💡 對應「下載本月 JSON 備份」的還原功能：讀取備份檔，寫回「目前畫面所在月份」自己的文件
-  const handleImportMonthJSON = (file) => {
+  const handleImportMonthJSON = async (file) => {
     const reader = new FileReader();
-    reader.onload = (ev) => {
+    reader.onload = async (ev) => {
       try {
         const backup = safeJSONParse(ev.target.result);
         if (!backup || typeof backup !== 'object') { alert("備份檔格式錯誤。"); return; }
@@ -689,15 +689,49 @@ const ScheduleTableView = ({ currentMonth, employees, schedule, cellColors, days
           if (!proceed) return;
         }
 
-        const ok = window.confirm(
-          `⚠️ 即將用這份備份檔，覆蓋「${currentMonth}」目前雲端上的班表、預假申請、抽籤結果等資料。\n\n` +
-          `此動作無法復原，確定要繼續嗎？`
-        );
-        if (!ok) return;
+        // 💡 還原前先讀取雲端「目前最新」的資料，用來比對備份檔是不是比較舊/比較不完整，
+        // 避免不小心用一份過期的備份，把雲端上更新、更完整的申請紀錄蓋掉
+        const liveSnap = await getDoc(getMonthDocRef(currentMonth));
+        const liveData = liveSnap.exists() ? liveSnap.data() : {};
+        const liveApplicantCount = Object.keys(liveData.apps || {}).length;
+        const backupApplicantCount = Object.keys(backup.apps || {}).length;
+        const liveResultCount = Object.keys(liveData.lotteryResults || {}).length;
+        const backupResultCount = Object.keys(backup.lotteryResults || {}).length;
+
+        if (backupApplicantCount < liveApplicantCount || backupResultCount < liveResultCount) {
+          const proceedAnyway = window.confirm(
+            `⚠️ 偵測到這份備份檔可能比雲端目前的資料「更舊或更不完整」：\n\n` +
+            `　　　　　　　雲端目前　　備份檔案\n` +
+            `申請人數　　${liveApplicantCount} 人　　　${backupApplicantCount} 人\n` +
+            `抽籤快照人數　${liveResultCount} 人　　　${backupResultCount} 人\n\n` +
+            `如果繼續，備份檔裡「缺少」的部分不會覆蓋雲端資料（申請紀錄會安全合併、不會刪除），\n` +
+            `但抽籤結果、班表等其他欄位仍會直接被備份檔內容取代。\n\n` +
+            `建議：如果不確定，請改用比較新的備份檔。確定要繼續這次還原嗎？`
+          );
+          if (!proceedAnyway) return;
+        } else {
+          const ok = window.confirm(
+            `⚠️ 即將用這份備份檔，更新「${currentMonth}」目前雲端上的班表、預假申請、抽籤結果等資料。\n\n` +
+            `此動作無法復原，確定要繼續嗎？`
+          );
+          if (!ok) return;
+        }
+
+        // 💡 申請紀錄(apps)改為「安全合併」：只補上雲端目前缺少的申請，絕不刪除或覆蓋雲端現在已經存在的申請，
+        // 這樣不管還原到哪一份備份，同仁的申請紀錄只會越補越完整，不會被舊資料蓋掉
+        const mergedApps = deepClone(liveData.apps || {});
+        Object.keys(backup.apps || {}).forEach(name => {
+          if (!mergedApps[name]) mergedApps[name] = {};
+          Object.keys(backup.apps[name]).forEach(day => {
+            if (mergedApps[name][day] === undefined || mergedApps[name][day] === null) {
+              mergedApps[name][day] = backup.apps[name][day];
+            }
+          });
+        });
 
         saveMonthDoc(currentMonth, {
           schedule: backup.schedule || {},
-          apps: backup.apps || {},
+          apps: mergedApps,
           dailyLimits: backup.dailyLimits || {},
           remarks: backup.remarks || {},
           lotteryResults: backup.lotteryResults || {},
