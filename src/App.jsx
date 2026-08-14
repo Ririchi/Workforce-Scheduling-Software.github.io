@@ -1062,23 +1062,35 @@ const RecordsView = ({ currentUser, swapRequests, onAction, onApprove, setReject
           {pendingList.length === 0 ? <div className="bg-white p-10 rounded-2xl border border-dashed text-center text-gray-300 italic font-bold">目前無待核定資料</div> :
             pendingList.map(req => {
               const reqMonthKey = req.date ? req.date.substring(0, 7) : currentMonth;
-              const checkDays = req.isBundle ? req.daysToSwap : [req.day];
+              // 💡 修正：req.day 可能因為舊資料/建立當下沒寫入而是空的，
+              // 這裡加上防呆，優先用 req.day，沒有的話就從 req.date 反推當月的「日」，
+              // 避免誤判成「找不到班別」而顯示錯誤的已更動警告
+              const fallbackDay = req.date ? Number(req.date.split('-')[2]) : null;
+              const checkDays = req.isBundle ? req.daysToSwap : [req.day ?? fallbackDay];
 
+              const normalize = (v) => {
+                const s = (v === null || v === undefined) ? "-" : String(v).trim();
+                return (s === "" || s === "-") ? "-" : s;
+              };
+              const clean = (val) => val.replace(/#|\(國\)/g, '');
+
+              // 💡 修正：改為檢查「所有參與者」的班別是否都跟申請當下記錄的一致，
+              // 不再只檢查被申請人一個人，避免漏掉發起人或第三、四位參與者的班別變動
               const isShiftMismatched = checkDays.some(d => {
                 const isFullDate = String(d).includes('-');
                 const targetMonth = isFullDate ? d.substring(0, 7) : reqMonthKey;
                 const dayKey = isFullDate ? Number(d.split('-')[2]) : d;
 
-                const rawCurTarget = schedule[targetMonth]?.[req.targetName]?.[dayKey];
+                if (Array.isArray(req.participants) && req.participants.length > 0) {
+                  return req.participants.some(p => {
+                    const rawCur = schedule[targetMonth]?.[p.name]?.[dayKey];
+                    return clean(normalize(rawCur)) !== clean(normalize(p.oldShift));
+                  });
+                }
 
-                const normalize = (v) => {
-                  const s = (v === null || v === undefined) ? "-" : String(v).trim();
-                  return (s === "" || s === "-") ? "-" : s;
-                };
-                const curTargetS = normalize(rawCurTarget);
-                const storedTargetS = normalize(req.targetShift);
-                const clean = (val) => val.replace(/#|\(國\)/g, '');
-                return clean(curTargetS) !== clean(storedTargetS);
+                // 相容沒有 participants 的極舊資料：退回只檢查被申請人
+                const rawCurTarget = schedule[targetMonth]?.[req.targetName]?.[dayKey];
+                return clean(normalize(rawCurTarget)) !== clean(normalize(req.targetShift));
               });
 
               return (
@@ -3523,6 +3535,7 @@ const handleParticipantApprove = (reqId) => {
             type: swapTarget.isBundle ? 'Bundle' : 'Single',
             status: 'WaitingParticipants',
             date: targetDateStr,
+            day: swapTarget.day,
             timestamp: Date.now(),
             participants: swapTarget.participants,
             approvals: approvalList,
