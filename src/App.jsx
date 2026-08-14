@@ -534,6 +534,7 @@ const ScheduleTableView = ({ currentMonth, employees, schedule, cellColors, days
   const [defaultHolidayLimit, setDefaultHolidayLimit] = useState(10);
   const [defaultWeekdayLimit, setDefaultWeekdayLimit] = useState(3);
   const [lotteryDay, setLotteryDay] = useState(15);
+  const monthBackupInputRef = useRef(null);
   const isAdmin = currentUser?.role === '0';
   const isMonthDrawn = (preLeaveData.drawnMonths || []).includes(currentMonth);
 
@@ -646,6 +647,48 @@ const ScheduleTableView = ({ currentMonth, employees, schedule, cellColors, days
     link.download = `${currentMonth}_預假班表備份.json`;
     link.click();
   };
+
+  // 💡 對應「下載本月 JSON 備份」的還原功能：讀取備份檔，寫回「目前畫面所在月份」自己的文件
+  const handleImportMonthJSON = (file) => {
+    const reader = new FileReader();
+    reader.onload = (ev) => {
+      try {
+        const backup = JSON.parse(ev.target.result);
+        if (!backup || typeof backup !== 'object') { alert("備份檔格式錯誤。"); return; }
+
+        if (backup.month && backup.month !== currentMonth) {
+          const proceed = window.confirm(
+            `⚠️ 這份備份檔是「${backup.month}」的資料，但您目前畫面停留在「${currentMonth}」。\n\n` +
+            `如果繼續，資料會被寫入「${currentMonth}」這個月份，而不是備份檔原本的月份。\n\n` +
+            `請先切換到正確的月份再上傳，或確認這就是您要的操作。\n\n確定要繼續嗎？`
+          );
+          if (!proceed) return;
+        }
+
+        const ok = window.confirm(
+          `⚠️ 即將用這份備份檔，覆蓋「${currentMonth}」目前雲端上的班表、預假申請、抽籤結果等資料。\n\n` +
+          `此動作無法復原，確定要繼續嗎？`
+        );
+        if (!ok) return;
+
+        saveMonthDoc(currentMonth, {
+          schedule: backup.schedule || {},
+          apps: backup.apps || {},
+          dailyLimits: backup.dailyLimits || {},
+          remarks: backup.remarks || {},
+          lotteryResults: backup.lotteryResults || {},
+          isDrawn: !!backup.isDrawn
+        });
+
+        alert(`「${currentMonth}」還原完成！畫面會透過即時同步自動更新。`);
+      } catch (err) {
+        console.error("還原月份備份失敗:", err);
+        alert("還原失敗，請確認上傳的是本系統匯出的月份備份 JSON 檔。");
+      }
+    };
+    reader.readAsText(file);
+  };
+
 
 
   const handleAdminSettingChange = (type, value) => {
@@ -929,6 +972,17 @@ const ScheduleTableView = ({ currentMonth, employees, schedule, cellColors, days
                 <button onClick={handleExportMonthJSON} className="flex-1 py-2 bg-slate-700 text-white rounded-lg text-xs font-bold shadow-sm active:scale-95 transition-transform">
                   <Download size={14} className="inline mr-1"/>下載本月 JSON 備份
                 </button>
+                {isAdmin && (
+                  <>
+                    <button onClick={() => monthBackupInputRef.current?.click()} className="flex-1 py-2 bg-slate-500 text-white rounded-lg text-xs font-bold shadow-sm active:scale-95 transition-transform">
+                      <Upload size={14} className="inline mr-1"/>上傳並還原本月備份
+                    </button>
+                    <input
+                      type="file" ref={monthBackupInputRef} className="hidden" accept=".json"
+                      onChange={(e) => { const f = e.target.files[0]; if (f) handleImportMonthJSON(f); e.target.value = ''; }}
+                    />
+                  </>
+                )}
               </div>
             </div>
           </div>
