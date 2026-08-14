@@ -554,7 +554,7 @@ const ScheduleTableView = ({ currentMonth, employees, schedule, cellColors, days
   );
 };
 
- const PreLeaveView = ({ currentMonth, employees, daysInMonth, currentUser, schedule, setSchedule, preLeaveData, setPreLeaveData, savePreLeaveMonth, saveMetaPreLeave, saveScheduleMonth, runLotteryTransaction, resetMonthDraw }) => {
+ const PreLeaveView = ({ currentMonth, employees, daysInMonth, currentUser, schedule, setSchedule, preLeaveData, setPreLeaveData, savePreLeaveMonth, saveMetaPreLeave, saveScheduleMonth, saveMonthDoc, runLotteryTransaction, resetMonthDraw }) => {
   const [defaultHolidayLimit, setDefaultHolidayLimit] = useState(10);
   const [defaultWeekdayLimit, setDefaultWeekdayLimit] = useState(3);
   const [lotteryDay, setLotteryDay] = useState(15);
@@ -3771,7 +3771,7 @@ const handleParticipantApprove = (reqId) => {
             case 'shifts': return <ShiftsManagementView shifts={shifts} updateShifts={updateShifts} holidays={holidays} updateHolidays={updateHolidays} setDeleteShiftTarget={setDeleteShiftTarget} personDayRules={personDayRules} updatePersonDayRules={updatePersonDayRules} />;
             case 'swap': return <ScheduleTableView currentMonth={currentMonth} employees={employees} schedule={schedule} cellColors={cellColors} daysInMonth={daysInMonth} onCellClick={handleSwapApply} swapRequests={swapRequests} currentPage={currentPage} currentUser={currentUser} swapTarget={swapTarget} handleSwapBack={handleSwapBack} isCycleEnd={isCycleEnd}/>;
             case 'records': return <RecordsView currentUser={currentUser} swapRequests={swapRequests} onAction={handleRecordAction} onApprove={handleParticipantApprove} setRejectingReq={setRejectingReq} schedule={schedule} currentMonth={currentMonth} />;
-            case 'leave':  return  <PreLeaveView currentMonth={currentMonth} employees={employees} daysInMonth={daysInMonth} currentUser={currentUser} schedule={schedule} setSchedule={setSchedule} preLeaveData={preLeaveData} setPreLeaveData={setPreLeaveData} savePreLeaveMonth={savePreLeaveMonth} saveMetaPreLeave={saveMetaPreLeave} saveScheduleMonth={saveScheduleMonth} runLotteryTransaction={runLotteryTransaction} resetMonthDraw={resetMonthDraw} />;
+            case 'leave':  return  <PreLeaveView currentMonth={currentMonth} employees={employees} daysInMonth={daysInMonth} currentUser={currentUser} schedule={schedule} setSchedule={setSchedule} preLeaveData={preLeaveData} setPreLeaveData={setPreLeaveData} savePreLeaveMonth={savePreLeaveMonth} saveMetaPreLeave={saveMetaPreLeave} saveScheduleMonth={saveScheduleMonth} saveMonthDoc={saveMonthDoc} runLotteryTransaction={runLotteryTransaction} resetMonthDraw={resetMonthDraw} />;
             case 'schedule': return <SchedulingView currentMonth={currentMonth} employees={employees} daysInMonth={daysInMonth} schedule={schedule} setSchedule={setSchedule} cellColors={cellColors} setCellColors={setCellColors} shifts={shifts} exportScheduleCSV={exportScheduleCSV} setCurrentPage={setCurrentPage} setIsDirty={setIsDirty} saveScheduleMonth={saveScheduleMonth} saveCellColorsMonth={saveCellColorsMonth} preLeaveData={preLeaveData} setPreLeaveData={setPreLeaveData} savePreLeaveMonth={savePreLeaveMonth} isAdmin={currentUser?.role === '0'} isMonthDrawn={(preLeaveData.drawnMonths || []).includes(currentMonth)} /> ;
             case 'report': return <ManagementReportView currentMonth={currentMonth} employees={employees} schedule={schedule} personDayRules={personDayRules} holidays={holidays} shifts={shifts} cellColors={cellColors}/>;
             case 'login': {
