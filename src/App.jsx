@@ -115,6 +115,30 @@ const deepClone = (obj) => {
   return JSON.parse(JSON.stringify(obj));
 };
 
+// 💡 容錯版 JSON 解析：還原備份檔時，很常遇到「檔案完全沒被使用者動過，
+// 但被作業系統/編輯器/雲端同步工具重新存檔」導致多了看不見的 BOM 字元、
+// 或是多了一個結尾逗號（trailing comma），這些狀況嚴格來說都不是合法 JSON，
+// 但內容其實完全沒問題，這裡自動修正這兩種最常見的狀況再解析，避免使用者反覆卡關。
+const safeJSONParse = (text) => {
+  let cleaned = text;
+  // 1. 去除檔案開頭可能存在的 UTF-8 BOM (\uFEFF)
+  if (cleaned.charCodeAt(0) === 0xFEFF) cleaned = cleaned.slice(1);
+  cleaned = cleaned.trim();
+  try {
+    return JSON.parse(cleaned);
+  } catch (firstError) {
+    // 2. 去除物件/陣列結尾多餘的逗號 (例如 "a": 1, } 或 [1, 2, ] )
+    const withoutTrailingCommas = cleaned.replace(/,(\s*[}\]])/g, '$1');
+    try {
+      return JSON.parse(withoutTrailingCommas);
+    } catch (secondError) {
+      // 兩種修正都救不回來，把原始錯誤丟出去，讓呼叫端顯示詳細訊息方便排查
+      throw firstError;
+    }
+  }
+};
+
+
 const isCycleEnd = (dateStr) => {
   if (!dateStr) return false;
   const baseEnd = new Date('2025-12-20').getTime();
@@ -653,7 +677,7 @@ const ScheduleTableView = ({ currentMonth, employees, schedule, cellColors, days
     const reader = new FileReader();
     reader.onload = (ev) => {
       try {
-        const backup = JSON.parse(ev.target.result);
+        const backup = safeJSONParse(ev.target.result);
         if (!backup || typeof backup !== 'object') { alert("備份檔格式錯誤。"); return; }
 
         if (backup.month && backup.month !== currentMonth) {
@@ -683,7 +707,8 @@ const ScheduleTableView = ({ currentMonth, employees, schedule, cellColors, days
         alert(`「${currentMonth}」還原完成！畫面會透過即時同步自動更新。`);
       } catch (err) {
         console.error("還原月份備份失敗:", err);
-        alert("還原失敗，請確認上傳的是本系統匯出的月份備份 JSON 檔。");
+        // 💡 把實際的解析錯誤訊息顯示出來，方便回報時能直接截圖給我精準定位問題
+        alert(`還原失敗，JSON 解析錯誤：\n${err.message}\n\n這通常代表檔案在下載後被其他程式重新存檔過（常見於雲端同步/防毒軟體），\n可以試著直接用「下載本月 JSON 備份」重新下載一次，中間不要用任何軟體開啟或搬動這個檔案，直接上傳看看。`);
       }
     };
     reader.readAsText(file);
@@ -3630,7 +3655,7 @@ const handleParticipantApprove = (reqId) => {
     const reader = new FileReader();
     reader.onload = async (ev) => {
       try {
-        const backup = JSON.parse(ev.target.result);
+        const backup = safeJSONParse(ev.target.result);
         if (!backup || !backup.meta) { alert("備份檔格式錯誤，找不到 meta 資料。"); return; }
 
         const confirmRestore = window.confirm(
@@ -3673,7 +3698,7 @@ const handleParticipantApprove = (reqId) => {
         alert(`還原完成！已寫回 ${Object.keys(monthlyData).length} 個月份的資料。`);
       } catch (error) {
         console.error("還原失敗:", error);
-        alert("還原失敗，請確認上傳的是本系統匯出的備份 JSON 檔。");
+        alert(`還原失敗，JSON 解析錯誤：\n${error.message}\n\n這通常代表檔案在下載後被其他程式重新存檔過（常見於雲端同步/防毒軟體），\n可以試著直接用「下載完整備份」重新下載一次，中間不要用任何軟體開啟或搬動這個檔案，直接上傳看看。`);
       }
     };
     reader.readAsText(file);
