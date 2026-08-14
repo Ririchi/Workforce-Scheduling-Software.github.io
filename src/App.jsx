@@ -561,7 +561,9 @@ const ScheduleTableView = ({ currentMonth, employees, schedule, cellColors, days
         const drawTimeTimestamp = executionDate.getTime();
 
         // 4. 核心判定：如果「該目標月份尚未抽籤(!isMonthDrawn)」且「目前時間已過設定的執行時間」
-        if (!isMonthDrawn && now >= drawTimeTimestamp) {
+        //    且「沒有被管理員手動暫停自動抽籤」（例如解鎖後正在等同仁重新填寫預假申請階段）
+        const isAutoSuspended = (preLeaveData.autoSuspendedMonths || []).includes(currentMonth);
+        if (!isMonthDrawn && now >= drawTimeTimestamp && !isAutoSuspended) {
           console.log(`⏰ 偵測到時間已過截止點 (${executionDate.toLocaleString()})，系統自動為 ${currentMonth} 月份執行預假抽籤...`);
           await handleLottery({ isAuto: true });
           console.log(`🎉 ${currentMonth} 月份自動抽籤執行並存檔成功！`);
@@ -584,7 +586,7 @@ const ScheduleTableView = ({ currentMonth, employees, schedule, cellColors, days
   const handleToggle = (empName, day) => {
     if (isMonthDrawn) return;
     const sVal = schedule[currentMonth]?.[empName]?.[day];
-    if (['休', '公假', '例'].includes(sVal)) return; 
+    if (['休', '公假', '例', 'P', 'P#'].includes(sVal)) return; 
     if (!isAdmin && empName !== currentUser?.name) return;
     const next = deepClone(preLeaveData);
     if (!next.apps) next.apps = {};
@@ -605,11 +607,15 @@ const ScheduleTableView = ({ currentMonth, employees, schedule, cellColors, days
     let csv = "\ufeff項目/日期," + daysInMonth.map(d => `${d.day}(${d.dayOfWeek})`).join(",") + "\n";
     csv += "備註," + daysInMonth.map(d => `"${preLeaveData.remarks?.[currentMonth]?.[d.day] || ""}"`).join(",") + "\n";
     csv += "可休人數," + daysInMonth.map(d => preLeaveData.dailyLimits?.[currentMonth]?.[d.day] || (d.rawDay === 0 || d.rawDay === 6 || d.holiday ? defaultHolidayLimit : defaultWeekdayLimit)).join(",") + "\n";
-    csv += "---藥師預假詳情---\n";
+    csv += isMonthDrawn ? "---藥師預假抽籤結果---\n" : "---藥師預假詳情---\n";
     employees.filter(e => !e.isSeparator).forEach(emp => {
       csv += `${emp.name},` + daysInMonth.map(d => {
         const sVal = schedule[currentMonth]?.[emp.name]?.[d.day];
         if (['休', '公假', '例', '休假'].includes(sVal)) return sVal;
+        // 💡 已抽籤的月份，優先匯出「抽籤結果快照」（休/未中），忠實反映抽籤當下結果，
+        // 不受之後班表異動影響；沒有快照時（未抽籤，或極舊資料）才退回即時的申請狀態
+        const lotteryResult = preLeaveData.lotteryResults?.[currentMonth]?.[emp.name]?.[d.day];
+        if (isMonthDrawn && lotteryResult) return lotteryResult;
         return preLeaveData.apps?.[currentMonth]?.[emp.name]?.[d.day] || "";
       }).join(",") + "\n";
     });
@@ -631,7 +637,8 @@ const ScheduleTableView = ({ currentMonth, employees, schedule, cellColors, days
       schedule: schedule[currentMonth] || {},
       apps: preLeaveData.apps?.[currentMonth] || {},
       dailyLimits: preLeaveData.dailyLimits?.[currentMonth] || {},
-      remarks: preLeaveData.remarks?.[currentMonth] || {}
+      remarks: preLeaveData.remarks?.[currentMonth] || {},
+      lotteryResults: preLeaveData.lotteryResults?.[currentMonth] || {}
     };
     const blob = new Blob([JSON.stringify(monthBackup, null, 2)], { type: 'application/json;charset=utf-8;' });
     const link = document.createElement("a");
@@ -785,8 +792,11 @@ const ScheduleTableView = ({ currentMonth, employees, schedule, cellColors, days
                 {daysInMonth.map(d => {
                   const sVal = schedule[currentMonth]?.[emp.name]?.[d.day];
                   const isApplied = preLeaveData.apps?.[currentMonth]?.[emp.name]?.[d.day] === "預假";
-                  const isFixed = ['休', '公假', '例'].includes(sVal);
+                  const isFixed = ['休', '公假', '例', 'P', 'P#'].includes(sVal);
                   const isWinner = sVal === '休';
+                  // 💡 優先使用「抽籤結果快照」：不受之後班表異動（換班/手動調整）影響，
+                  // 忠實呈現抽籤當下的結果；沒有快照時（例如尚未抽籤、或舊資料沒有快照）才退回即時判斷
+                  const lotteryResult = preLeaveData.lotteryResults?.[currentMonth]?.[emp.name]?.[d.day];
                   const cycleEnd = isCycleEnd(d.fullDate);
                   const canToggle = !isMonthDrawn && !isFixed && (isAdmin || emp.name === currentUser?.name);
                   let bgClass = "bg-white";
@@ -796,10 +806,12 @@ const ScheduleTableView = ({ currentMonth, employees, schedule, cellColors, days
                     <td 
                       key={d.day} 
                       onClick={() => handleToggle(emp.name, d.day)} 
-                      className={`border py-1.5 px-0 h-10 transition-all ${bgClass} ${cycleEnd ? 'border-r-4 border-r-gray-400' : ''} ${isApplied || isWinner ? 'ring-2 ring-inset ring-orange-400 shadow-inner' : ''} ${canToggle ? 'cursor-pointer hover:opacity-80' : 'cursor-not-allowed'}`}
+                      className={`border py-1.5 px-0 h-10 transition-all ${bgClass} ${cycleEnd ? 'border-r-4 border-r-gray-400' : ''} ${(isApplied || isWinner || lotteryResult) ? 'ring-2 ring-inset ring-orange-400 shadow-inner' : ''} ${canToggle ? 'cursor-pointer hover:opacity-80' : 'cursor-not-allowed'}`}
                     >
                       <div className="flex flex-col items-center justify-center h-full">
                         {isFixed ? <span className="text-gray-500 font-bold opacity-60 text-xs">{sVal}</span> :
+                         lotteryResult === '休' ? <span className="text-green-800 font-black text-[13px] bg-green-50 px-1 rounded">休</span> :
+                         lotteryResult === '未中' ? <span className="text-orange-600/70 font-bold text-[10px] bg-orange-50/60 px-1 rounded border border-dashed border-orange-200">預假(未中)</span> :
                          isWinner ? <span className="text-green-800 font-black text-[13px] bg-green-50 px-1 rounded">休</span> :
                          /* 💡 只有在『已完成抽籤』且『沒抽中』時才顯示『預假(未中)』；抽籤前一律顯示乾淨的『預假』 */
                          isApplied ? (
@@ -825,7 +837,7 @@ const ScheduleTableView = ({ currentMonth, employees, schedule, cellColors, days
                   <td key={d.day} className={`border p-1 align-top h-20 overflow-y-auto bg-blue-50/30 ${isCycleEnd(d.fullDate) ? 'border-r-4 border-r-gray-500' : ''}`}>
                     <div className="flex flex-col gap-0.5">
                       {list.map((name, i) => {
-                        const isWinner = schedule[currentMonth]?.[name]?.[d.day] === "休";
+                        const isWinner = (preLeaveData.lotteryResults?.[currentMonth]?.[name]?.[d.day] === '休') || (!preLeaveData.lotteryResults?.[currentMonth]?.[name]?.[d.day] && schedule[currentMonth]?.[name]?.[d.day] === "休");
                         return (
                           <div key={i} className={`text-[9px] font-black text-center leading-none truncate border rounded py-1 shadow-sm ${
                             isWinner 
@@ -863,7 +875,7 @@ const ScheduleTableView = ({ currentMonth, employees, schedule, cellColors, days
             <span className="text-sm font-black text-gray-700">預假規範 {isRulesExpanded ? '▲' : '▼'}</span>
           </div>
           <span className="text-[9px] text-gray-400 font-bold bg-gray-200 px-2 py-0.5 rounded-full">
-            {isMonthDrawn ? "已抽籤" : `每月 ${preLeaveData.lotteryDay || 15} 號抽`}
+            {isMonthDrawn ? "已抽籤" : (preLeaveData.autoSuspendedMonths || []).includes(currentMonth) ? "已解鎖，等待手動抽籤" : `每月 ${preLeaveData.lotteryDay || 15} 號抽`}
           </span>
         </div>
 
@@ -896,16 +908,19 @@ const ScheduleTableView = ({ currentMonth, employees, schedule, cellColors, days
                   <button
                     onClick={() => {
                       const ok = window.confirm(
-                        `⚠️ 即將解除「${currentMonth}」的抽籤鎖定，讓本月可以重新執行抽籤。\n\n` +
-                        `不會刪除同仁的預假申請紀錄，但目前班表上已經標記為「休」的人會維持原樣，\n` +
-                        `重新抽籤只會針對名額還沒抽滿的日期繼續抽出中籤者。\n\n` +
+                        `⚠️ 即將解除「${currentMonth}」的抽籤鎖定。\n\n` +
+                        `解鎖後：\n` +
+                        `・同仁可以重新調整/補填當月的預假申請\n` +
+                        `・不會刪除既有的申請紀錄，班表上已經標記為「休」的人也會維持原樣\n` +
+                        `・解鎖後「不會」自動重新抽籤，需要您確認名額與申請都調整好後，\n` +
+                        `　再自行點擊「立即抽籤」手動執行（該按鈕解鎖後就會出現）\n\n` +
                         `確定要解鎖嗎？`
                       );
                       if (ok) resetMonthDraw(currentMonth);
                     }}
                     className="flex-1 py-2 bg-amber-500 text-white rounded-lg text-xs font-black shadow-sm active:scale-95 transition-transform"
                   >
-                    <Undo2 size={14} className="inline mr-1"/>解鎖並重新抽籤
+                    <Undo2 size={14} className="inline mr-1"/>解鎖本月（供同仁重填）
                   </button>
                 )}
                 <button onClick={handleExportPreLeave} className="flex-1 py-2 bg-green-600 text-white rounded-lg text-xs font-bold shadow-sm active:scale-95 transition-transform">
@@ -2817,7 +2832,7 @@ const App = () => {
   const [isDirty, setIsDirty] = useState(false);
   const [showExitConfirm, setShowExitConfirm] = useState(false);
   const [targetPage, setTargetPage] = useState(null);
-  const [preLeaveData, setPreLeaveData] = useState({apps: {},dailyLimits: {},remarks: {},weekendLimit: 10,weekdayLimit: 3,lotteryDay: 15,drawnMonths: []});
+  const [preLeaveData, setPreLeaveData] = useState({apps: {},dailyLimits: {},remarks: {},lotteryResults: {},weekendLimit: 10,weekdayLimit: 3,lotteryDay: 15,drawnMonths: [],autoSuspendedMonths: []});
   const [isModalOpen, setIsModalOpen] = useState(false);
   const [loadedMonths, setLoadedMonths] = useState(new Set());
   const migrationDoneRef = useRef(false);
@@ -2882,6 +2897,9 @@ const App = () => {
         const nextMonthSched = deepClone(data.schedule || {});
         const apps = data.apps || {};
         const dailyLimits = data.dailyLimits || {};
+        // 💡 抽籤結果快照：獨立保存「誰申請、有沒有中籤」，即使抽完之後班表因為其他原因（換班、手動調整）異動，
+        // 這份紀錄也不會被覆蓋或消失，作為預假頁面顯示與匯出 CSV 的依據
+        const nextLotteryResults = deepClone(data.lotteryResults || {});
 
         const getLeaveListFresh = (day) => employees
           .filter(e => !e.isSeparator && !getIsNightClinic(e) && e.role !== '2' && e.role !== '3' && apps?.[e.name]?.[day] === "預假")
@@ -2894,18 +2912,28 @@ const App = () => {
           // 只補抽名額還沒滿的部分，避免解鎖重新抽籤時把既有結果洗掉或抽出超過名額的人數
           const alreadyOffCount = Object.values(nextMonthSched).filter(empDays => empDays && empDays[d.day] === "休").length;
           const remainingSlots = limit - alreadyOffCount;
-          if (remainingSlots <= 0) return;
 
-          const candidates = getLeaveListFresh(d.day).filter(name => nextMonthSched[name]?.[d.day] !== "休");
-          const winners = [...candidates].sort(() => 0.5 - Math.random()).slice(0, remainingSlots);
-          winners.forEach(name => {
-            if (!nextMonthSched[name]) nextMonthSched[name] = {};
-            nextMonthSched[name][d.day] = "休";
+          const allApplicants = getLeaveListFresh(d.day);
+
+          if (remainingSlots > 0) {
+            const candidates = allApplicants.filter(name => nextMonthSched[name]?.[d.day] !== "休");
+            const winners = [...candidates].sort(() => 0.5 - Math.random()).slice(0, remainingSlots);
+            winners.forEach(name => {
+              if (!nextMonthSched[name]) nextMonthSched[name] = {};
+              nextMonthSched[name][d.day] = "休";
+            });
+          }
+
+          // 💡 不管這天有沒有抽出新的人，只要有人申請過，就把「這一輪最終結果」記進快照：
+          // 中籤記「休」，沒中籤記「未中」，日後即使班表被改掉，這份快照仍保留當初的抽籤結果
+          allApplicants.forEach(name => {
+            if (!nextLotteryResults[name]) nextLotteryResults[name] = {};
+            nextLotteryResults[name][d.day] = (nextMonthSched[name]?.[d.day] === "休") ? "休" : "未中";
           });
         });
 
-        // 💡 只用單一 tx.set 一次寫入 schedule + isDrawn，確保「抽籤結果」與「已抽籤標記」原子性地同時生效
-        tx.set(mDocRef, { schedule: nextMonthSched, isDrawn: true }, { merge: true });
+        // 💡 只用單一 tx.set 一次寫入 schedule + lotteryResults + isDrawn，確保三者原子性地同時生效
+        tx.set(mDocRef, { schedule: nextMonthSched, lotteryResults: nextLotteryResults, isDrawn: true, autoLotterySuspended: false }, { merge: true });
         result = { ok: true };
       });
     } catch (error) {
@@ -2917,7 +2945,9 @@ const App = () => {
 
   // 💡 管理員救援用：強制解鎖某個月份的「已抽籤」狀態，讓該月可以重新執行抽籤或手動調整。
   // 只清除 isDrawn 這個旗標，不會動到同仁的申請紀錄(apps)，也不會清除既有班表。
-  const resetMonthDraw = (monthKey) => saveMonthDoc(monthKey, { isDrawn: false });
+  // 💡 解鎖時同步標記「本月自動抽籤已暫停」，避免因為抽籤截止時間已過，
+  // 只要有同仁打開預假頁面就被自動偵測機制立刻重新觸發抽籤，搶在管理員手動確認前跑掉
+  const resetMonthDraw = (monthKey) => saveMonthDoc(monthKey, { isDrawn: false, autoLotterySuspended: true });
 
 
   // ---------------------------------------------------------------------------------
@@ -3091,19 +3121,25 @@ const App = () => {
         const nextApps = { ...(prevPreLeave.apps || {}) };
         const nextDailyLimits = { ...(prevPreLeave.dailyLimits || {}) };
         const nextRemarks = { ...(prevPreLeave.remarks || {}) };
+        const nextLotteryResults = { ...(prevPreLeave.lotteryResults || {}) };
         const nextDrawnSet = new Set(prevPreLeave.drawnMonths || []);
+        const nextSuspendedSet = new Set(prevPreLeave.autoSuspendedMonths || []);
         snap.docChanges().forEach(change => {
           const m = change.doc.id;
           const data = change.doc.data();
-          if (change.type === 'removed') { delete nextApps[m]; delete nextDailyLimits[m]; delete nextRemarks[m]; nextDrawnSet.delete(m); return; }
+          if (change.type === 'removed') { delete nextApps[m]; delete nextDailyLimits[m]; delete nextRemarks[m]; delete nextLotteryResults[m]; nextDrawnSet.delete(m); nextSuspendedSet.delete(m); return; }
           nextApps[m] = data.apps || {};
           nextDailyLimits[m] = data.dailyLimits || {};
           nextRemarks[m] = data.remarks || {};
+          // 💡 抽籤結果快照，依各月份自己的文件為準
+          nextLotteryResults[m] = data.lotteryResults || {};
           // 💡 「本月是否已抽籤」改成看該月份自己的文件裡的 isDrawn 欄位，
           // 不再共用一個全域陣列，避免不同月份的抽籤結果互相覆蓋
           if (data.isDrawn === true) nextDrawnSet.add(m); else nextDrawnSet.delete(m);
+          // 💡 「本月自動抽籤是否暫停」也依各月份自己的文件為準
+          if (data.autoLotterySuspended === true) nextSuspendedSet.add(m); else nextSuspendedSet.delete(m);
         });
-        return { ...prevPreLeave, apps: nextApps, dailyLimits: nextDailyLimits, remarks: nextRemarks, drawnMonths: Array.from(nextDrawnSet) };
+        return { ...prevPreLeave, apps: nextApps, dailyLimits: nextDailyLimits, remarks: nextRemarks, lotteryResults: nextLotteryResults, drawnMonths: Array.from(nextDrawnSet), autoSuspendedMonths: Array.from(nextSuspendedSet) };
       });
       setSwapRequestsByMonth(prev => {
         const next = { ...prev };
