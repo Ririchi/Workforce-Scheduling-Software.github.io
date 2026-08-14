@@ -574,27 +574,12 @@ const ScheduleTableView = ({ currentMonth, employees, schedule, cellColors, days
     handleAutoLotteryCheck();
   }, [currentMonth, preLeaveData, isMonthDrawn, currentUser]); // 精確監聽子組件內的狀態
 
-  useEffect(() => {
-    if (!schedule[currentMonth]) return;
-    let changed = false;
-    const next = deepClone(preLeaveData);
-    if (!next.apps || !next.apps[currentMonth]) return;
-    Object.keys(next.apps[currentMonth]).forEach(empName => {
-      Object.keys(next.apps[currentMonth][empName]).forEach(day => {
-        const sVal = schedule[currentMonth]?.[empName]?.[day];
-        if (['休', '公假', '例'].includes(sVal) && next.apps[currentMonth][empName][day] === "預假") {
-          next.apps[currentMonth][empName][day] = null;
-          changed = true;
-        }
-      });
-    });
-
-    if (changed) {
-      setPreLeaveData(next);
-      // 💡 修正：只存「這個月」的 apps 資料，不再整包月份物件覆寫，避免互相蓋掉其他月份
-      savePreLeaveMonth(currentMonth, { apps: next.apps[currentMonth] });
-    }
-  }, [currentMonth, schedule]);
+  // 💡 V1.11 移除：這裡原本有一段「自動清除已中籤者的預假申請標記」的邏輯，
+  // 但它把「例」（每逢週日/國定假日的例行預設值，只要發佈過班表就會出現，跟抽籤完全無關）
+  // 也一併當成「已中籤」處理，導致只要發佈過班表，同仁的預假申請就會被誤判清空，
+  // 這是造成「預假資料無故消失」的根本原因之一。
+  // 事實上這段清理完全不需要：畫面上「休/未中」本來就是即時從班表算出來的（見下方 isWinner 判斷），
+  // 不需要真的去刪除申請紀錄，所以直接移除，申請紀錄會被完整保留。
 
   const handleToggle = (empName, day) => {
     if (isMonthDrawn) return;
@@ -635,6 +620,26 @@ const ScheduleTableView = ({ currentMonth, employees, schedule, cellColors, days
     link.download = `預假橫式備份_${currentMonth}.csv`;
     link.click();
   };
+
+  // 💡 快速匯出「本月」完整 JSON 備份（schedule / apps / dailyLimits / remarks / 是否已抽籤），
+  // 不用跳去帳號管理頁也能隨時備份，特別適合在做「解鎖重新抽籤」這類風險操作前先存一份
+  const handleExportMonthJSON = () => {
+    const monthBackup = {
+      month: currentMonth,
+      exportedAt: new Date().toISOString(),
+      isDrawn: (preLeaveData.drawnMonths || []).includes(currentMonth),
+      schedule: schedule[currentMonth] || {},
+      apps: preLeaveData.apps?.[currentMonth] || {},
+      dailyLimits: preLeaveData.dailyLimits?.[currentMonth] || {},
+      remarks: preLeaveData.remarks?.[currentMonth] || {}
+    };
+    const blob = new Blob([JSON.stringify(monthBackup, null, 2)], { type: 'application/json;charset=utf-8;' });
+    const link = document.createElement("a");
+    link.href = URL.createObjectURL(blob);
+    link.download = `${currentMonth}_預假班表備份.json`;
+    link.click();
+  };
+
 
   const handleAdminSettingChange = (type, value) => {
     if (!isAdmin) return;
@@ -905,6 +910,9 @@ const ScheduleTableView = ({ currentMonth, employees, schedule, cellColors, days
                 )}
                 <button onClick={handleExportPreLeave} className="flex-1 py-2 bg-green-600 text-white rounded-lg text-xs font-bold shadow-sm active:scale-95 transition-transform">
                   <Download size={14} className="inline mr-1"/>匯出 CSV
+                </button>
+                <button onClick={handleExportMonthJSON} className="flex-1 py-2 bg-slate-700 text-white rounded-lg text-xs font-bold shadow-sm active:scale-95 transition-transform">
+                  <Download size={14} className="inline mr-1"/>下載本月 JSON 備份
                 </button>
               </div>
             </div>
@@ -2126,14 +2134,12 @@ const SchedulingView = ({ currentMonth, employees, daysInMonth, schedule, setSch
       if (e.isSeparator) return;
       newSched[e.name] = { ...curMonthSched[e.name] };
       daysInMonth.forEach(d => { 
+        // 💡 依需求移除「週六自動填#、週日/假日自動填例」的預設邏輯：
+        // 只要這一格「還沒有真的存過資料」，一律留空顯示「-」，不再自動幫忙猜；
+        // 已經發佈、真的存在 Firestore 裡的資料完全不會被這裡動到（上面 !newSched[e.name][d.day] 的判斷保證了這點）
         if (!newSched[e.name][d.day]) {
           const isNC = getIsNightClinic(e);
-          if (isNC) newSched[e.name][d.day] = ""; 
-          else {
-            if (d.rawDay === 0 || !!d.holiday) newSched[e.name][d.day] = e.labor === 'Y' ? "例" : "#";
-            else if (d.rawDay === 6) newSched[e.name][d.day] = "#";
-            else newSched[e.name][d.day] = "-";
-          }
+          newSched[e.name][d.day] = isNC ? "" : "-";
         } 
       });
     });
@@ -3709,55 +3715,14 @@ const handleParticipantApprove = (reqId) => {
   );
 };
 
-// =====================================================================================
-// 💡 登入頁 V1.10：改為兩步驟，從根本解決「密碼被離奇改變」的真正成因
-//    真正的成因不是資料庫時間差，而是「密碼欄位是空的（新人或剛被重設）時，
-//    系統會把第一次輸入的任何內容直接當成新密碼」，一旦手滑打錯，
-//    那個打錯的內容就永久變成正式密碼。
-//    解法：輸入員編後，先判斷密碼是否為空 —
-//      - 空的 → 進入「設定新密碼」模式，強制輸入兩次且必須一致才能繼續
-//      - 不是空的 → 維持原本單一密碼欄位登入
-// =====================================================================================
+// 💡 登入頁維持單頁（員編＋密碼同時輸入），依使用者要求不拆分成多步驟
 const LoginPage = ({ employees, onLogin }) => {
-  const [step, setStep] = useState('id'); // 'id' | 'setpass' | 'password'
-  const [id, setId] = useState('');
-  const [pwd, setPwd] = useState('');
-  const [pwd2, setPwd2] = useState('');
-  const [showPwd, setShowPwd] = useState(false);
+  const [showPassword, setShowPassword] = useState(false);
 
-  const resetToIdStep = () => { setStep('id'); setPwd(''); setPwd2(''); setShowPwd(false); };
-
-  const handleContinue = () => {
-    const trimmedId = id.trim().toUpperCase();
-    if (!trimmedId) { alert("請輸入員編！"); return; }
-    const emp = employees.find(e => e.id === trimmedId);
-    if (!emp) { alert("無此員編權限。"); return; }
-    setId(trimmedId);
-    // 💡 防止裝置/瀏覽器自動填入殘留的舊值（例如共用裝置上一位同仁留下的自動填入密碼），
-    // 切換到下一步時強制清空密碼欄位，一定要讓同仁自己重新手動輸入
-    setPwd('');
-    setPwd2('');
-    if (emp.password === "") {
-      // 💡 設定新密碼時預設「顯示明碼」，讓同仁能親眼確認自己打的（或被自動填入的）內容是否正確，
-      // 而不是被遮住的圓點，看不出來是不是被瀏覽器自動帶入了錯誤/別人的密碼
-      setShowPwd(true);
-      setStep('setpass');
-    } else {
-      setShowPwd(false);
-      setStep('password');
-    }
-  };
-
-  const handleSubmitPassword = () => {
+  const triggerLogin = () => {
+    const id = document.getElementById('uid')?.value.toUpperCase();
+    const pwd = document.getElementById('upwd')?.value;
     if (!pwd) { alert("請輸入密碼！"); return; }
-    onLogin(id, pwd);
-  };
-
-  const handleSubmitNewPassword = () => {
-    if (!pwd || !pwd2) { alert("請輸入兩次新密碼！"); return; }
-    if (pwd !== pwd2) { alert("兩次輸入的新密碼不一致，請重新輸入。"); setPwd(''); setPwd2(''); return; }
-    const confirmOk = window.confirm(`請再次確認畫面上顯示的新密碼是您自己要設定的內容：\n\n${pwd}\n\n（若這是共用裝置，密碼可能被瀏覽器自動填入錯誤內容，請仔細核對後再繼續）`);
-    if (!confirmOk) return;
     onLogin(id, pwd);
   };
 
@@ -3765,77 +3730,27 @@ const LoginPage = ({ employees, onLogin }) => {
     <div className="flex flex-col items-center justify-center min-h-[60vh] p-4">
       <div className="bg-white p-10 rounded-[2.5rem] shadow-2xl border max-w-sm w-full text-center">
         <h2 className="text-xl font-black mb-2 text-gray-800">藥劑部 班表系統登入</h2>
-
-        {step === 'id' && (
-          <>
-            <div className="text-[10px] text-gray-400 font-bold mb-8">請先輸入您的員編</div>
-            <div className="space-y-4">
-              <input
-                className="w-full border-2 p-3 rounded-2xl outline-none font-mono text-center uppercase"
-                placeholder="員編" value={id}
-                autoComplete="off"
-                onChange={e => setId(e.target.value.toUpperCase())}
-                onKeyDown={e => e.key === 'Enter' && handleContinue()}
-                autoFocus
-              />
-              <button onClick={handleContinue} className="w-full bg-blue-600 text-white p-3 rounded-2xl font-black shadow transition-all transform active:scale-95">下一步</button>
-            </div>
-          </>
-        )}
-
-        {step === 'password' && (
-          <>
-            <div className="text-[10px] text-gray-400 font-bold mb-6">員編：{id}</div>
-            <div className="space-y-4">
-              <div className="relative">
-                <input
-                  className="w-full border-2 p-3 rounded-2xl outline-none text-center"
-                  type={showPwd ? "text" : "password"} placeholder="密碼" value={pwd}
-                  autoComplete="current-password"
-                  onChange={e => setPwd(e.target.value)}
-                  onKeyDown={e => e.key === 'Enter' && handleSubmitPassword()}
-                  autoFocus
-                />
-                <button onClick={() => setShowPwd(!showPwd)} className="absolute right-4 top-4 text-gray-400">{showPwd ? <Eye size={18}/> : <EyeOff size={18}/>}</button>
-              </div>
-              <button onClick={handleSubmitPassword} className="w-full bg-blue-600 text-white p-3 rounded-2xl font-black shadow transition-all transform active:scale-95">進入系統</button>
-              <button onClick={resetToIdStep} className="w-full text-xs font-bold text-gray-400 hover:text-gray-600">重新輸入員編</button>
-            </div>
-          </>
-        )}
-
-        {step === 'setpass' && (
-          <>
-            <div className="bg-amber-50 border border-amber-200 text-amber-700 text-[11px] font-bold rounded-xl p-3 mb-6 leading-relaxed">
-              ⚠️ 偵測到「{id}」尚未設定密碼（可能是新帳號，或密碼已被管理員重設）。<br/>
-              請設定一組新密碼，並輸入兩次以確認沒有打錯。<br/>
-              <span className="text-amber-500">若是共用裝置，請留意欄位是否被自動填入非您本人輸入的內容。</span>
-            </div>
-            <div className="space-y-3">
-              <div className="relative">
-                <input
-                  className="w-full border-2 p-3 rounded-2xl outline-none text-center"
-                  type={showPwd ? "text" : "password"} placeholder="設定新密碼" value={pwd}
-                  autoComplete="new-password"
-                  onChange={e => setPwd(e.target.value)}
-                  autoFocus
-                />
-                <button onClick={() => setShowPwd(!showPwd)} className="absolute right-4 top-4 text-gray-400">{showPwd ? <Eye size={18}/> : <EyeOff size={18}/>}</button>
-              </div>
-              <input
-                className="w-full border-2 p-3 rounded-2xl outline-none text-center"
-                type={showPwd ? "text" : "password"} placeholder="再次輸入新密碼確認" value={pwd2}
-                autoComplete="new-password"
-                onChange={e => setPwd2(e.target.value)}
-                onKeyDown={e => e.key === 'Enter' && handleSubmitNewPassword()}
-              />
-              <button onClick={handleSubmitNewPassword} className="w-full bg-amber-500 text-white p-3 rounded-2xl font-black shadow transition-all transform active:scale-95">設定密碼並登入</button>
-              <button onClick={resetToIdStep} className="w-full text-xs font-bold text-gray-400 hover:text-gray-600">重新輸入員編</button>
-            </div>
-          </>
-        )}
+        <div className="text-[10px] text-gray-400 font-bold mb-8">第一次輸入的密碼會自動設定為密碼</div>
+        <div className="space-y-4">
+          <input
+            className="w-full border-2 p-3 rounded-2xl outline-none font-mono text-center uppercase"
+            placeholder="員編" id="uid" autoComplete="off"
+            onInput={(e) => e.target.value = e.target.value.toUpperCase()}
+            onKeyDown={(e) => e.key === 'Enter' && triggerLogin()}
+          />
+          <div className="relative">
+            <input
+              className="w-full border-2 p-3 rounded-2xl outline-none text-center"
+              type={showPassword ? "text" : "password"} placeholder="密碼" id="upwd"
+              autoComplete="current-password"
+              onKeyDown={(e) => e.key === 'Enter' && triggerLogin()}
+            />
+            <button onClick={() => setShowPassword(!showPassword)} className="absolute right-4 top-4 text-gray-400">{showPassword ? <Eye size={18}/> : <EyeOff size={18}/>}</button>
+          </div>
+          <button onClick={triggerLogin} className="w-full bg-blue-600 text-white p-3 rounded-2xl font-black shadow transition-all transform active:scale-95">進入系統</button>
+        </div>
       </div>
-      <div className="mt-12 text-[11px] text-gray-400 font-bold tracking-wider">© 2026 NTUH Yunlin Pharmacy - V1.10</div>
+      <div className="mt-12 text-[11px] text-gray-400 font-bold tracking-wider">© 2026 NTUH Yunlin Pharmacy - V1.11</div>
     </div>
   );
 };
