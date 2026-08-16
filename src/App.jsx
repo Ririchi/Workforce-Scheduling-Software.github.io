@@ -1027,11 +1027,11 @@ const ScheduleTableView = ({ currentMonth, employees, schedule, cellColors, days
                   <button
                     onClick={() => {
                       const ok = window.confirm(
-                        `⚠️ 即將解除「${currentMonth}」的抽籤鎖定。\n\n` +
-                        `解鎖後：\n` +
-                        `・系統會自動用上次的抽籤結果，把所有申請人的「預假」標記還原回去，同仁不需要重新申請\n` +
-                        `・同仁仍可以自行調整/補填申請\n` +
-                        `・不會刪除既有的申請紀錄，班表上已經標記為「休」的人也會維持原樣\n` +
+                        `⚠️ 即將解除「${currentMonth}」的抽籤鎖定，這是完整還原：\n\n` +
+                        `・系統會自動用上次的抽籤結果，把所有申請人（不管中籤或未中）的「預假」標記還原回去，同仁不需要重新申請\n` +
+                        `・這次抽籤造成班表上的「休」也會一併撤銷、清空回原樣，真正回到抽籤前的狀態\n` +
+                        `・跟這次抽籤無關、班表上本來就存在的其他排班內容不會受影響\n` +
+                        `・解鎖前會自動存一份備份，之後可以隨時用「還原至解鎖前」一鍵撤銷這次解鎖\n` +
                         `・這個月份會「永久」改為手動抽籤模式，不會再被系統自動觸發，之後不管解鎖或重抽幾次都一樣，\n` +
                         `　需要您自行點擊「立即抽籤」手動執行（該按鈕解鎖後就會出現）\n\n` +
                         `確定要解鎖嗎？`
@@ -1040,7 +1040,7 @@ const ScheduleTableView = ({ currentMonth, employees, schedule, cellColors, days
                     }}
                     className="flex-1 py-2 bg-amber-500 text-white rounded-lg text-xs font-black shadow-sm active:scale-95 transition-transform"
                   >
-                    <Undo2 size={14} className="inline mr-1"/>解鎖本月（自動還原申請）
+                    <Undo2 size={14} className="inline mr-1"/>解鎖本月（完整還原）
                   </button>
                 )}
                 {isAdmin && (preLeaveData.monthsWithPreUnlockBackup || []).includes(currentMonth) && (
@@ -3122,6 +3122,7 @@ const App = () => {
         };
 
         const nextApps = deepClone(data.apps || {});
+        const nextMonthSched = deepClone(data.schedule || {});
         const results = data.lotteryResults || {};
         Object.keys(results).forEach(name => {
           Object.keys(results[name]).forEach(day => {
@@ -3129,13 +3130,19 @@ const App = () => {
             // 一律補回「預假」標記，讓申請紀錄回到抽籤前的狀態
             if (!nextApps[name]) nextApps[name] = {};
             nextApps[name][day] = "預假";
+
+            // 💡 修正：如果這格快照記錄的是「中籤(休)」，代表這個「休」是這次抽籤造成的，
+            // 解鎖時要一併撤銷、清回空白，才是真正完整的還原；只會動到「抽籤造成的休」，
+            // 不會影響班表上跟這次抽籤無關、本來就存在的其他排班內容
+            if (results[name][day] === "休" && nextMonthSched[name]?.[day] === "休") {
+              nextMonthSched[name][day] = "-";
+            }
           });
         });
 
         // 💡 修正：解鎖時要一併清空舊的抽籤結果快照(lotteryResults)，
         // 不然畫面會優先顯示上一輪已經過期的「未中」結果，讓人誤以為系統又自動重抽了一次。
-        // 班表上已經標記的「休」完全不會被這裡動到，只是快照本身歸零、等下一次真正抽籤再重新產生。
-        tx.set(mDocRef, { isDrawn: false, autoLotterySuspended: true, apps: nextApps, lotteryResults: {}, preUnlockBackup }, { merge: true });
+        tx.set(mDocRef, { isDrawn: false, autoLotterySuspended: true, apps: nextApps, schedule: nextMonthSched, lotteryResults: {}, preUnlockBackup }, { merge: true });
       });
     } catch (error) {
       console.error("解鎖並還原申請紀錄失敗:", error);
