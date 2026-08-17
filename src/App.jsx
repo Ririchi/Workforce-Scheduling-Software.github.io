@@ -130,7 +130,7 @@ const db = getFirestore(app);
 //      你可以直接去 Firebase Console 找 artifacts/pharmacy-system-TEST/... 這個固定路徑確認資料
 //    測試完成、準備上線前，記得改回空字串 "" 再推上 GitHub！
 // =====================================================================================
-const FORCE_APP_ID_FOR_TESTING = "";
+const FORCE_APP_ID_FOR_TESTING = "pharmacy-system-TEST";
 
 const rawAppId = FORCE_APP_ID_FOR_TESTING || (typeof __app_id !== 'undefined' ? __app_id : 'pharmacy-system-v1-8');
 // 💡 修正：某些執行環境注入的 __app_id 本身可能帶有 "/" 或其他不能出現在 Firestore
