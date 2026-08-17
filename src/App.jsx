@@ -58,6 +58,57 @@ const INITIAL_PERSON_DAY_RULES = [
   { id: 12, pattern: '/4', value: '0.5', mode: 'suffix' }
 ];
 
+// 💡 各班別上班時段參考表：不需登入即可檢視，管理員可編輯
+const INITIAL_SHIFT_TIME_TABLE = [
+  {
+    id: 'sec-1', title: '門急診作業',
+    rows: [
+      { id: 'r1', name: '黃', start: '7:00', rest: '11:00-11:30', end: '15:30', hours: '8' },
+      { id: 'r2', name: '紅', start: '8:30', rest: '12:30-13:30', end: '17:30', hours: '8' },
+      { id: 'r3', name: '藍', start: '7:30', rest: '12:00-12:30', end: '16:00', hours: '8' },
+      { id: 'r4', name: '磨粉', start: '8:00', rest: '12:30-13:30', end: '17:00', hours: '8' },
+      { id: 'r5', name: 'B9班', start: '8:00', rest: '12:30-13:30', end: '17:00', hours: '8' },
+      { id: 'r6', name: 'B8班', start: '7:30', rest: '12:30-13:30', end: '16:30', hours: '8' },
+      { id: 'r7', name: '發1', start: '8:00', rest: '11:30-12:30', end: '17:00', hours: '8' },
+      { id: 'r8', name: '發2', start: '9:00', rest: '12:30-13:30', end: '18:00', hours: '8' },
+      { id: 'r9', name: 'CK1', start: '8:00', rest: '11:30-12:30', end: '17:00', hours: '8' },
+      { id: 'r10', name: 'CK2', start: '9:00', rest: '12:30-13:30', end: '18:00', hours: '8' },
+      { id: 'r11', name: 'V8', start: '8:00', rest: '11:30-12:30', end: '17:00', hours: '8' },
+      { id: 'r12', name: 'DI', start: '8:00', rest: '12:00-13:00', end: '17:00', hours: '8' }
+    ]
+  },
+  {
+    id: 'sec-2', title: '住診作業',
+    rows: [
+      { id: 'r13', name: 'U', start: '8:00', rest: '12:30-13:30', end: '17:00', hours: '8' },
+      { id: 'r14', name: 'U81', start: '8:00', rest: '12:30-13:30', end: '17:00', hours: '8' },
+      { id: 'r15', name: 'U82', start: '8:00', rest: '12:30-13:30', end: '17:00', hours: '8' },
+      { id: 'r16', name: 'U83', start: '8:00', rest: '12:30-13:30', end: '17:00', hours: '8' },
+      { id: 'r17', name: 'U84', start: '8:00', rest: '12:30-13:30', end: '17:00', hours: '8' },
+      { id: 'r18', name: 'U85', start: '8:00', rest: '12:30-13:30', end: '17:00', hours: '8' },
+      { id: 'r19', name: 'U85-2', start: '8:00', rest: '11:30-12:30', end: '17:00', hours: '8' },
+      { id: 'r20', name: 'U91', start: '9:00', rest: '12:00-13:00', end: '18:00', hours: '8' },
+      { id: 'r21', name: 'U92', start: '9:00', rest: '12:30-13:30', end: '18:00', hours: '8' },
+      { id: 'r22', name: 'U7.5', start: '7:30', rest: '11:30-12:30', end: '16:30', hours: '8' },
+      { id: 'r23', name: 'U86', start: '8:00', rest: '12:00-13:00', end: '17:00', hours: '8' }
+    ]
+  },
+  {
+    id: 'sec-3', title: '假日/大小夜',
+    rows: [
+      { id: 'r24', name: 'SD/HD', start: '7:00', rest: '無', end: '15:00', hours: '8' },
+      { id: 'r25', name: 'HL/7.5-15.5', start: '7:30', rest: '無', end: '15:30', hours: '8' },
+      { id: 'r26', name: 'SA1/HA1', start: '15:00', rest: '無', end: '23:00', hours: '8' },
+      { id: 'r27', name: 'SA2/HA2', start: '15:00', rest: '無', end: '23:00', hours: '8' },
+      { id: 'r28', name: 'P/SP/HP', start: '23:00', rest: '無', end: '7:00', hours: '8' },
+      { id: 'r29', name: 'SL/B4', start: '8:30', rest: '無', end: '12:30', hours: '4' },
+      { id: 'r30', name: 'A1', start: '14:30', rest: '17:30-18:00', end: '23:00', hours: '8' },
+      { id: 'r31', name: 'A2', start: '14:30', rest: '17:00-17:30', end: '23:00', hours: '8' },
+      { id: 'r32', name: 'A3', start: '14:30', rest: '17:30-18:00', end: '23:00', hours: '8' }
+    ]
+  }
+];
+
 // Firebase 配置
 const firebaseConfig = {
   apiKey: "AIzaSyApEBgpAFaytqPBtPTEXE-fr8o4LdzKzPA",
@@ -389,6 +440,7 @@ const Header = ({ currentMonth, setCurrentMonth, currentPage, handlePageChange, 
         </div>
         <div className="flex flex-wrap items-center gap-1">
           <NavButton id="home" label="首頁" icon={Home} colorClass="bg-yellow-400" active={currentPage==='home'} onClick={handlePageChange} />
+          <NavButton id="shiftTimes" label="各班別上班時段" icon={FileText} colorClass="bg-teal-200" active={currentPage==='shiftTimes'} onClick={handlePageChange} />
           {isLoggedIn && isAdmin && (
             <>
               <NavButton id="account" label="帳號管理" icon={UserCog} colorClass="bg-pink-200" active={currentPage==='account'} onClick={handlePageChange} />
@@ -550,6 +602,155 @@ const ScheduleTableView = ({ currentMonth, employees, schedule, cellColors, days
           </tbody>
         </table>
       </div>
+    </div>
+  );
+};
+
+// 💡 各班別上班時段：不需登入即可檢視，管理員可編輯（新增/修改/刪除班別、區塊）
+const ShiftTimeTableView = ({ shiftTimeTable, updateShiftTimeTable, isAdmin }) => {
+  const [editingCell, setEditingCell] = useState(null); // { sectionId, rowId, field }
+  const [deleteRowTarget, setDeleteRowTarget] = useState(null); // { sectionId, rowId }
+  const [deleteSectionTarget, setDeleteSectionTarget] = useState(null); // sectionId
+
+  const fieldLabels = { name: '班別', start: '上班時間', rest: '休息時間', end: '下班時間', hours: '上班時數' };
+
+  const handleCellChange = (sectionId, rowId, field, value) => {
+    updateShiftTimeTable(latest => latest.map(sec =>
+      sec.id !== sectionId ? sec : {
+        ...sec,
+        rows: sec.rows.map(r => r.id !== rowId ? r : { ...r, [field]: value })
+      }
+    ));
+  };
+
+  const handleAddRow = (sectionId) => {
+    const newRow = { id: `r-${Date.now()}`, name: '', start: '', rest: '', end: '', hours: '' };
+    updateShiftTimeTable(latest => latest.map(sec =>
+      sec.id !== sectionId ? sec : { ...sec, rows: [...sec.rows, newRow] }
+    ));
+  };
+
+  const handleDeleteRow = () => {
+    const { sectionId, rowId } = deleteRowTarget;
+    updateShiftTimeTable(latest => latest.map(sec =>
+      sec.id !== sectionId ? sec : { ...sec, rows: sec.rows.filter(r => r.id !== rowId) }
+    ));
+    setDeleteRowTarget(null);
+  };
+
+  const handleAddSection = () => {
+    const title = window.prompt("請輸入新區塊的標題（例如：夜間支援）");
+    if (!title) return;
+    updateShiftTimeTable(latest => [...latest, { id: `sec-${Date.now()}`, title, rows: [] }]);
+  };
+
+  const handleRenameSection = (sectionId, currentTitle) => {
+    const title = window.prompt("修改區塊標題", currentTitle);
+    if (!title) return;
+    updateShiftTimeTable(latest => latest.map(sec => sec.id !== sectionId ? sec : { ...sec, title }));
+  };
+
+  const handleDeleteSection = () => {
+    updateShiftTimeTable(latest => latest.filter(sec => sec.id !== deleteSectionTarget));
+    setDeleteSectionTarget(null);
+  };
+
+  return (
+    <div className="flex-grow bg-gray-50 p-3 sm:p-6 font-sans overflow-auto">
+      <div className="max-w-4xl mx-auto space-y-6">
+        <div className="flex justify-between items-center">
+          <h2 className="text-lg font-black text-gray-800 flex items-center gap-2">
+            <Clock className="text-teal-600"/> 各班別上班時段
+          </h2>
+          {isAdmin && (
+            <button onClick={handleAddSection} className="bg-teal-600 text-white px-3 py-1.5 rounded-xl text-xs font-bold shadow hover:bg-teal-700 flex items-center gap-1">
+              <Plus size={14}/> 新增區塊
+            </button>
+          )}
+        </div>
+
+        {shiftTimeTable.map(section => (
+          <div key={section.id} className="bg-white rounded-3xl shadow-sm border overflow-hidden">
+            <div className="flex justify-between items-center px-5 pt-4 pb-2">
+              <h3 className="text-sm font-black text-teal-700">{section.title}</h3>
+              {isAdmin && (
+                <div className="flex items-center gap-3">
+                  <button onClick={() => handleRenameSection(section.id, section.title)} className="text-blue-500 text-xs font-bold hover:underline">重新命名</button>
+                  <button onClick={() => setDeleteSectionTarget(section.id)} className="text-red-300 hover:text-red-500"><Trash2 size={14}/></button>
+                </div>
+              )}
+            </div>
+            <div className="overflow-x-auto">
+              <table className="w-full text-sm text-center border-collapse">
+                <thead className="bg-gray-50 border-y text-[11px] text-gray-400 font-black uppercase tracking-tighter">
+                  <tr>
+                    <th className="p-3 text-left">班別</th>
+                    <th className="p-3">上班時間</th>
+                    <th className="p-3">休息時間</th>
+                    <th className="p-3">下班時間</th>
+                    <th className="p-3">上班時數</th>
+                    {isAdmin && <th className="p-3 w-10"></th>}
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-gray-50">
+                  {section.rows.map(row => (
+                    <tr key={row.id} className="hover:bg-teal-50/30 transition-colors">
+                      {['name', 'start', 'rest', 'end', 'hours'].map(field => (
+                        <td key={field} className={`p-3 ${field === 'name' ? 'text-left font-black text-gray-700' : 'font-mono text-gray-600'}`}>
+                          {isAdmin ? (
+                            <input
+                              type="text"
+                              value={row[field]}
+                              onChange={e => handleCellChange(section.id, row.id, field, e.target.value)}
+                              className={`w-full bg-transparent outline-none rounded px-1 focus:bg-teal-50 ${field === 'name' ? 'text-left font-black' : 'text-center font-mono'}`}
+                            />
+                          ) : (
+                            row[field] || '-'
+                          )}
+                        </td>
+                      ))}
+                      {isAdmin && (
+                        <td className="p-3">
+                          <button onClick={() => setDeleteRowTarget({ sectionId: section.id, rowId: row.id })} className="text-red-300 hover:text-red-500"><Trash2 size={14}/></button>
+                        </td>
+                      )}
+                    </tr>
+                  ))}
+                  {section.rows.length === 0 && (
+                    <tr><td colSpan={isAdmin ? 6 : 5} className="p-6 text-center text-gray-300 italic font-bold">尚無資料</td></tr>
+                  )}
+                </tbody>
+              </table>
+            </div>
+            {isAdmin && (
+              <div className="p-3 border-t bg-gray-50/50">
+                <button onClick={() => handleAddRow(section.id)} className="w-full py-2 border-2 border-dashed rounded-xl text-xs font-black text-gray-400 hover:bg-white transition-all">
+                  ＋ 新增班別
+                </button>
+              </div>
+            )}
+          </div>
+        ))}
+
+        {shiftTimeTable.length === 0 && (
+          <div className="bg-white p-10 rounded-2xl border border-dashed text-center text-gray-300 italic font-bold">尚無班別時段資料</div>
+        )}
+      </div>
+
+      <Modal
+        isOpen={!!deleteRowTarget}
+        onClose={() => setDeleteRowTarget(null)}
+        onConfirm={handleDeleteRow}
+        title="確定刪除這個班別？"
+        message="刪除後將無法復原。"
+      />
+      <Modal
+        isOpen={!!deleteSectionTarget}
+        onClose={() => setDeleteSectionTarget(null)}
+        onConfirm={handleDeleteSection}
+        title="確定刪除整個區塊？"
+        message="這會連同區塊內所有班別時段一併刪除，無法復原。"
+      />
     </div>
   );
 };
@@ -2958,6 +3159,7 @@ const App = () => {
   }, [currentMonth]);
   const [employees, setEmployees] = useState(INITIAL_EMPLOYEES);
   const [shifts, setShifts] = useState(INITIAL_SHIFTS);
+  const [shiftTimeTable, setShiftTimeTable] = useState(INITIAL_SHIFT_TIME_TABLE);
   const [holidays, setHolidays] = useState({ "2026-05-01": "勞動節" });
   const [personDayRules, setPersonDayRules] = useState(INITIAL_PERSON_DAY_RULES);
   const [schedule, setSchedule] = useState({});
@@ -3212,6 +3414,7 @@ const App = () => {
   // 員工異動一律走這裡：mutatorFn 接收「雲端最新員工陣列」，回傳新的員工陣列
   const updateEmployees = (mutatorFn) => runMetaTransaction('employees', mutatorFn, INITIAL_EMPLOYEES);
   const updateShifts = (mutatorFn) => runMetaTransaction('shifts', mutatorFn, INITIAL_SHIFTS);
+  const updateShiftTimeTable = (mutatorFn) => runMetaTransaction('shiftTimeTable', mutatorFn, INITIAL_SHIFT_TIME_TABLE);
   const updateHolidays = (mutatorFn) => runMetaTransaction('holidays', mutatorFn, {});
   const updatePersonDayRules = (mutatorFn) => runMetaTransaction('personDayRules', mutatorFn, INITIAL_PERSON_DAY_RULES);
 
@@ -3250,6 +3453,7 @@ const App = () => {
       const d = snap.data();
       if (d.employees) setEmployees(d.employees);
       if (d.shifts) setShifts(d.shifts);
+      if (d.shiftTimeTable) setShiftTimeTable(d.shiftTimeTable);
       if (d.holidays) setHolidays(d.holidays);
       if (d.personDayRules) setPersonDayRules(d.personDayRules);
       if (d.preLeaveMeta) {
@@ -3760,12 +3964,13 @@ const handleParticipantApprove = (reqId) => {
 
       const backup = {
         exportedAt: new Date().toISOString(),
-        version: 'V1.9',
+        version: 'V1.12',
         meta: {
           employees: meta.employees || [],
           shifts: meta.shifts || [],
           holidays: meta.holidays || {},
           personDayRules: meta.personDayRules || [],
+          shiftTimeTable: meta.shiftTimeTable || INITIAL_SHIFT_TIME_TABLE,
           // 💡 換班紀錄現在存在各月份文件裡（monthlyData 已包含），這裡不再重複備份
           preLeaveMeta: meta.preLeaveMeta || { weekendLimit: 10, weekdayLimit: 3, lotteryDay: 15, drawnMonths: [] }
         },
@@ -3802,6 +4007,7 @@ const handleParticipantApprove = (reqId) => {
           shifts: backup.meta.shifts || [],
           holidays: backup.meta.holidays || {},
           personDayRules: backup.meta.personDayRules || [],
+          shiftTimeTable: backup.meta.shiftTimeTable || INITIAL_SHIFT_TIME_TABLE,
           preLeaveMeta: backup.meta.preLeaveMeta || { weekendLimit: 10, weekdayLimit: 3, lotteryDay: 15, drawnMonths: [] },
           // 順手清掉舊版可能殘留在主文件裡的舊格式欄位（包含舊版把換班紀錄整包放在這裡的情況）
           schedule: deleteField(),
@@ -3865,6 +4071,7 @@ const handleParticipantApprove = (reqId) => {
           }
           switch (currentPage) {
             case 'home': return <ScheduleTableView currentMonth={currentMonth} employees={employees} schedule={schedule} cellColors={cellColors} daysInMonth={daysInMonth} swapRequests={swapRequests} currentPage={currentPage} currentUser={currentUser} />;
+            case 'shiftTimes': return <ShiftTimeTableView shiftTimeTable={shiftTimeTable} updateShiftTimeTable={updateShiftTimeTable} isAdmin={isLoggedIn && currentUser?.role === '0'} />;
             case 'account': return <AccountManagementView employees={employees} updateEmployees={updateEmployees} setDeleteTarget={setDeleteTarget} onExportFullBackup={handleExportFullBackup} onImportFullBackup={handleImportFullBackup} />;
             case 'shifts': return <ShiftsManagementView shifts={shifts} updateShifts={updateShifts} holidays={holidays} updateHolidays={updateHolidays} setDeleteShiftTarget={setDeleteShiftTarget} personDayRules={personDayRules} updatePersonDayRules={updatePersonDayRules} />;
             case 'swap': return <ScheduleTableView currentMonth={currentMonth} employees={employees} schedule={schedule} cellColors={cellColors} daysInMonth={daysInMonth} onCellClick={handleSwapApply} swapRequests={swapRequests} currentPage={currentPage} currentUser={currentUser} swapTarget={swapTarget} handleSwapBack={handleSwapBack} isCycleEnd={isCycleEnd}/>;
