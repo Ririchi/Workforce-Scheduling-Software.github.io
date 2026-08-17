@@ -79,7 +79,7 @@ const db = getFirestore(app);
 //      你可以直接去 Firebase Console 找 artifacts/pharmacy-system-TEST/... 這個固定路徑確認資料
 //    測試完成、準備上線前，記得改回空字串 "" 再推上 GitHub！
 // =====================================================================================
-const FORCE_APP_ID_FOR_TESTING = "pharmacy-system-TEST";
+const FORCE_APP_ID_FOR_TESTING = "";
 
 const rawAppId = FORCE_APP_ID_FOR_TESTING || (typeof __app_id !== 'undefined' ? __app_id : 'pharmacy-system-v1-8');
 // 💡 修正：某些執行環境注入的 __app_id 本身可能帶有 "/" 或其他不能出現在 Firestore
@@ -793,12 +793,15 @@ const ScheduleTableView = ({ currentMonth, employees, schedule, cellColors, days
     // 💡 修正核心 bug：改用畫面上「假日名額/平日名額」實際的設定值，
     // 舊版這裡誤用了另一組永遠固定是 10/3、從未被更新過的內部變數，
     // 導致抽籤名額跟畫面顯示的設定完全對不起來
-    const result = await runLotteryTransaction(currentMonth, daysInMonth, preLeaveData.weekendLimit ?? 10, preLeaveData.weekdayLimit ?? 3);
+    const result = await runLotteryTransaction(currentMonth, daysInMonth, preLeaveData.weekendLimit ?? 10, preLeaveData.weekdayLimit ?? 3, isAuto);
 
     if (!result?.ok) {
       if (result?.reason === 'already-drawn') {
         // 💡 代表在你按下按鈕的同一時間，已經有別的裝置搶先完成抽籤了，這是正常、預期內的保護行為
         if (!isAuto) alert(`${currentMonth} 剛好已被其他裝置完成抽籤，畫面即將自動更新結果，不會重複抽獎。`);
+      } else if (result?.reason === 'auto-suspended') {
+        // 💡 這個月已經被管理員標記為手動模式，自動抽籤在 Transaction 內被擋下，不會執行，也不會提示使用者
+        console.log(`[自動抽籤] ${currentMonth} 已被標記為手動模式，跳過自動觸發。`);
       } else if (!isAuto) {
         alert("抽籤失敗，請檢查網路連線後再試一次。");
       }
@@ -3024,7 +3027,7 @@ const App = () => {
   // （不使用畫面上可能過期的本地 state），確保無論同時有幾台裝置觸發，
   // 只會有一次真正生效，其餘會在 Transaction 內偵測到「已抽籤」而自動放棄，不會互相覆蓋。
   // ---------------------------------------------------------------------------------
-  const runLotteryTransaction = async (monthKey, daysInMonthArr, defaultHolidayLimit, defaultWeekdayLimit) => {
+  const runLotteryTransaction = async (monthKey, daysInMonthArr, defaultHolidayLimit, defaultWeekdayLimit, isAutoTrigger) => {
     let result = null;
     try {
       await runTransaction(db, async (tx) => {
@@ -3033,6 +3036,11 @@ const App = () => {
         const data = snap.exists() ? snap.data() : {};
 
         if (data.isDrawn === true) { result = { ok: false, reason: 'already-drawn' }; return; }
+        // 💡 防呆核心：如果是「自動觸發」的抽籤，這裡在 Transaction 內部再次確認一次
+        // autoLotterySuspended 是不是為 true（讀的是這個瞬間雲端最新的資料，不是外層可能過期的本地狀態）。
+        // 不管觸發端的判斷有沒有延遲、有沒有漏掉，只要月份被標記為手動模式，自動抽籤在這裡一定會被擋下來。
+        // 手動點擊的抽籤（isAutoTrigger 為 false）則不受此限制，管理員永遠可以手動抽。
+        if (isAutoTrigger && data.autoLotterySuspended === true) { result = { ok: false, reason: 'auto-suspended' }; return; }
 
         const nextMonthSched = deepClone(data.schedule || {});
         const apps = data.apps || {};
