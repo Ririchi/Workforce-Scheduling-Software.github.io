@@ -6,7 +6,7 @@ import {
   Home, UserCog, CalendarRange, ArrowLeftRight, Clock, LayoutGrid, Download, Upload, LogIn, LogOut,
   GripVertical, Plus, Trash2, Save, UserPlus, AlertCircle, Calendar as CalendarIcon, CheckCircle2,
   XCircle, Undo2, Redo2, Copy, FileText, SeparatorHorizontal, Info, ChevronLeft, ChevronRight, PaintBucket,
-  Eye, EyeOff, ShieldCheck, ShieldAlert, BarChart3, History, Search, Check, X, ClipboardList, MessageSquare, User, Circle, Settings, Dice5, Lock, TrendingUp, KeyRound as ResetPasswordIcon
+  Eye, EyeOff, ShieldCheck, ShieldAlert, BarChart3, History, Search, Check, X, ClipboardList, MessageSquare, User, Circle, Settings, Dice5, Lock, TrendingUp, KeyRound as ResetPasswordIcon, Link as LinkIcon, ChevronDown, ChevronUp
 } from 'lucide-react';
 
 // --- 常數定義與初始資料 ---
@@ -56,6 +56,57 @@ const INITIAL_PERSON_DAY_RULES = [
   { id: 10, pattern: '/2', value: '0.5', mode: 'suffix' },
   { id: 11, pattern: '/3', value: '0.5', mode: 'suffix' },
   { id: 12, pattern: '/4', value: '0.5', mode: 'suffix' }
+];
+
+// 💡 各班別上班時段參考表：不需登入即可檢視，管理員可編輯
+const INITIAL_SHIFT_TIME_TABLE = [
+  {
+    id: 'sec-1', title: '門急診作業',
+    rows: [
+      { id: 'r1', name: '黃', start: '7:00', rest: '11:00-11:30', end: '15:30', hours: '8' },
+      { id: 'r2', name: '紅', start: '8:30', rest: '12:30-13:30', end: '17:30', hours: '8' },
+      { id: 'r3', name: '藍', start: '7:30', rest: '12:00-12:30', end: '16:00', hours: '8' },
+      { id: 'r4', name: '磨粉', start: '8:00', rest: '12:30-13:30', end: '17:00', hours: '8' },
+      { id: 'r5', name: 'B9班', start: '8:00', rest: '12:30-13:30', end: '17:00', hours: '8' },
+      { id: 'r6', name: 'B8班', start: '7:30', rest: '12:30-13:30', end: '16:30', hours: '8' },
+      { id: 'r7', name: '發1', start: '8:00', rest: '11:30-12:30', end: '17:00', hours: '8' },
+      { id: 'r8', name: '發2', start: '9:00', rest: '12:30-13:30', end: '18:00', hours: '8' },
+      { id: 'r9', name: 'CK1', start: '8:00', rest: '11:30-12:30', end: '17:00', hours: '8' },
+      { id: 'r10', name: 'CK2', start: '9:00', rest: '12:30-13:30', end: '18:00', hours: '8' },
+      { id: 'r11', name: 'V8', start: '8:00', rest: '11:30-12:30', end: '17:00', hours: '8' },
+      { id: 'r12', name: 'DI', start: '8:00', rest: '12:00-13:00', end: '17:00', hours: '8' }
+    ]
+  },
+  {
+    id: 'sec-2', title: '住診作業',
+    rows: [
+      { id: 'r13', name: 'U', start: '8:00', rest: '12:30-13:30', end: '17:00', hours: '8' },
+      { id: 'r14', name: 'U81', start: '8:00', rest: '12:30-13:30', end: '17:00', hours: '8' },
+      { id: 'r15', name: 'U82', start: '8:00', rest: '12:30-13:30', end: '17:00', hours: '8' },
+      { id: 'r16', name: 'U83', start: '8:00', rest: '12:30-13:30', end: '17:00', hours: '8' },
+      { id: 'r17', name: 'U84', start: '8:00', rest: '12:30-13:30', end: '17:00', hours: '8' },
+      { id: 'r18', name: 'U85', start: '8:00', rest: '12:30-13:30', end: '17:00', hours: '8' },
+      { id: 'r19', name: 'U85-2', start: '8:00', rest: '11:30-12:30', end: '17:00', hours: '8' },
+      { id: 'r20', name: 'U91', start: '9:00', rest: '12:00-13:00', end: '18:00', hours: '8' },
+      { id: 'r21', name: 'U92', start: '9:00', rest: '12:30-13:30', end: '18:00', hours: '8' },
+      { id: 'r22', name: 'U7.5', start: '7:30', rest: '11:30-12:30', end: '16:30', hours: '8' },
+      { id: 'r23', name: 'U86', start: '8:00', rest: '12:00-13:00', end: '17:00', hours: '8' }
+    ]
+  },
+  {
+    id: 'sec-3', title: '假日/大小夜',
+    rows: [
+      { id: 'r24', name: 'SD/HD', start: '7:00', rest: '無', end: '15:00', hours: '8' },
+      { id: 'r25', name: 'HL/7.5-15.5', start: '7:30', rest: '無', end: '15:30', hours: '8' },
+      { id: 'r26', name: 'SA1/HA1', start: '15:00', rest: '無', end: '23:00', hours: '8' },
+      { id: 'r27', name: 'SA2/HA2', start: '15:00', rest: '無', end: '23:00', hours: '8' },
+      { id: 'r28', name: 'P/SP/HP', start: '23:00', rest: '無', end: '7:00', hours: '8' },
+      { id: 'r29', name: 'SL/B4', start: '8:30', rest: '無', end: '12:30', hours: '4' },
+      { id: 'r30', name: 'A1', start: '14:30', rest: '17:30-18:00', end: '23:00', hours: '8' },
+      { id: 'r31', name: 'A2', start: '14:30', rest: '17:00-17:30', end: '23:00', hours: '8' },
+      { id: 'r32', name: 'A3', start: '14:30', rest: '17:30-18:00', end: '23:00', hours: '8' }
+    ]
+  }
 ];
 
 // Firebase 配置
@@ -389,6 +440,7 @@ const Header = ({ currentMonth, setCurrentMonth, currentPage, handlePageChange, 
         </div>
         <div className="flex flex-wrap items-center gap-1">
           <NavButton id="home" label="首頁" icon={Home} colorClass="bg-yellow-400" active={currentPage==='home'} onClick={handlePageChange} />
+          <NavButton id="shiftTimes" label="各班別上班時段" icon={FileText} colorClass="bg-teal-200" active={currentPage==='shiftTimes'} onClick={handlePageChange} />
           {isLoggedIn && isAdmin && (
             <>
               <NavButton id="account" label="帳號管理" icon={UserCog} colorClass="bg-pink-200" active={currentPage==='account'} onClick={handlePageChange} />
@@ -550,6 +602,203 @@ const ScheduleTableView = ({ currentMonth, employees, schedule, cellColors, days
           </tbody>
         </table>
       </div>
+    </div>
+  );
+};
+
+// 💡 各班別上班時段：不需登入即可檢視，管理員可編輯（新增/修改/刪除班別、區塊）
+const ShiftTimeTableView = ({ shiftTimeTable, updateShiftTimeTable, isAdmin }) => {
+  const [deleteRowTarget, setDeleteRowTarget] = useState(null); // { sectionId, rowId }
+  const [deleteSectionTarget, setDeleteSectionTarget] = useState(null); // sectionId
+  // 💡 預設全部收合，只有被點開的區塊才會展開顯示班別內容
+  const [expandedSections, setExpandedSections] = useState(new Set());
+
+  const toggleSection = (sectionId) => {
+    setExpandedSections(prev => {
+      const next = new Set(prev);
+      if (next.has(sectionId)) next.delete(sectionId); else next.add(sectionId);
+      return next;
+    });
+  };
+
+  const handleCellChange = (sectionId, rowId, field, value) => {
+    updateShiftTimeTable(latest => latest.map(sec =>
+      sec.id !== sectionId ? sec : {
+        ...sec,
+        rows: sec.rows.map(r => r.id !== rowId ? r : { ...r, [field]: value })
+      }
+    ));
+  };
+
+  const handleEditLink = (sectionId, rowId, currentLink, rowName) => {
+    const url = window.prompt(`設定「${rowName || '此班別'}」的工作檢核表連結網址\n（留空並確定可清除連結）`, currentLink || "");
+    if (url === null) return; // 取消
+    handleCellChange(sectionId, rowId, 'link', url.trim());
+  };
+
+  const handleAddRow = (sectionId) => {
+    const newRow = { id: `r-${Date.now()}`, name: '', start: '', rest: '', end: '', hours: '', link: '' };
+    updateShiftTimeTable(latest => latest.map(sec =>
+      sec.id !== sectionId ? sec : { ...sec, rows: [...sec.rows, newRow] }
+    ));
+  };
+
+  const handleDeleteRow = () => {
+    const { sectionId, rowId } = deleteRowTarget;
+    updateShiftTimeTable(latest => latest.map(sec =>
+      sec.id !== sectionId ? sec : { ...sec, rows: sec.rows.filter(r => r.id !== rowId) }
+    ));
+    setDeleteRowTarget(null);
+  };
+
+  const handleAddSection = () => {
+    const title = window.prompt("請輸入新區塊的標題（例如：夜間支援）");
+    if (!title) return;
+    const newId = `sec-${Date.now()}`;
+    updateShiftTimeTable(latest => [...latest, { id: newId, title, rows: [] }]);
+    setExpandedSections(prev => new Set(prev).add(newId));
+  };
+
+  const handleRenameSection = (sectionId, currentTitle) => {
+    const title = window.prompt("修改區塊標題", currentTitle);
+    if (!title) return;
+    updateShiftTimeTable(latest => latest.map(sec => sec.id !== sectionId ? sec : { ...sec, title }));
+  };
+
+  const handleDeleteSection = () => {
+    updateShiftTimeTable(latest => latest.filter(sec => sec.id !== deleteSectionTarget));
+    setDeleteSectionTarget(null);
+  };
+
+  return (
+    <div className="flex-grow bg-gray-50 p-3 sm:p-6 font-sans overflow-auto">
+      <div className="max-w-4xl mx-auto space-y-6">
+        <div className="flex justify-between items-center">
+          <h2 className="text-lg font-black text-gray-800 flex items-center gap-2">
+            <Clock className="text-teal-600"/> 各班別上班時段
+          </h2>
+          {isAdmin && (
+            <button onClick={handleAddSection} className="bg-teal-600 text-white px-3 py-1.5 rounded-xl text-xs font-bold shadow hover:bg-teal-700 flex items-center gap-1">
+              <Plus size={14}/> 新增區塊
+            </button>
+          )}
+        </div>
+
+        {shiftTimeTable.map(section => {
+          const isExpanded = expandedSections.has(section.id);
+          return (
+          <div key={section.id} className="bg-white rounded-3xl shadow-sm border overflow-hidden">
+            <div
+              onClick={() => toggleSection(section.id)}
+              className="flex justify-between items-center px-5 py-4 cursor-pointer hover:bg-gray-50 transition-colors"
+            >
+              <h3 className="text-sm font-black text-teal-700 flex items-center gap-2">
+                {isExpanded ? <ChevronUp size={16} className="text-gray-400"/> : <ChevronDown size={16} className="text-gray-400"/>}
+                {section.title}
+                <span className="text-[10px] text-gray-300 font-bold">（{section.rows.length} 個班別）</span>
+              </h3>
+              {isAdmin && (
+                <div className="flex items-center gap-3" onClick={e => e.stopPropagation()}>
+                  <button onClick={() => handleRenameSection(section.id, section.title)} className="text-blue-500 text-xs font-bold hover:underline">重新命名</button>
+                  <button onClick={() => setDeleteSectionTarget(section.id)} className="text-red-300 hover:text-red-500"><Trash2 size={14}/></button>
+                </div>
+              )}
+            </div>
+
+            {isExpanded && (
+              <>
+                <div className="overflow-x-auto border-t">
+                  <table className="w-full text-sm text-center border-collapse">
+                    <thead className="bg-gray-50 border-b text-[11px] text-gray-400 font-black uppercase tracking-tighter">
+                      <tr>
+                        <th className="p-3 text-left">班別</th>
+                        <th className="p-3">上班時間</th>
+                        <th className="p-3">休息時間</th>
+                        <th className="p-3">下班時間</th>
+                        <th className="p-3">上班時數</th>
+                        {isAdmin && <th className="p-3 w-16"></th>}
+                      </tr>
+                    </thead>
+                    <tbody className="divide-y divide-gray-50">
+                      {section.rows.map(row => (
+                        <tr key={row.id} className="hover:bg-teal-50/30 transition-colors">
+                          {['name', 'start', 'rest', 'end', 'hours'].map(field => (
+                            <td key={field} className={`p-3 ${field === 'name' ? 'text-left font-black text-gray-700' : 'font-mono text-gray-600'}`}>
+                              {isAdmin ? (
+                                <input
+                                  type="text"
+                                  value={row[field]}
+                                  onChange={e => handleCellChange(section.id, row.id, field, e.target.value)}
+                                  className={`w-full bg-transparent outline-none rounded px-1 focus:bg-teal-50 ${field === 'name' ? 'text-left font-black' : 'text-center font-mono'}`}
+                                />
+                              ) : field === 'name' ? (
+                                row.link ? (
+                                  <a
+                                    href={row.link} target="_blank" rel="noopener noreferrer"
+                                    className="text-blue-600 font-black underline decoration-dotted hover:text-blue-800 inline-flex items-center gap-1"
+                                    title="點選查看工作檢核表"
+                                  >
+                                    {row.name || '(未命名)'} <LinkIcon size={11}/>
+                                  </a>
+                                ) : (row.name || '-')
+                              ) : (
+                                row[field] || '-'
+                              )}
+                            </td>
+                          ))}
+                          {isAdmin && (
+                            <td className="p-3">
+                              <div className="flex items-center justify-center gap-2">
+                                <button
+                                  onClick={() => handleEditLink(section.id, row.id, row.link, row.name)}
+                                  title="設定工作檢核表連結"
+                                  className={row.link ? "text-blue-500 hover:text-blue-700" : "text-gray-300 hover:text-blue-500"}
+                                >
+                                  <LinkIcon size={14}/>
+                                </button>
+                                <button onClick={() => setDeleteRowTarget({ sectionId: section.id, rowId: row.id })} className="text-red-300 hover:text-red-500"><Trash2 size={14}/></button>
+                              </div>
+                            </td>
+                          )}
+                        </tr>
+                      ))}
+                      {section.rows.length === 0 && (
+                        <tr><td colSpan={isAdmin ? 6 : 5} className="p-6 text-center text-gray-300 italic font-bold">尚無資料</td></tr>
+                      )}
+                    </tbody>
+                  </table>
+                </div>
+                {isAdmin && (
+                  <div className="p-3 border-t bg-gray-50/50">
+                    <button onClick={() => handleAddRow(section.id)} className="w-full py-2 border-2 border-dashed rounded-xl text-xs font-black text-gray-400 hover:bg-white transition-all">
+                      ＋ 新增班別
+                    </button>
+                  </div>
+                )}
+              </>
+            )}
+          </div>
+        );})}
+
+        {shiftTimeTable.length === 0 && (
+          <div className="bg-white p-10 rounded-2xl border border-dashed text-center text-gray-300 italic font-bold">尚無班別時段資料</div>
+        )}
+      </div>
+
+      <Modal
+        isOpen={!!deleteRowTarget}
+        onClose={() => setDeleteRowTarget(null)}
+        onConfirm={handleDeleteRow}
+        title="確定刪除這個班別？"
+        message="刪除後將無法復原。"
+      />
+      <Modal
+        isOpen={!!deleteSectionTarget}
+        onClose={() => setDeleteSectionTarget(null)}
+        onConfirm={handleDeleteSection}
+        title="確定刪除整個區塊？"
+        message="這會連同區塊內所有班別時段一併刪除，無法復原。"
+      />
     </div>
   );
 };
@@ -793,12 +1042,15 @@ const ScheduleTableView = ({ currentMonth, employees, schedule, cellColors, days
     // 💡 修正核心 bug：改用畫面上「假日名額/平日名額」實際的設定值，
     // 舊版這裡誤用了另一組永遠固定是 10/3、從未被更新過的內部變數，
     // 導致抽籤名額跟畫面顯示的設定完全對不起來
-    const result = await runLotteryTransaction(currentMonth, daysInMonth, preLeaveData.weekendLimit ?? 10, preLeaveData.weekdayLimit ?? 3);
+    const result = await runLotteryTransaction(currentMonth, daysInMonth, preLeaveData.weekendLimit ?? 10, preLeaveData.weekdayLimit ?? 3, isAuto);
 
     if (!result?.ok) {
       if (result?.reason === 'already-drawn') {
         // 💡 代表在你按下按鈕的同一時間，已經有別的裝置搶先完成抽籤了，這是正常、預期內的保護行為
         if (!isAuto) alert(`${currentMonth} 剛好已被其他裝置完成抽籤，畫面即將自動更新結果，不會重複抽獎。`);
+      } else if (result?.reason === 'auto-suspended') {
+        // 💡 這個月已經被管理員標記為手動模式，自動抽籤在 Transaction 內被擋下，不會執行，也不會提示使用者
+        console.log(`[自動抽籤] ${currentMonth} 已被標記為手動模式，跳過自動觸發。`);
       } else if (!isAuto) {
         alert("抽籤失敗，請檢查網路連線後再試一次。");
       }
@@ -2955,6 +3207,7 @@ const App = () => {
   }, [currentMonth]);
   const [employees, setEmployees] = useState(INITIAL_EMPLOYEES);
   const [shifts, setShifts] = useState(INITIAL_SHIFTS);
+  const [shiftTimeTable, setShiftTimeTable] = useState(INITIAL_SHIFT_TIME_TABLE);
   const [holidays, setHolidays] = useState({ "2026-05-01": "勞動節" });
   const [personDayRules, setPersonDayRules] = useState(INITIAL_PERSON_DAY_RULES);
   const [schedule, setSchedule] = useState({});
@@ -3024,7 +3277,7 @@ const App = () => {
   // （不使用畫面上可能過期的本地 state），確保無論同時有幾台裝置觸發，
   // 只會有一次真正生效，其餘會在 Transaction 內偵測到「已抽籤」而自動放棄，不會互相覆蓋。
   // ---------------------------------------------------------------------------------
-  const runLotteryTransaction = async (monthKey, daysInMonthArr, defaultHolidayLimit, defaultWeekdayLimit) => {
+  const runLotteryTransaction = async (monthKey, daysInMonthArr, defaultHolidayLimit, defaultWeekdayLimit, isAutoTrigger) => {
     let result = null;
     try {
       await runTransaction(db, async (tx) => {
@@ -3033,6 +3286,11 @@ const App = () => {
         const data = snap.exists() ? snap.data() : {};
 
         if (data.isDrawn === true) { result = { ok: false, reason: 'already-drawn' }; return; }
+        // 💡 防呆核心：如果是「自動觸發」的抽籤，這裡在 Transaction 內部再次確認一次
+        // autoLotterySuspended 是不是為 true（讀的是這個瞬間雲端最新的資料，不是外層可能過期的本地狀態）。
+        // 不管觸發端的判斷有沒有延遲、有沒有漏掉，只要月份被標記為手動模式，自動抽籤在這裡一定會被擋下來。
+        // 手動點擊的抽籤（isAutoTrigger 為 false）則不受此限制，管理員永遠可以手動抽。
+        if (isAutoTrigger && data.autoLotterySuspended === true) { result = { ok: false, reason: 'auto-suspended' }; return; }
 
         const nextMonthSched = deepClone(data.schedule || {});
         const apps = data.apps || {};
@@ -3204,6 +3462,7 @@ const App = () => {
   // 員工異動一律走這裡：mutatorFn 接收「雲端最新員工陣列」，回傳新的員工陣列
   const updateEmployees = (mutatorFn) => runMetaTransaction('employees', mutatorFn, INITIAL_EMPLOYEES);
   const updateShifts = (mutatorFn) => runMetaTransaction('shifts', mutatorFn, INITIAL_SHIFTS);
+  const updateShiftTimeTable = (mutatorFn) => runMetaTransaction('shiftTimeTable', mutatorFn, INITIAL_SHIFT_TIME_TABLE);
   const updateHolidays = (mutatorFn) => runMetaTransaction('holidays', mutatorFn, {});
   const updatePersonDayRules = (mutatorFn) => runMetaTransaction('personDayRules', mutatorFn, INITIAL_PERSON_DAY_RULES);
 
@@ -3242,6 +3501,7 @@ const App = () => {
       const d = snap.data();
       if (d.employees) setEmployees(d.employees);
       if (d.shifts) setShifts(d.shifts);
+      if (d.shiftTimeTable) setShiftTimeTable(d.shiftTimeTable);
       if (d.holidays) setHolidays(d.holidays);
       if (d.personDayRules) setPersonDayRules(d.personDayRules);
       if (d.preLeaveMeta) {
@@ -3752,12 +4012,13 @@ const handleParticipantApprove = (reqId) => {
 
       const backup = {
         exportedAt: new Date().toISOString(),
-        version: 'V1.9',
+        version: 'V1.12',
         meta: {
           employees: meta.employees || [],
           shifts: meta.shifts || [],
           holidays: meta.holidays || {},
           personDayRules: meta.personDayRules || [],
+          shiftTimeTable: meta.shiftTimeTable || INITIAL_SHIFT_TIME_TABLE,
           // 💡 換班紀錄現在存在各月份文件裡（monthlyData 已包含），這裡不再重複備份
           preLeaveMeta: meta.preLeaveMeta || { weekendLimit: 10, weekdayLimit: 3, lotteryDay: 15, drawnMonths: [] }
         },
@@ -3794,6 +4055,7 @@ const handleParticipantApprove = (reqId) => {
           shifts: backup.meta.shifts || [],
           holidays: backup.meta.holidays || {},
           personDayRules: backup.meta.personDayRules || [],
+          shiftTimeTable: backup.meta.shiftTimeTable || INITIAL_SHIFT_TIME_TABLE,
           preLeaveMeta: backup.meta.preLeaveMeta || { weekendLimit: 10, weekdayLimit: 3, lotteryDay: 15, drawnMonths: [] },
           // 順手清掉舊版可能殘留在主文件裡的舊格式欄位（包含舊版把換班紀錄整包放在這裡的情況）
           schedule: deleteField(),
@@ -3857,6 +4119,7 @@ const handleParticipantApprove = (reqId) => {
           }
           switch (currentPage) {
             case 'home': return <ScheduleTableView currentMonth={currentMonth} employees={employees} schedule={schedule} cellColors={cellColors} daysInMonth={daysInMonth} swapRequests={swapRequests} currentPage={currentPage} currentUser={currentUser} />;
+            case 'shiftTimes': return <ShiftTimeTableView shiftTimeTable={shiftTimeTable} updateShiftTimeTable={updateShiftTimeTable} isAdmin={isLoggedIn && currentUser?.role === '0'} />;
             case 'account': return <AccountManagementView employees={employees} updateEmployees={updateEmployees} setDeleteTarget={setDeleteTarget} onExportFullBackup={handleExportFullBackup} onImportFullBackup={handleImportFullBackup} />;
             case 'shifts': return <ShiftsManagementView shifts={shifts} updateShifts={updateShifts} holidays={holidays} updateHolidays={updateHolidays} setDeleteShiftTarget={setDeleteShiftTarget} personDayRules={personDayRules} updatePersonDayRules={updatePersonDayRules} />;
             case 'swap': return <ScheduleTableView currentMonth={currentMonth} employees={employees} schedule={schedule} cellColors={cellColors} daysInMonth={daysInMonth} onCellClick={handleSwapApply} swapRequests={swapRequests} currentPage={currentPage} currentUser={currentUser} swapTarget={swapTarget} handleSwapBack={handleSwapBack} isCycleEnd={isCycleEnd}/>;
