@@ -6,7 +6,7 @@ import {
   Home, UserCog, CalendarRange, ArrowLeftRight, Clock, LayoutGrid, Download, Upload, LogIn, LogOut,
   GripVertical, Plus, Trash2, Save, UserPlus, AlertCircle, Calendar as CalendarIcon, CheckCircle2,
   XCircle, Undo2, Redo2, Copy, FileText, SeparatorHorizontal, Info, ChevronLeft, ChevronRight, PaintBucket,
-  Eye, EyeOff, ShieldCheck, ShieldAlert, BarChart3, History, Search, Check, X, ClipboardList, MessageSquare, User, Circle, Settings, Dice5, Lock, TrendingUp, KeyRound as ResetPasswordIcon
+  Eye, EyeOff, ShieldCheck, ShieldAlert, BarChart3, History, Search, Check, X, ClipboardList, MessageSquare, User, Circle, Settings, Dice5, Lock, TrendingUp, KeyRound as ResetPasswordIcon, Link as LinkIcon, ChevronDown, ChevronUp
 } from 'lucide-react';
 
 // --- 常數定義與初始資料 ---
@@ -608,11 +608,18 @@ const ScheduleTableView = ({ currentMonth, employees, schedule, cellColors, days
 
 // 💡 各班別上班時段：不需登入即可檢視，管理員可編輯（新增/修改/刪除班別、區塊）
 const ShiftTimeTableView = ({ shiftTimeTable, updateShiftTimeTable, isAdmin }) => {
-  const [editingCell, setEditingCell] = useState(null); // { sectionId, rowId, field }
   const [deleteRowTarget, setDeleteRowTarget] = useState(null); // { sectionId, rowId }
   const [deleteSectionTarget, setDeleteSectionTarget] = useState(null); // sectionId
+  // 💡 預設全部收合，只有被點開的區塊才會展開顯示班別內容
+  const [expandedSections, setExpandedSections] = useState(new Set());
 
-  const fieldLabels = { name: '班別', start: '上班時間', rest: '休息時間', end: '下班時間', hours: '上班時數' };
+  const toggleSection = (sectionId) => {
+    setExpandedSections(prev => {
+      const next = new Set(prev);
+      if (next.has(sectionId)) next.delete(sectionId); else next.add(sectionId);
+      return next;
+    });
+  };
 
   const handleCellChange = (sectionId, rowId, field, value) => {
     updateShiftTimeTable(latest => latest.map(sec =>
@@ -623,8 +630,14 @@ const ShiftTimeTableView = ({ shiftTimeTable, updateShiftTimeTable, isAdmin }) =
     ));
   };
 
+  const handleEditLink = (sectionId, rowId, currentLink, rowName) => {
+    const url = window.prompt(`設定「${rowName || '此班別'}」的工作檢核表連結網址\n（留空並確定可清除連結）`, currentLink || "");
+    if (url === null) return; // 取消
+    handleCellChange(sectionId, rowId, 'link', url.trim());
+  };
+
   const handleAddRow = (sectionId) => {
-    const newRow = { id: `r-${Date.now()}`, name: '', start: '', rest: '', end: '', hours: '' };
+    const newRow = { id: `r-${Date.now()}`, name: '', start: '', rest: '', end: '', hours: '', link: '' };
     updateShiftTimeTable(latest => latest.map(sec =>
       sec.id !== sectionId ? sec : { ...sec, rows: [...sec.rows, newRow] }
     ));
@@ -641,7 +654,9 @@ const ShiftTimeTableView = ({ shiftTimeTable, updateShiftTimeTable, isAdmin }) =
   const handleAddSection = () => {
     const title = window.prompt("請輸入新區塊的標題（例如：夜間支援）");
     if (!title) return;
-    updateShiftTimeTable(latest => [...latest, { id: `sec-${Date.now()}`, title, rows: [] }]);
+    const newId = `sec-${Date.now()}`;
+    updateShiftTimeTable(latest => [...latest, { id: newId, title, rows: [] }]);
+    setExpandedSections(prev => new Set(prev).add(newId));
   };
 
   const handleRenameSection = (sectionId, currentTitle) => {
@@ -669,68 +684,101 @@ const ShiftTimeTableView = ({ shiftTimeTable, updateShiftTimeTable, isAdmin }) =
           )}
         </div>
 
-        {shiftTimeTable.map(section => (
+        {shiftTimeTable.map(section => {
+          const isExpanded = expandedSections.has(section.id);
+          return (
           <div key={section.id} className="bg-white rounded-3xl shadow-sm border overflow-hidden">
-            <div className="flex justify-between items-center px-5 pt-4 pb-2">
-              <h3 className="text-sm font-black text-teal-700">{section.title}</h3>
+            <div
+              onClick={() => toggleSection(section.id)}
+              className="flex justify-between items-center px-5 py-4 cursor-pointer hover:bg-gray-50 transition-colors"
+            >
+              <h3 className="text-sm font-black text-teal-700 flex items-center gap-2">
+                {isExpanded ? <ChevronUp size={16} className="text-gray-400"/> : <ChevronDown size={16} className="text-gray-400"/>}
+                {section.title}
+                <span className="text-[10px] text-gray-300 font-bold">（{section.rows.length} 個班別）</span>
+              </h3>
               {isAdmin && (
-                <div className="flex items-center gap-3">
+                <div className="flex items-center gap-3" onClick={e => e.stopPropagation()}>
                   <button onClick={() => handleRenameSection(section.id, section.title)} className="text-blue-500 text-xs font-bold hover:underline">重新命名</button>
                   <button onClick={() => setDeleteSectionTarget(section.id)} className="text-red-300 hover:text-red-500"><Trash2 size={14}/></button>
                 </div>
               )}
             </div>
-            <div className="overflow-x-auto">
-              <table className="w-full text-sm text-center border-collapse">
-                <thead className="bg-gray-50 border-y text-[11px] text-gray-400 font-black uppercase tracking-tighter">
-                  <tr>
-                    <th className="p-3 text-left">班別</th>
-                    <th className="p-3">上班時間</th>
-                    <th className="p-3">休息時間</th>
-                    <th className="p-3">下班時間</th>
-                    <th className="p-3">上班時數</th>
-                    {isAdmin && <th className="p-3 w-10"></th>}
-                  </tr>
-                </thead>
-                <tbody className="divide-y divide-gray-50">
-                  {section.rows.map(row => (
-                    <tr key={row.id} className="hover:bg-teal-50/30 transition-colors">
-                      {['name', 'start', 'rest', 'end', 'hours'].map(field => (
-                        <td key={field} className={`p-3 ${field === 'name' ? 'text-left font-black text-gray-700' : 'font-mono text-gray-600'}`}>
-                          {isAdmin ? (
-                            <input
-                              type="text"
-                              value={row[field]}
-                              onChange={e => handleCellChange(section.id, row.id, field, e.target.value)}
-                              className={`w-full bg-transparent outline-none rounded px-1 focus:bg-teal-50 ${field === 'name' ? 'text-left font-black' : 'text-center font-mono'}`}
-                            />
-                          ) : (
-                            row[field] || '-'
+
+            {isExpanded && (
+              <>
+                <div className="overflow-x-auto border-t">
+                  <table className="w-full text-sm text-center border-collapse">
+                    <thead className="bg-gray-50 border-b text-[11px] text-gray-400 font-black uppercase tracking-tighter">
+                      <tr>
+                        <th className="p-3 text-left">班別</th>
+                        <th className="p-3">上班時間</th>
+                        <th className="p-3">休息時間</th>
+                        <th className="p-3">下班時間</th>
+                        <th className="p-3">上班時數</th>
+                        {isAdmin && <th className="p-3 w-16"></th>}
+                      </tr>
+                    </thead>
+                    <tbody className="divide-y divide-gray-50">
+                      {section.rows.map(row => (
+                        <tr key={row.id} className="hover:bg-teal-50/30 transition-colors">
+                          {['name', 'start', 'rest', 'end', 'hours'].map(field => (
+                            <td key={field} className={`p-3 ${field === 'name' ? 'text-left font-black text-gray-700' : 'font-mono text-gray-600'}`}>
+                              {isAdmin ? (
+                                <input
+                                  type="text"
+                                  value={row[field]}
+                                  onChange={e => handleCellChange(section.id, row.id, field, e.target.value)}
+                                  className={`w-full bg-transparent outline-none rounded px-1 focus:bg-teal-50 ${field === 'name' ? 'text-left font-black' : 'text-center font-mono'}`}
+                                />
+                              ) : field === 'name' ? (
+                                row.link ? (
+                                  <a
+                                    href={row.link} target="_blank" rel="noopener noreferrer"
+                                    className="text-blue-600 font-black underline decoration-dotted hover:text-blue-800 inline-flex items-center gap-1"
+                                    title="點選查看工作檢核表"
+                                  >
+                                    {row.name || '(未命名)'} <LinkIcon size={11}/>
+                                  </a>
+                                ) : (row.name || '-')
+                              ) : (
+                                row[field] || '-'
+                              )}
+                            </td>
+                          ))}
+                          {isAdmin && (
+                            <td className="p-3">
+                              <div className="flex items-center justify-center gap-2">
+                                <button
+                                  onClick={() => handleEditLink(section.id, row.id, row.link, row.name)}
+                                  title="設定工作檢核表連結"
+                                  className={row.link ? "text-blue-500 hover:text-blue-700" : "text-gray-300 hover:text-blue-500"}
+                                >
+                                  <LinkIcon size={14}/>
+                                </button>
+                                <button onClick={() => setDeleteRowTarget({ sectionId: section.id, rowId: row.id })} className="text-red-300 hover:text-red-500"><Trash2 size={14}/></button>
+                              </div>
+                            </td>
                           )}
-                        </td>
+                        </tr>
                       ))}
-                      {isAdmin && (
-                        <td className="p-3">
-                          <button onClick={() => setDeleteRowTarget({ sectionId: section.id, rowId: row.id })} className="text-red-300 hover:text-red-500"><Trash2 size={14}/></button>
-                        </td>
+                      {section.rows.length === 0 && (
+                        <tr><td colSpan={isAdmin ? 6 : 5} className="p-6 text-center text-gray-300 italic font-bold">尚無資料</td></tr>
                       )}
-                    </tr>
-                  ))}
-                  {section.rows.length === 0 && (
-                    <tr><td colSpan={isAdmin ? 6 : 5} className="p-6 text-center text-gray-300 italic font-bold">尚無資料</td></tr>
-                  )}
-                </tbody>
-              </table>
-            </div>
-            {isAdmin && (
-              <div className="p-3 border-t bg-gray-50/50">
-                <button onClick={() => handleAddRow(section.id)} className="w-full py-2 border-2 border-dashed rounded-xl text-xs font-black text-gray-400 hover:bg-white transition-all">
-                  ＋ 新增班別
-                </button>
-              </div>
+                    </tbody>
+                  </table>
+                </div>
+                {isAdmin && (
+                  <div className="p-3 border-t bg-gray-50/50">
+                    <button onClick={() => handleAddRow(section.id)} className="w-full py-2 border-2 border-dashed rounded-xl text-xs font-black text-gray-400 hover:bg-white transition-all">
+                      ＋ 新增班別
+                    </button>
+                  </div>
+                )}
+              </>
             )}
           </div>
-        ))}
+        );})}
 
         {shiftTimeTable.length === 0 && (
           <div className="bg-white p-10 rounded-2xl border border-dashed text-center text-gray-300 italic font-bold">尚無班別時段資料</div>
