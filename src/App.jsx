@@ -3185,6 +3185,9 @@ const SchedulingView = ({ currentMonth, employees, daysInMonth, schedule, setSch
 const mainDocRef = doc(db, 'artifacts', appId, 'public', 'data', 'roster', 'main');
 const monthlyColRef = collection(mainDocRef, 'monthlyData');
 const getMonthDocRef = (monthKey) => doc(monthlyColRef, monthKey);
+// 💡 給其他系統（例如分類系統）查詢「員編 -> 姓名」用的公開摘要文件，完全不含密碼等敏感資料。
+// 路徑跟 mainDocRef 同一層，appId 會跟著測試/正式環境自動切換，測試時不會動到正式資料。
+const directoryDocRef = doc(db, 'artifacts', appId, 'public', 'data', 'roster', 'directory');
 
 const App = () => {
   const [currentPage, setCurrentPage] = useState('home');
@@ -3452,6 +3455,19 @@ const App = () => {
         const cloudVal = snap.exists() && snap.data()[fieldName] !== undefined ? snap.data()[fieldName] : fallbackValue;
         const nextVal = mutatorFn(deepClone(cloudVal));
         tx.set(mainDocRef, { [fieldName]: nextVal }, { merge: true });
+
+        // 💡 只要是員工資料異動（新增/編輯/刪除/匯入/排序/密碼設定/換班鎖定都算），
+        // 就在同一個 Transaction 裡，用「當下最新的完整員工清單」重新整份重建一次摘要文件，
+        // 讓其他系統（如分類系統）能直接讀 id -> name 對照表做登入核對，完全不含密碼。
+        // 用完整重建（而非 merge）是刻意的：這樣員工被刪除時，摘要文件裡的舊紀錄才會確實被移除，
+        // 不會留下殘影，也不需要額外判斷誰被刪除、誰改名。
+        if (fieldName === 'employees' && Array.isArray(nextVal)) {
+          const entries = {};
+          nextVal.forEach(emp => {
+            if (!emp.isSeparator && emp.id && emp.name) entries[emp.id] = emp.name;
+          });
+          tx.set(directoryDocRef, { entries, updatedAt: new Date().toISOString() });
+        }
       });
     } catch (error) {
       console.error(`Transaction 寫入失敗(${fieldName}):`, error);
@@ -4063,6 +4079,16 @@ const handleParticipantApprove = (reqId) => {
           preLeaveData: deleteField(),
           swapRequests: deleteField()
         }, { merge: true });
+
+        // 💡 完整備份還原會直接寫入 employees，繞過 runMetaTransaction，
+        // 這裡補上同一份「員編->姓名」摘要文件重建，確保還原後不會跟摘要文件對不起來
+        {
+          const entries = {};
+          (backup.meta.employees || []).forEach(emp => {
+            if (!emp.isSeparator && emp.id && emp.name) entries[emp.id] = emp.name;
+          });
+          await setDoc(directoryDocRef, { entries, updatedAt: new Date().toISOString() });
+        }
 
         const monthlyData = deepClone(backup.monthlyData || {});
 
