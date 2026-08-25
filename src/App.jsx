@@ -130,7 +130,7 @@ const db = getFirestore(app);
 //      你可以直接去 Firebase Console 找 artifacts/pharmacy-system-TEST/... 這個固定路徑確認資料
 //    測試完成、準備上線前，記得改回空字串 "" 再推上 GitHub！
 // =====================================================================================
-const FORCE_APP_ID_FOR_TESTING = "pharmacy-system-TEST";
+const FORCE_APP_ID_FOR_TESTING = "";
 
 const rawAppId = FORCE_APP_ID_FOR_TESTING || (typeof __app_id !== 'undefined' ? __app_id : 'pharmacy-system-v1-8');
 // 💡 修正：某些執行環境注入的 __app_id 本身可能帶有 "/" 或其他不能出現在 Firestore
@@ -1164,9 +1164,8 @@ const ShiftTimeTableView = ({ shiftTimeTable, updateShiftTimeTable, isAdmin }) =
                   const sVal = schedule[currentMonth]?.[emp.name]?.[d.day];
                   const isApplied = preLeaveData.apps?.[currentMonth]?.[emp.name]?.[d.day] === "預假";
                   const isFixed = ['休', '公', '公#', '例', 'P', 'P#'].includes(sVal);
-                  const isWinner = sVal === '休';
-                  // 💡 優先使用「抽籤結果快照」：不受之後班表異動（換班/手動調整）影響，
-                  // 忠實呈現抽籤當下的結果；沒有快照時（例如尚未抽籤、或舊資料沒有快照）才退回即時判斷
+                  // 💡 修正：只使用「抽籤結果快照」判斷中籤與否，不再拿即時班表的值做比對或退回判斷。
+                  // 這樣抽籤完成之後，不管班表之後因為換班、手動調整而變動，這裡顯示的結果永遠維持抽籤當下的樣子。
                   const lotteryResult = preLeaveData.lotteryResults?.[currentMonth]?.[emp.name]?.[d.day];
                   const cycleEnd = isCycleEnd(d.fullDate);
                   const canToggle = !isMonthDrawn && !isFixed && (isAdmin || emp.name === currentUser?.name);
@@ -1177,13 +1176,12 @@ const ShiftTimeTableView = ({ shiftTimeTable, updateShiftTimeTable, isAdmin }) =
                     <td 
                       key={d.day} 
                       onClick={() => handleToggle(emp.name, d.day)} 
-                      className={`border py-1.5 px-0 h-10 transition-all ${bgClass} ${cycleEnd ? 'border-r-4 border-r-gray-400' : ''} ${(isApplied || isWinner || lotteryResult) ? 'ring-2 ring-inset ring-orange-400 shadow-inner' : ''} ${canToggle ? 'cursor-pointer hover:opacity-80' : 'cursor-not-allowed'}`}
+                      className={`border py-1.5 px-0 h-10 transition-all ${bgClass} ${cycleEnd ? 'border-r-4 border-r-gray-400' : ''} ${(isApplied || lotteryResult) ? 'ring-2 ring-inset ring-orange-400 shadow-inner' : ''} ${canToggle ? 'cursor-pointer hover:opacity-80' : 'cursor-not-allowed'}`}
                     >
                       <div className="flex flex-col items-center justify-center h-full">
                         {isFixed ? <span className="text-gray-500 font-bold opacity-60 text-xs">{sVal}</span> :
                          lotteryResult === '休' ? <span className="text-green-800 font-black text-[13px] bg-green-50 px-1 rounded">休</span> :
                          lotteryResult === '未中' ? <span className="text-orange-600/70 font-bold text-[10px] bg-orange-50/60 px-1 rounded border border-dashed border-orange-200">預假(未中)</span> :
-                         isWinner ? <span className="text-green-800 font-black text-[13px] bg-green-50 px-1 rounded">休</span> :
                          /* 💡 只有在『已完成抽籤』且『沒抽中』時才顯示『預假(未中)』；抽籤前一律顯示乾淨的『預假』 */
                          isApplied ? (
                            isMonthDrawn ? (
@@ -1208,7 +1206,10 @@ const ShiftTimeTableView = ({ shiftTimeTable, updateShiftTimeTable, isAdmin }) =
                   <td key={d.day} className={`border p-1 align-top h-20 overflow-y-auto bg-blue-50/30 ${isCycleEnd(d.fullDate) ? 'border-r-4 border-r-gray-500' : ''}`}>
                     <div className="flex flex-col gap-0.5">
                       {list.map((name, i) => {
-                        const isWinner = (preLeaveData.lotteryResults?.[currentMonth]?.[name]?.[d.day] === '休') || (!preLeaveData.lotteryResults?.[currentMonth]?.[name]?.[d.day] && schedule[currentMonth]?.[name]?.[d.day] === "休");
+                        // 💡 修正：只看抽籤結果快照是否記錄「休」，不再退回比對即時班表。
+                        // 之前的寫法會讓後續班表異動（換班、手動調整）反過來影響這裡顯示的中籤結果，
+                        // 導致「跟現在班表不同就顯示綠色」的錯誤畫面，現在完全以抽籤當下的結果為準。
+                        const isWinner = preLeaveData.lotteryResults?.[currentMonth]?.[name]?.[d.day] === '休';
                         return (
                           <div key={i} className={`text-[9px] font-black text-center leading-none truncate border rounded py-1 shadow-sm ${
                             isWinner 
