@@ -882,12 +882,17 @@ const ShiftTimeTableView = ({ shiftTimeTable, updateShiftTimeTable, isAdmin }) =
     csv += isMonthDrawn ? "---藥師預假抽籤結果---\n" : "---藥師預假詳情---\n";
     employees.filter(e => !e.isSeparator).forEach(emp => {
       csv += `${emp.name},` + daysInMonth.map(d => {
+        const isApplied = preLeaveData.apps?.[currentMonth]?.[emp.name]?.[d.day] === "預假";
+        const frozenVal = preLeaveData.lotteryResults?.[currentMonth]?.[emp.name]?.[d.day];
+        if (isMonthDrawn && frozenVal !== undefined) {
+          // 💡 已抽籤：完全以凍結快照為準，不看即時班表
+          if (isApplied) return frozenVal === '休' ? '休' : '未中';
+          if (['休', '公', '公#', '例', 'P', 'P#'].includes(frozenVal)) return frozenVal;
+          return "";
+        }
+        // 💡 尚未抽籤、或舊資料沒有凍結快照：維持原本即時判斷的邏輯
         const sVal = schedule[currentMonth]?.[emp.name]?.[d.day];
         if (['休', '公', '公#', '例', '休假'].includes(sVal)) return sVal;
-        // 💡 已抽籤的月份，優先匯出「抽籤結果快照」（休/未中），忠實反映抽籤當下結果，
-        // 不受之後班表異動影響；沒有快照時（未抽籤，或極舊資料）才退回即時的申請狀態
-        const lotteryResult = preLeaveData.lotteryResults?.[currentMonth]?.[emp.name]?.[d.day];
-        if (isMonthDrawn && lotteryResult) return lotteryResult;
         return preLeaveData.apps?.[currentMonth]?.[emp.name]?.[d.day] || "";
       }).join(",") + "\n";
     });
@@ -1164,10 +1169,11 @@ const ShiftTimeTableView = ({ shiftTimeTable, updateShiftTimeTable, isAdmin }) =
                   const sVal = schedule[currentMonth]?.[emp.name]?.[d.day];
                   const isApplied = preLeaveData.apps?.[currentMonth]?.[emp.name]?.[d.day] === "預假";
                   const isFixed = ['休', '公', '公#', '例', 'P', 'P#'].includes(sVal);
-                  const isWinner = sVal === '休';
-                  // 💡 優先使用「抽籤結果快照」：不受之後班表異動（換班/手動調整）影響，
-                  // 忠實呈現抽籤當下的結果；沒有快照時（例如尚未抽籤、或舊資料沒有快照）才退回即時判斷
-                  const lotteryResult = preLeaveData.lotteryResults?.[currentMonth]?.[emp.name]?.[d.day];
+                  // 💡 修正：lotteryResults 現在是抽籤當下「全員/全天」的完整凍結快照（每一格都有紀錄，沒資料存"-"）。
+                  // 只要月份已抽籤且這格有凍結紀錄，就完全依據凍結快照顯示，徹底不看即時班表(sVal)；
+                  // 只有在還沒抽籤、或舊資料沒有凍結快照時，才退回原本「即時比對班表」的邏輯。
+                  const frozenVal = preLeaveData.lotteryResults?.[currentMonth]?.[emp.name]?.[d.day];
+                  const hasFrozenSnapshot = isMonthDrawn && frozenVal !== undefined;
                   const cycleEnd = isCycleEnd(d.fullDate);
                   const canToggle = !isMonthDrawn && !isFixed && (isAdmin || emp.name === currentUser?.name);
                   let bgClass = "bg-white";
@@ -1177,21 +1183,26 @@ const ShiftTimeTableView = ({ shiftTimeTable, updateShiftTimeTable, isAdmin }) =
                     <td 
                       key={d.day} 
                       onClick={() => handleToggle(emp.name, d.day)} 
-                      className={`border py-1.5 px-0 h-10 transition-all ${bgClass} ${cycleEnd ? 'border-r-4 border-r-gray-400' : ''} ${(isApplied || isWinner || lotteryResult) ? 'ring-2 ring-inset ring-orange-400 shadow-inner' : ''} ${canToggle ? 'cursor-pointer hover:opacity-80' : 'cursor-not-allowed'}`}
+                      className={`border py-1.5 px-0 h-10 transition-all ${bgClass} ${cycleEnd ? 'border-r-4 border-r-gray-400' : ''} ${isApplied ? 'ring-2 ring-inset ring-orange-400 shadow-inner' : ''} ${canToggle ? 'cursor-pointer hover:opacity-80' : 'cursor-not-allowed'}`}
                     >
                       <div className="flex flex-col items-center justify-center h-full">
-                        {isFixed ? <span className="text-gray-500 font-bold opacity-60 text-xs">{sVal}</span> :
-                         lotteryResult === '休' ? <span className="text-green-800 font-black text-[13px] bg-green-50 px-1 rounded">休</span> :
-                         lotteryResult === '未中' ? <span className="text-orange-600/70 font-bold text-[10px] bg-orange-50/60 px-1 rounded border border-dashed border-orange-200">預假(未中)</span> :
-                         isWinner ? <span className="text-green-800 font-black text-[13px] bg-green-50 px-1 rounded">休</span> :
-                         /* 💡 只有在『已完成抽籤』且『沒抽中』時才顯示『預假(未中)』；抽籤前一律顯示乾淨的『預假』 */
-                         isApplied ? (
-                           isMonthDrawn ? (
-                             <span className="text-orange-600/70 font-bold text-[10px] bg-orange-50/60 px-1 rounded border border-dashed border-orange-200">預假(未中)</span>
-                           ) : (
-                             <span className="text-orange-700 font-black text-[11px]">預假</span>
-                           )
-                         ) : null}
+                        {hasFrozenSnapshot ? (
+                          // 💡 已抽籤：完全只看凍結快照，不看即時班表
+                          frozenVal === '休' && isApplied ? <span className="text-green-800 font-black text-[13px] bg-green-50 px-1 rounded">休</span> :
+                          isApplied && frozenVal !== '休' ? <span className="text-orange-600/70 font-bold text-[10px] bg-orange-50/60 px-1 rounded border border-dashed border-orange-200">預假(未中)</span> :
+                          ['休', '公', '公#', '例', 'P', 'P#'].includes(frozenVal) ? <span className="text-gray-500 font-bold opacity-60 text-xs">{frozenVal}</span> :
+                          null
+                        ) : (
+                          // 💡 尚未抽籤、或舊資料沒有凍結快照：維持原本即時判斷的邏輯
+                          isFixed ? <span className="text-gray-500 font-bold opacity-60 text-xs">{sVal}</span> :
+                          isApplied ? (
+                            isMonthDrawn ? (
+                              <span className="text-orange-600/70 font-bold text-[10px] bg-orange-50/60 px-1 rounded border border-dashed border-orange-200">預假(未中)</span>
+                            ) : (
+                              <span className="text-orange-700 font-black text-[11px]">預假</span>
+                            )
+                          ) : null
+                        )}
                       </div>
                     </td>
                   );
@@ -1208,7 +1219,10 @@ const ShiftTimeTableView = ({ shiftTimeTable, updateShiftTimeTable, isAdmin }) =
                   <td key={d.day} className={`border p-1 align-top h-20 overflow-y-auto bg-blue-50/30 ${isCycleEnd(d.fullDate) ? 'border-r-4 border-r-gray-500' : ''}`}>
                     <div className="flex flex-col gap-0.5">
                       {list.map((name, i) => {
-                        const isWinner = (preLeaveData.lotteryResults?.[currentMonth]?.[name]?.[d.day] === '休') || (!preLeaveData.lotteryResults?.[currentMonth]?.[name]?.[d.day] && schedule[currentMonth]?.[name]?.[d.day] === "休");
+                        // 💡 修正：只看抽籤結果快照是否記錄「休」，不再退回比對即時班表。
+                        // 之前的寫法會讓後續班表異動（換班、手動調整）反過來影響這裡顯示的中籤結果，
+                        // 導致「跟現在班表不同就顯示綠色」的錯誤畫面，現在完全以抽籤當下的結果為準。
+                        const isWinner = preLeaveData.lotteryResults?.[currentMonth]?.[name]?.[d.day] === '休';
                         return (
                           <div key={i} className={`text-[9px] font-black text-center leading-none truncate border rounded py-1 shadow-sm ${
                             isWinner 
@@ -2896,7 +2910,7 @@ const SchedulingView = ({ currentMonth, employees, daysInMonth, schedule, setSch
                     let xmlRows = "";
                     xmlRows += `
                       <tr style="height:35px;">
-                        <td colspan="33" style="font-family:Microsoft JhengHei;font-size:16px;font-weight:bold;align:center;vertical-align:middle;background-color:#F3F4F6;">
+                        <td colspan="${daysInMonth.length + 2}" style="font-family:Microsoft JhengHei;font-size:16px;font-weight:bold;align:center;vertical-align:middle;background-color:#F3F4F6;">
                           ${titleHeader}
                         </td>
                       </tr>`;
@@ -2905,12 +2919,11 @@ const SchedulingView = ({ currentMonth, employees, daysInMonth, schedule, setSch
                     xmlRows += `<td style="border:0.5pt solid #D1D5DB;width:60pt;">員工編號</td>`;
                     xmlRows += `<td style="border:0.5pt solid #D1D5DB;width:60pt;">員工姓名</td>`;
 
-                    const weekMap = ['日', '一', '二', '三', '四', '五', '六'];
-                    for (let d = 1; d <= 31; d++) {
-                      const dateObj = new Date(`${currentMonth}-${String(d).padStart(2, '0')}`);
-                      const dayOfWeek = weekMap[dateObj.getDay()];
-                      xmlRows += `<td style="border:0.5pt solid #D1D5DB;width:30pt;">${d}(${dayOfWeek})</td>`;
-                    }
+                    // 💡 修正：改用 daysInMonth（跟畫面上排班表格用的是同一份資料，已經包含正確的假日資訊），
+                    // 不再自己重新用日期計算一次，避免跟畫面顯示的假日判斷邏輯兜不起來
+                    daysInMonth.forEach(dayInfo => {
+                      xmlRows += `<td style="border:0.5pt solid #D1D5DB;width:30pt;">${dayInfo.day}(${dayInfo.dayOfWeek})</td>`;
+                    });
                     xmlRows += `</tr>`;
 
                     employees.forEach(emp => {
@@ -2918,17 +2931,19 @@ const SchedulingView = ({ currentMonth, employees, daysInMonth, schedule, setSch
                       xmlRows += `<td style="border:0.5pt solid #E5E7EB;">${emp.id}</td>`;
                       xmlRows += `<td style="border:0.5pt solid #E5E7EB;font-weight:bold;">${emp.name}</td>`;
 
-                      for (let d = 1; d <= 31; d++) {
+                      daysInMonth.forEach(dayInfo => {
+                        const d = dayInfo.day;
                         const rawValue = schedule[currentMonth]?.[emp.name]?.[d];
                         const cellValue = (rawValue === undefined || rawValue === null) ? "" : rawValue;
 
                         const customColorClass = cellColors?.[currentMonth]?.[emp.name]?.[d];
-                        const dateObj = new Date(`${currentMonth}-${String(d).padStart(2, '0')}`);
-                        const dayOfWeek = dateObj.getDay();
 
+                        // 💡 修正核心：跟畫面上排班表格完全一致的判斷順序——
+                        // 先看是不是週日「或」有設定國定假日(dayInfo.holiday)，再看是不是週六，
+                        // 不再只用「星期幾」判斷，才能正確把非週末的國定假日（例如週五的中秋節）也標成粉紅色
                         let cellBg = "#FFFFFF";
-                        if (dayOfWeek === 0) cellBg = "#FFB3D9"; 
-                        else if (dayOfWeek === 6) cellBg = "#FFB366"; 
+                        if (dayInfo.rawDay === 0 || dayInfo.holiday) cellBg = "#FFB3D9";
+                        else if (dayInfo.rawDay === 6) cellBg = "#FFB366";
 
                         if (customColorClass) {
                           const hex = getHex(customColorClass);
@@ -2936,7 +2951,7 @@ const SchedulingView = ({ currentMonth, employees, daysInMonth, schedule, setSch
                         }
 
                         xmlRows += `<td style="background-color:${cellBg};border:0.5pt solid #E5E7EB;">${cellValue}</td>`;
-                      }
+                      });
                       xmlRows += `</tr>`;
                     });
 
@@ -3301,9 +3316,6 @@ const App = () => {
         // 就把當下算出來的預設值直接補寫回去，讓 dailyLimits 抽完之後變成完整、清楚的正確紀錄，
         // 不再需要每次都依賴「執行當下用預設值去補算」這種容易被誤解、也容易踩雷的隱性邏輯
         const nextDailyLimits = deepClone(data.dailyLimits || {});
-        // 💡 抽籤結果快照：獨立保存「誰申請、有沒有中籤」，即使抽完之後班表因為其他原因（換班、手動調整）異動，
-        // 這份紀錄也不會被覆蓋或消失，作為預假頁面顯示與匯出 CSV 的依據
-        const nextLotteryResults = deepClone(data.lotteryResults || {});
 
         const getLeaveListFresh = (day) => employees
           .filter(e => !e.isSeparator && !getIsNightClinic(e) && e.role !== '2' && e.role !== '3' && apps?.[e.name]?.[day] === "預假")
@@ -3333,12 +3345,18 @@ const App = () => {
               nextMonthSched[name][d.day] = "休";
             });
           }
+        });
 
-          // 💡 不管這天有沒有抽出新的人，只要有人申請過，就把「這一輪最終結果」記進快照：
-          // 中籤記「休」，沒中籤記「未中」，日後即使班表被改掉，這份快照仍保留當初的抽籤結果
-          allApplicants.forEach(name => {
-            if (!nextLotteryResults[name]) nextLotteryResults[name] = {};
-            nextLotteryResults[name][d.day] = (nextMonthSched[name]?.[d.day] === "休") ? "休" : "未中";
+        // 💡 修正：抽籤完成後，把「這個月每個人每一天」的完整班表內容整個凍結、重新寫入 lotteryResults，
+        // 沒有資料的格子存 "-"。之後只要月份是已抽籤狀態，畫面跟匯出都只讀這份凍結快照，
+        // 完全不會再去看即時班表——抽籤結果就是結果，不會因為之後排班異動而被「連帶看起來也變了」。
+        const frozenSnapshot = {};
+        employees.forEach(emp => {
+          if (emp.isSeparator) return;
+          frozenSnapshot[emp.name] = {};
+          daysInMonthArr.forEach(d => {
+            const val = nextMonthSched[emp.name]?.[d.day];
+            frozenSnapshot[emp.name][d.day] = (val === undefined || val === null || val === "") ? "-" : val;
           });
         });
 
@@ -3346,7 +3364,7 @@ const App = () => {
         // 💡 修正：抽籤成功後「不」重置 autoLotterySuspended。
         // 只要這個月曾經被管理員按過「解鎖」，就永久停用自動抽籤，之後不管手動抽幾次都一樣，
         // 徹底避免「復原→自動又被觸發→又要再復原」這種沒完沒了的迴圈。
-        tx.set(mDocRef, { schedule: nextMonthSched, lotteryResults: nextLotteryResults, dailyLimits: nextDailyLimits, isDrawn: true }, { merge: true });
+        tx.set(mDocRef, { schedule: nextMonthSched, lotteryResults: frozenSnapshot, dailyLimits: nextDailyLimits, isDrawn: true }, { merge: true });
         result = { ok: true };
       });
     } catch (error) {
@@ -3384,18 +3402,16 @@ const App = () => {
 
         const nextApps = deepClone(data.apps || {});
         const nextMonthSched = deepClone(data.schedule || {});
-        const results = data.lotteryResults || {};
-        Object.keys(results).forEach(name => {
-          Object.keys(results[name]).forEach(day => {
-            // 只要抽籤快照裡有紀錄（不管當初是「休」還是「未中」），代表這個人當初確實申請過，
-            // 一律補回「預假」標記，讓申請紀錄回到抽籤前的狀態
-            if (!nextApps[name]) nextApps[name] = {};
-            nextApps[name][day] = "預假";
-
-            // 💡 修正：如果這格快照記錄的是「中籤(休)」，代表這個「休」是這次抽籤造成的，
-            // 解鎖時要一併撤銷、清回空白，才是真正完整的還原；只會動到「抽籤造成的休」，
-            // 不會影響班表上跟這次抽籤無關、本來就存在的其他排班內容
-            if (results[name][day] === "休" && nextMonthSched[name]?.[day] === "休") {
+        // 💡 lotteryResults 現在是「全員/全天」的完整凍結快照，不再只有申請人才有紀錄，
+        // 所以不能再用「有沒有紀錄」判斷誰申請過——申請名單一律以即時的 apps 為準
+        // （apps 本身不會被抽籤流程動到，一直維持申請當下的樣子，不需要額外還原）。
+        const frozen = data.lotteryResults || {};
+        Object.keys(nextApps).forEach(name => {
+          Object.keys(nextApps[name] || {}).forEach(day => {
+            if (nextApps[name][day] !== "預假") return;
+            // 💡 只有「這個人這天確實申請過」且「凍結快照顯示中籤(休)」，才代表這個休是這次抽籤造成的，
+            // 解鎖時才需要撤銷、清回空白；不會影響班表上跟這次抽籤無關、本來就存在的其他排班內容
+            if (frozen[name]?.[day] === "休" && nextMonthSched[name]?.[day] === "休") {
               nextMonthSched[name][day] = "-";
             }
           });
