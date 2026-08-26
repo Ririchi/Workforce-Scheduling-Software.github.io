@@ -130,7 +130,7 @@ const db = getFirestore(app);
 //      你可以直接去 Firebase Console 找 artifacts/pharmacy-system-TEST/... 這個固定路徑確認資料
 //    測試完成、準備上線前，記得改回空字串 "" 再推上 GitHub！
 // =====================================================================================
-const FORCE_APP_ID_FOR_TESTING = "pharmacy-system-TEST";
+const FORCE_APP_ID_FOR_TESTING = "";
 
 const rawAppId = FORCE_APP_ID_FOR_TESTING || (typeof __app_id !== 'undefined' ? __app_id : 'pharmacy-system-v1-8');
 // 💡 修正：某些執行環境注入的 __app_id 本身可能帶有 "/" 或其他不能出現在 Firestore
@@ -2910,7 +2910,7 @@ const SchedulingView = ({ currentMonth, employees, daysInMonth, schedule, setSch
                     let xmlRows = "";
                     xmlRows += `
                       <tr style="height:35px;">
-                        <td colspan="33" style="font-family:Microsoft JhengHei;font-size:16px;font-weight:bold;align:center;vertical-align:middle;background-color:#F3F4F6;">
+                        <td colspan="${daysInMonth.length + 2}" style="font-family:Microsoft JhengHei;font-size:16px;font-weight:bold;align:center;vertical-align:middle;background-color:#F3F4F6;">
                           ${titleHeader}
                         </td>
                       </tr>`;
@@ -2919,12 +2919,11 @@ const SchedulingView = ({ currentMonth, employees, daysInMonth, schedule, setSch
                     xmlRows += `<td style="border:0.5pt solid #D1D5DB;width:60pt;">員工編號</td>`;
                     xmlRows += `<td style="border:0.5pt solid #D1D5DB;width:60pt;">員工姓名</td>`;
 
-                    const weekMap = ['日', '一', '二', '三', '四', '五', '六'];
-                    for (let d = 1; d <= 31; d++) {
-                      const dateObj = new Date(`${currentMonth}-${String(d).padStart(2, '0')}`);
-                      const dayOfWeek = weekMap[dateObj.getDay()];
-                      xmlRows += `<td style="border:0.5pt solid #D1D5DB;width:30pt;">${d}(${dayOfWeek})</td>`;
-                    }
+                    // 💡 修正：改用 daysInMonth（跟畫面上排班表格用的是同一份資料，已經包含正確的假日資訊），
+                    // 不再自己重新用日期計算一次，避免跟畫面顯示的假日判斷邏輯兜不起來
+                    daysInMonth.forEach(dayInfo => {
+                      xmlRows += `<td style="border:0.5pt solid #D1D5DB;width:30pt;">${dayInfo.day}(${dayInfo.dayOfWeek})</td>`;
+                    });
                     xmlRows += `</tr>`;
 
                     employees.forEach(emp => {
@@ -2932,17 +2931,19 @@ const SchedulingView = ({ currentMonth, employees, daysInMonth, schedule, setSch
                       xmlRows += `<td style="border:0.5pt solid #E5E7EB;">${emp.id}</td>`;
                       xmlRows += `<td style="border:0.5pt solid #E5E7EB;font-weight:bold;">${emp.name}</td>`;
 
-                      for (let d = 1; d <= 31; d++) {
+                      daysInMonth.forEach(dayInfo => {
+                        const d = dayInfo.day;
                         const rawValue = schedule[currentMonth]?.[emp.name]?.[d];
                         const cellValue = (rawValue === undefined || rawValue === null) ? "" : rawValue;
 
                         const customColorClass = cellColors?.[currentMonth]?.[emp.name]?.[d];
-                        const dateObj = new Date(`${currentMonth}-${String(d).padStart(2, '0')}`);
-                        const dayOfWeek = dateObj.getDay();
 
+                        // 💡 修正核心：跟畫面上排班表格完全一致的判斷順序——
+                        // 先看是不是週日「或」有設定國定假日(dayInfo.holiday)，再看是不是週六，
+                        // 不再只用「星期幾」判斷，才能正確把非週末的國定假日（例如週五的中秋節）也標成粉紅色
                         let cellBg = "#FFFFFF";
-                        if (dayOfWeek === 0) cellBg = "#FFB3D9"; 
-                        else if (dayOfWeek === 6) cellBg = "#FFB366"; 
+                        if (dayInfo.rawDay === 0 || dayInfo.holiday) cellBg = "#FFB3D9";
+                        else if (dayInfo.rawDay === 6) cellBg = "#FFB366";
 
                         if (customColorClass) {
                           const hex = getHex(customColorClass);
@@ -2950,7 +2951,7 @@ const SchedulingView = ({ currentMonth, employees, daysInMonth, schedule, setSch
                         }
 
                         xmlRows += `<td style="background-color:${cellBg};border:0.5pt solid #E5E7EB;">${cellValue}</td>`;
-                      }
+                      });
                       xmlRows += `</tr>`;
                     });
 
