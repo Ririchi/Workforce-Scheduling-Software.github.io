@@ -130,7 +130,7 @@ const db = getFirestore(app);
 //      你可以直接去 Firebase Console 找 artifacts/pharmacy-system-TEST/... 這個固定路徑確認資料
 //    測試完成、準備上線前，記得改回空字串 "" 再推上 GitHub！
 // =====================================================================================
-const FORCE_APP_ID_FOR_TESTING = "";
+const FORCE_APP_ID_FOR_TESTING = "pharmacy-system-TEST";
 
 const rawAppId = FORCE_APP_ID_FOR_TESTING || (typeof __app_id !== 'undefined' ? __app_id : 'pharmacy-system-v1-8');
 // 💡 修正：某些執行環境注入的 __app_id 本身可能帶有 "/" 或其他不能出現在 Firestore
@@ -3203,6 +3203,19 @@ const getMonthDocRef = (monthKey) => doc(monthlyColRef, monthKey);
 // 💡 給其他系統（例如分類系統）查詢「員編 -> 姓名」用的公開摘要文件，完全不含密碼等敏感資料。
 // 路徑跟 mainDocRef 同一層，appId 會跟著測試/正式環境自動切換，測試時不會動到正式資料。
 const directoryDocRef = doc(db, 'artifacts', appId, 'public', 'data', 'roster', 'directory');
+// 💡 給其他系統查詢「某員編、某日期的班別」用的每月班表快照，用員編當索引（原本 schedule 是用姓名當索引，
+// 其他系統只會知道員編，所以另外轉換一份給他們查）。路徑跟 monthlyData 同一層，每個月各自一份文件。
+const scheduleDirColRef = collection(mainDocRef, 'scheduleDirectory');
+const getScheduleDirDocRef = (monthKey) => doc(scheduleDirColRef, monthKey);
+// 💡 把「姓名 -> 班別」的班表物件，轉換成「員編 -> 班別」的物件，供上面那份快照使用
+const buildScheduleDirEntries = (monthScheduleObj, employeesList) => {
+  const entries = {};
+  (employeesList || []).forEach(emp => {
+    if (emp.isSeparator || !emp.id || !emp.name) return;
+    entries[emp.id] = monthScheduleObj?.[emp.name] || {};
+  });
+  return entries;
+};
 
 const App = () => {
   const [currentPage, setCurrentPage] = useState('home');
@@ -3279,6 +3292,12 @@ const App = () => {
     if (!auth.currentUser || !monthKey || !updates) return;
     try {
       await setDoc(getMonthDocRef(monthKey), updates, { merge: true });
+      // 💡 只要這次寫入包含 schedule（發佈班表、換班核定、還原備份都會走到這裡），
+      // 就同步重建一份「員編 -> 班別」的查詢快照，供其他系統查詢當月每一天的班別使用
+      if (updates.schedule) {
+        const entries = buildScheduleDirEntries(updates.schedule, employees);
+        await setDoc(getScheduleDirDocRef(monthKey), { entries, updatedAt: new Date().toISOString() });
+      }
     } catch (error) {
       console.error(`雲端儲存失敗(月份 ${monthKey}):`, error);
     }
@@ -3365,6 +3384,8 @@ const App = () => {
         // 只要這個月曾經被管理員按過「解鎖」，就永久停用自動抽籤，之後不管手動抽幾次都一樣，
         // 徹底避免「復原→自動又被觸發→又要再復原」這種沒完沒了的迴圈。
         tx.set(mDocRef, { schedule: nextMonthSched, lotteryResults: frozenSnapshot, dailyLimits: nextDailyLimits, isDrawn: true }, { merge: true });
+        // 💡 抽籤會直接改到班表，同步重建員編查詢快照，讓其他系統看到最新的抽籤結果
+        tx.set(getScheduleDirDocRef(monthKey), { entries: buildScheduleDirEntries(nextMonthSched, employees), updatedAt: new Date().toISOString() });
         result = { ok: true };
       });
     } catch (error) {
@@ -3420,6 +3441,8 @@ const App = () => {
         // 💡 修正：解鎖時要一併清空舊的抽籤結果快照(lotteryResults)，
         // 不然畫面會優先顯示上一輪已經過期的「未中」結果，讓人誤以為系統又自動重抽了一次。
         tx.set(mDocRef, { isDrawn: false, autoLotterySuspended: true, apps: nextApps, schedule: nextMonthSched, lotteryResults: {}, preUnlockBackup }, { merge: true });
+        // 💡 解鎖會撤銷抽籤造成的休假、動到班表，同步重建員編查詢快照
+        tx.set(getScheduleDirDocRef(monthKey), { entries: buildScheduleDirEntries(nextMonthSched, employees), updatedAt: new Date().toISOString() });
       });
     } catch (error) {
       console.error("解鎖並還原申請紀錄失敗:", error);
