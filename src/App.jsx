@@ -2355,11 +2355,11 @@ const ManagementReportView = ({ currentMonth, employees, schedule, personDayRule
       }
     }
 
-    const headers = ["員編", "姓名", ...reportDays.map(d => reportType === 'shiftCode' ? String(d.day) : `${d.day}(${d.dayOfWeek})`)];
+    const headers = [reportType === 'shiftCode' ? "workid" : "員編", reportType === 'shiftCode' ? "姓名(可不填)" : "姓名", ...reportDays.map((d, idx) => reportType === 'shiftCode' ? String(idx + 1) : `${d.day}(${d.dayOfWeek})`)];
     if (!isFourWeekMode && !isNightFeeMode) headers.push("總計");
 
     if (exportType === 'csv') {
-      let csv = `\ufeff${titleHeader}${(",").repeat(headers.length - 1)}\n`;
+      let csv = reportType === 'shiftCode' ? "\ufeff" : `\ufeff${titleHeader}${(",").repeat(headers.length - 1)}\n`;
       csv += headers.join(",") + "\n";
 
       filteredEmployees.forEach(emp => {
@@ -2383,12 +2383,14 @@ const ManagementReportView = ({ currentMonth, employees, schedule, personDayRule
     else if (exportType === 'excel') {
       let xmlRows = "";
 
-      xmlRows += `
+      if (reportType !== 'shiftCode') {
+        xmlRows += `
         <tr style="height:35px;">
           <td colspan="${headers.length}" style="font-family:Microsoft JhengHei;font-size:16px;font-weight:bold;align:center;vertical-align:middle;background-color:#F3F4F6;">
             ${titleHeader} (${typeLabel})
           </td>
         </tr>`;
+      }
 
       xmlRows += `<tr style="height:28px;font-family:Microsoft JhengHei;font-size:12px;font-weight:bold;align:center;vertical-align:middle;">`;
       headers.forEach(h => xmlRows += `<td style="background-color:#E5E7EB;border:0.5pt solid #D1D5DB;align:center;">${h.replace(/\n/g, " ")}</td>`);
