@@ -2355,7 +2355,7 @@ const ManagementReportView = ({ currentMonth, employees, schedule, personDayRule
       }
     }
 
-    const headers = ["員編", "姓名", ...reportDays.map(d => reportType === 'shiftCode' ? String(d.day) : `${d.day}(${d.dayOfWeek})`)];
+    const headers = [reportType === 'shiftCode' ? "workid" : "員編", reportType === 'shiftCode' ? "姓名(可不填)" : "姓名", ...reportDays.map(d => reportType === 'shiftCode' ? String(d.day) : `${d.day}(${d.dayOfWeek})`)];
     if (!isFourWeekMode && !isNightFeeMode) headers.push("總計");
 
     if (exportType === 'csv') {
