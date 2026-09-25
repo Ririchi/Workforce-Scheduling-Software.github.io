@@ -3278,12 +3278,30 @@ const App = () => {
   // ---------------------------------------------------------------------------------
   // 💡 換班紀錄：只寫入該筆申請「所屬月份」的文件，不會動到其他月份的換班紀錄
   // mutatorFn 接收「該月份目前的換班紀錄陣列」，回傳新的陣列
+  // 💡 修正核心：不再依賴「本地可能過期的 swapRequestsByMonth」去覆蓋整包陣列，
+  // 一律用 transaction 讀取雲端當下最新的該月換班紀錄陣列，在最新資料上套用 mutatorFn 再寫回去。
+  // 這樣即使同一個月份同時有好幾個換班動作（新增申請、同意、核定、否決）幾乎同時發生，
+  // Firestore 會自動偵測衝突並重試，不會有人的動作被別人「洗掉」，也不會讓舊狀態復活。
   // ---------------------------------------------------------------------------------
-  const patchSwapRequestsMonth = (monthKey, mutatorFn) => {
-    const current = swapRequestsByMonth[monthKey] || [];
-    const next = mutatorFn(current).map(req => cleanBundleData(req));
-    setSwapRequestsByMonth(prev => ({ ...prev, [monthKey]: next }));
-    saveMonthDoc(monthKey, { swapRequests: next });
+  const patchSwapRequestsMonth = async (monthKey, mutatorFn) => {
+    if (!auth.currentUser || !monthKey) return;
+    try {
+      let nextResult = null;
+      await runTransaction(db, async (tx) => {
+        const mDocRef = getMonthDocRef(monthKey);
+        const snap = await tx.get(mDocRef);
+        const latestList = (snap.exists() && Array.isArray(snap.data().swapRequests)) ? snap.data().swapRequests : [];
+        const next = mutatorFn(deepClone(latestList)).map(req => cleanBundleData(req));
+        tx.set(mDocRef, { swapRequests: next }, { merge: true });
+        nextResult = next;
+      });
+      if (nextResult) {
+        setSwapRequestsByMonth(prev => ({ ...prev, [monthKey]: nextResult }));
+      }
+    } catch (error) {
+      console.error(`換班紀錄 Transaction 失敗(月份 ${monthKey}):`, error);
+      alert("換班操作儲存失敗，可能是網路問題，請重新操作一次。");
+    }
   };
 
   // ---------------------------------------------------------------------------------
@@ -3932,7 +3950,7 @@ const handleSwapBack = () => {
   setSwapTarget({ ...swapTarget, participants: newParticipants });
 };
 
-const handleRecordAction = (req, action) => {
+const handleRecordAction = async (req, action) => {
   // 💡 解鎖名單內所有人的日期鎖：透過 transaction 對雲端最新員工資料操作，避免覆蓋其他人剛好也在做的變更
   const unlockParticipantIds = req.participants ? req.participants.map(p => p.id) : [req.creatorId, req.targetId];
   let datesToUnlock = req.date ? [req.date] : [];
@@ -3956,72 +3974,115 @@ const handleRecordAction = (req, action) => {
   if (action === 'Approve') {
     if (req.status === 'WaitingParticipants') {
       patchSwapRequestsMonth(reqMonthKey, list => list.map(r => r.id === req.id ? { ...r, status: 'PendingAdmin' } : r));
-    } 
+    }
     else if (req.status === 'PendingAdmin') {
       const targetMonthKey = req.date ? req.date.substring(0, 7) : currentMonth;
 
-      let isAllShiftsValid = true;
-      let errorMsg = "";
+      // 💡 修正核心：核定換班時，班表與換班紀錄的最新狀態都改成在同一個 transaction 裡
+      // 直接讀雲端當下最新資料來驗證與寫入，不再依賴本地畫面上可能過期的 schedule / 換班清單，
+      // 避免跟其他同時發生的排班編輯或換班動作互相覆蓋，也避免拿舊資料誤判「班別不符」。
+      let outcome = null;
+      try {
+        await runTransaction(db, async (tx) => {
+          const reqDocRef = getMonthDocRef(reqMonthKey);
+          const targetDocRef = getMonthDocRef(targetMonthKey);
+          const sameDoc = reqMonthKey === targetMonthKey;
 
-      if (req.participants && !req.isBundle) {
-        req.participants.forEach(p => {
-          const exactDay = p.day || req.day || (req.startDate ? req.startDate.split('-')[2] : null);
-          if (!exactDay) return;
+          const reqSnap = await tx.get(reqDocRef);
+          const targetSnap = sameDoc ? reqSnap : await tx.get(targetDocRef);
 
-          const currentSystemShift = schedule[targetMonthKey]?.[p.name]?.[Number(exactDay)];
-          const normalize = (v) => {
-            const s = (v === null || v === undefined) ? "-" : String(v).trim();
-            return (s === "" || s === "-") ? "-" : s;
-          };
-          const clean = (val) => val.replace(/#|\(國\)/g, '');
+          const latestSwapList = (reqSnap.exists() && Array.isArray(reqSnap.data().swapRequests)) ? reqSnap.data().swapRequests : [];
+          const latestReq = latestSwapList.find(r => r.id === req.id);
 
-          if (clean(normalize(currentSystemShift)) !== clean(normalize(p.oldShift))) {
-            isAllShiftsValid = false;
-            errorMsg += `【${p.name}】的班別不符（目前首頁：${normalize(currentSystemShift)}，紀錄：${p.oldShift}）\n`;
+          if (!latestReq || latestReq.status !== 'PendingAdmin') {
+            outcome = { ok: false, msg: "此換班申請的狀態已被更新（可能已被其他人處理過），請重新整理後再確認一次。" };
+            return;
           }
+
+          const monthSchedBase = deepClone((targetSnap.exists() && targetSnap.data().schedule) || {});
+
+          let isAllShiftsValid = true;
+          let errorMsg = "";
+
+          if (latestReq.participants && !latestReq.isBundle) {
+            latestReq.participants.forEach(p => {
+              const exactDay = p.day || latestReq.day || (latestReq.startDate ? latestReq.startDate.split('-')[2] : null);
+              if (!exactDay) return;
+
+              const currentSystemShift = monthSchedBase?.[p.name]?.[Number(exactDay)];
+              const normalize = (v) => {
+                const s = (v === null || v === undefined) ? "-" : String(v).trim();
+                return (s === "" || s === "-") ? "-" : s;
+              };
+              const clean = (val) => val.replace(/#|\(國\)/g, '');
+
+              if (clean(normalize(currentSystemShift)) !== clean(normalize(p.oldShift))) {
+                isAllShiftsValid = false;
+                errorMsg += `【${p.name}】的班別不符（目前首頁：${normalize(currentSystemShift)}，紀錄：${p.oldShift}）\n`;
+              }
+            });
+          }
+
+          if (!isAllShiftsValid) {
+            outcome = { ok: false, msg: `無法核定換班！\n\n${errorMsg}\n請組長再次確認「首頁」目前的最新班表。` };
+            return;
+          }
+
+          let daysArray = [];
+          if (latestReq.isBundle && latestReq.daysToSwap) {
+            daysArray = [...latestReq.daysToSwap];
+          } else {
+            const exactDay = latestReq.day || (latestReq.date ? Number(latestReq.date.split('-')[2]) : null);
+            if (exactDay) daysArray = [exactDay];
+          }
+
+          daysArray.forEach(dRaw => {
+            // daysToSwap 可能是 "YYYY-MM-DD"（整段換班）或純數字（單日換班），統一換算成當月的「日」數字
+            const d = latestReq.isBundle ? Number(String(dRaw).split('-')[2]) : dRaw;
+            if (!latestReq.participants || latestReq.participants.length < 2) return;
+
+            const originalShifts = latestReq.participants.map(p => {
+              if (!monthSchedBase[p.name]) monthSchedBase[p.name] = {};
+              return monthSchedBase[p.name][d] || "-";
+            });
+
+            latestReq.participants.forEach((p, idx) => {
+              const nextIdx = (idx + 1) % latestReq.participants.length;
+              monthSchedBase[p.name][d] = originalShifts[nextIdx];
+            });
+          });
+
+          const nextSwapList = latestSwapList.map(r => r.id === req.id ? { ...r, status: 'Approved' } : r).map(r => cleanBundleData(r));
+
+          // 💡 分流寫入：schedule 只存到「目標月份自己的文件」；換班紀錄只更新這一筆申請所屬的月份文件
+          // 若兩者剛好是同一份月份文件，合併成一次 tx.set，避免對同一份文件寫入兩次
+          if (sameDoc) {
+            tx.set(targetDocRef, { schedule: monthSchedBase, swapRequests: nextSwapList }, { merge: true });
+          } else {
+            tx.set(targetDocRef, { schedule: monthSchedBase }, { merge: true });
+            tx.set(reqDocRef, { swapRequests: nextSwapList }, { merge: true });
+          }
+
+          const entries = buildScheduleDirEntries(monthSchedBase, employees);
+          tx.set(getScheduleDirDocRef(targetMonthKey), { entries, updatedAt: new Date().toISOString() });
+
+          outcome = { ok: true, monthSchedBase, targetMonthKey, nextSwapList, reqMonthKey };
         });
+      } catch (error) {
+        console.error("核定換班 Transaction 失敗:", error);
+        outcome = { ok: false, msg: "核定換班時發生錯誤，可能是網路問題，請重新操作一次。" };
       }
 
-      if (!isAllShiftsValid) {
-        alert(`無法核定換班！\n\n${errorMsg}\n請組長再次確認「首頁」目前的最新班表。`);
-        return; 
+      if (!outcome || !outcome.ok) {
+        alert(outcome?.msg || "核定換班失敗。");
+        return;
       }
 
-      const nextStatus = 'Approved';
-      const monthSchedBase = deepClone(schedule[targetMonthKey] || {});
-
-      let daysArray = [];
-        if (req.isBundle && req.daysToSwap) {
-          daysArray = [...req.daysToSwap];
-        } else {
-          const exactDay = req.day || (req.date ? Number(req.date.split('-')[2]) : null);
-          if (exactDay) daysArray = [exactDay];
-        }
-
-      daysArray.forEach(dRaw => {
-        // daysToSwap 可能是 "YYYY-MM-DD"（整段換班）或純數字（單日換班），統一換算成當月的「日」數字
-        const d = req.isBundle ? Number(String(dRaw).split('-')[2]) : dRaw;
-        if (!req.participants || req.participants.length < 2) return;
-
-        const originalShifts = req.participants.map(p => {
-          if (!monthSchedBase[p.name]) monthSchedBase[p.name] = {};
-          return monthSchedBase[p.name][d] || "-";
-        });
-
-        req.participants.forEach((p, idx) => {
-          const nextIdx = (idx + 1) % req.participants.length;
-          monthSchedBase[p.name][d] = originalShifts[nextIdx];
-        });
-      });
-
-      setSchedule(prev => ({ ...prev, [targetMonthKey]: monthSchedBase }));
-
-      // 💡 分流寫入：schedule 只存到「目標月份自己的文件」；換班紀錄只更新這一筆申請所屬的月份文件
-      saveScheduleMonth(targetMonthKey, monthSchedBase);
-      patchSwapRequestsMonth(reqMonthKey, list => list.map(r => r.id === req.id ? { ...r, status: nextStatus } : r));
+      setSchedule(prev => ({ ...prev, [outcome.targetMonthKey]: outcome.monthSchedBase }));
+      setSwapRequestsByMonth(prev => ({ ...prev, [outcome.reqMonthKey]: outcome.nextSwapList }));
       doUnlock();
     }
-  } 
+  }
   else if (action === 'Reject' || action === 'Delete') {
     patchSwapRequestsMonth(reqMonthKey, list => (action === 'Delete')
       ? list.filter(r => r.id !== req.id)
