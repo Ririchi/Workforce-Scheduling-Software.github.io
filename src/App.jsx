@@ -2677,8 +2677,9 @@ const SchedulingView = ({ currentMonth, employees, daysInMonth, schedule, setSch
                                ? "-" 
                                : String(currentRaw).trim();
 
-            // 💡 匯入檔該格是空白或 "-" 視為「不更動」，不進入對比清單（不顯示藍框，確認套用時也不會覆蓋現有班別）
-            if (finalValue === "-") continue;
+            // 💡 對比以「原班表（系統目前的班表）」為準：原班表該格是空值或 "-" 就不進行比對（不顯示藍框、
+            // 確認套用時也不會寫入）；原班表該格已有班別，且與匯入檔不同，才進入對比清單顯示藍框
+            if (currentVal === "-") continue;
 
             if (finalValue !== currentVal) {
               if (!nextImportData[emp.name]) nextImportData[emp.name] = {};
@@ -3114,10 +3115,7 @@ const SchedulingView = ({ currentMonth, employees, daysInMonth, schedule, setSch
                   {/* 排班格子 */}
                   {daysInMonth.map((d) => {
                     const originalVal = editSched[emp.name]?.[d.day] || (isNC ? "" : "-");
-                    const rawPreviewVal = importPreview ? importPreview[emp.name]?.[d.day] : null;
-                    // 💡 對比模式：匯入檔該格若是空值（空字串、"-"、無資料）視為「無變動」，
-                    // 不顯示藍框、不覆蓋原班別，避免多餘資訊干擾檢核
-                    const previewVal = (rawPreviewVal === null || rawPreviewVal === undefined || String(rawPreviewVal).trim() === "" || String(rawPreviewVal).trim() === "-") ? null : rawPreviewVal;
+                    const previewVal = importPreview ? importPreview[emp.name]?.[d.day] : null;
                     const isConflict = importPreview && 
                                       previewVal !== null && 
                                       previewVal !== undefined && 
