@@ -2677,10 +2677,6 @@ const SchedulingView = ({ currentMonth, employees, daysInMonth, schedule, setSch
                                ? "-" 
                                : String(currentRaw).trim();
 
-            // 💡 對比以「原班表（系統目前的班表）」為準：原班表該格是空值或 "-" 就不進行比對（不顯示藍框、
-            // 確認套用時也不會寫入）；原班表該格已有班別，且與匯入檔不同，才進入對比清單顯示藍框
-            if (currentVal === "-") continue;
-
             if (finalValue !== currentVal) {
               if (!nextImportData[emp.name]) nextImportData[emp.name] = {};
               nextImportData[emp.name][day] = finalValue;
@@ -3116,14 +3112,22 @@ const SchedulingView = ({ currentMonth, employees, daysInMonth, schedule, setSch
                   {daysInMonth.map((d) => {
                     const originalVal = editSched[emp.name]?.[d.day] || (isNC ? "" : "-");
                     const previewVal = importPreview ? importPreview[emp.name]?.[d.day] : null;
+                    // 💡 原班表該格是空值或 "-"：不比對，直接帶入匯入檔內容（不顯示藍框，確認套用時一併寫入）；
+                    // 原班表該格已有班別且與匯入檔不同，才算「衝突」顯示藍框供確認
+                    const isAutoFill = importPreview && 
+                                      previewVal !== null && 
+                                      previewVal !== undefined && 
+                                      previewVal !== originalVal &&
+                                      (originalVal === "-" || originalVal === "");
                     const isConflict = importPreview && 
                                       previewVal !== null && 
                                       previewVal !== undefined && 
-                                      previewVal !== originalVal;
+                                      previewVal !== originalVal &&
+                                      !isAutoFill;
                     // 對比模式藍框衝突判定邏輯
                     const isIgnored = ignoredCells.has(`${emp.name}-${d.day}`);
                     // 如果預覽值存在、不是 null 且不等於原值，才判定為變動
-                    const isChanged = previewVal !== null && previewVal !== undefined && previewVal !== originalVal && !isIgnored;
+                    const isChanged = previewVal !== null && previewVal !== undefined && previewVal !== originalVal && !isIgnored && !isAutoFill;
                     // 3. 決定最終顯示內容
                     const displayVal = (previewVal !== null && previewVal !== undefined && !isIgnored) ? previewVal : originalVal;
                     const customColor = cellColors[currentMonth]?.[emp.name]?.[d.day];
