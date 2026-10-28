@@ -130,7 +130,7 @@ const db = getFirestore(app);
 //      你可以直接去 Firebase Console 找 artifacts/pharmacy-system-TEST/... 這個固定路徑確認資料
 //    測試完成、準備上線前，記得改回空字串 "" 再推上 GitHub！
 // =====================================================================================
-const FORCE_APP_ID_FOR_TESTING = "pharmacy-system-TEST";
+const FORCE_APP_ID_FOR_TESTING = "";
 
 const rawAppId = FORCE_APP_ID_FOR_TESTING || (typeof __app_id !== 'undefined' ? __app_id : 'pharmacy-system-v1-8');
 // 💡 修正：某些執行環境注入的 __app_id 本身可能帶有 "/" 或其他不能出現在 Firestore
@@ -219,6 +219,9 @@ const toROCTitle = (currentMonth) => {
   return `${year}年${month}月`;
 };
 
+// 💡 院區：沒有 campus 欄位的既有員工一律視為「斗六」；只有「斗六」可登入、並出現在排班/預假/報表/換班等畫面。
+// 「虎尾」員工只存在帳號管理名冊（作為員工資料建置用）。
+const getCampus = (emp) => (emp && emp.campus) ? emp.campus : '斗六';
 const getIsNightClinic = (emp) => {
   if (!emp) return false;
   return (
@@ -1732,7 +1735,7 @@ const RecordsView = ({ currentUser, swapRequests, onAction, onApprove, setReject
 };
 
 const AccountManagementView = ({ employees, updateEmployees, setDeleteTarget, onExportFullBackup, onImportFullBackup }) => {
-  const [formData, setFormData] = useState({ id: '', name: '', role: '1', labor: 'N', password: '' });
+  const [formData, setFormData] = useState({ id: '', name: '', role: '1', labor: 'N', campus: '斗六', password: '' });
   const [editingId, setEditingId] = useState(null);
   const [draggedIdx, setDraggedIdx] = useState(null);
   const [dragOverIdx, setDragOverIdx] = useState(null);
@@ -1768,9 +1771,9 @@ const AccountManagementView = ({ employees, updateEmployees, setDeleteTarget, on
   };
 
   const handleExport = () => {
-    let csv = "\ufeff員編,姓名,角色(0:管理1:藥師2:書記3:藥庫),適用勞基法(Y/N),密碼\n";
+    let csv = "\ufeff員編,姓名,角色(0:管理1:藥師2:書記3:藥庫),適用勞基法(Y/N),密碼,院區\n";
     employees.filter(e => !e.isSeparator).forEach(emp => {
-      csv += `${emp.id},${emp.name},${emp.role},${emp.labor},${emp.password || ''}\n`;
+      csv += `${emp.id},${emp.name},${emp.role},${emp.labor},${emp.password || ''},${getCampus(emp)}\n`;
     });
     const blob = new Blob([csv], { type: 'text/csv;charset=utf-8' });
     const link = document.createElement("a");
@@ -1786,8 +1789,8 @@ const AccountManagementView = ({ employees, updateEmployees, setDeleteTarget, on
     reader.onload = (ev) => {
       const rows = ev.target.result.split(/\r?\n/).map(r => r.trim()).filter(Boolean).slice(1);
       const parsedRows = rows.map(r => {
-        const [id, name, role, labor, pwd] = r.split(',');
-        return { id, name, role, labor, pwd };
+        const [id, name, role, labor, pwd, campus] = r.split(',');
+        return { id, name, role, labor, pwd, campus: (campus || '').trim() === '虎尾' ? '虎尾' : '斗六' };
       }).filter(r => r.id && r.name);
 
       // 💡 修正：以 Firestore 最新清單為基礎新增，避免匯入時把別人剛新增/編輯的人員蓋掉
@@ -1795,10 +1798,10 @@ const AccountManagementView = ({ employees, updateEmployees, setDeleteTarget, on
         let addedCount = 0;
         const existingIds = new Set(latest.map(emp => emp.id));
         const nextEmployees = [...latest];
-        parsedRows.forEach(({ id, name, role, labor, pwd }) => {
+        parsedRows.forEach(({ id, name, role, labor, pwd, campus }) => {
           if (!existingIds.has(id)) {
             const isNC = (id === "E1" || id === "E2" || id === "E3" || name.includes("夜診"));
-            nextEmployees.push({ id, name, role: role || '1', labor: labor || 'N', password: pwd || "", isNightClinic: isNC });
+            nextEmployees.push({ id, name, role: role || '1', labor: labor || 'N', campus: campus || '斗六', password: pwd || "", isNightClinic: isNC });
             existingIds.add(id);
             addedCount++;
           }
@@ -1836,7 +1839,7 @@ const AccountManagementView = ({ employees, updateEmployees, setDeleteTarget, on
             return [...latest, submittedData];
           });
           setEditingId(null);
-          setFormData({id: '', name: '', role: '1', labor: 'N', password: ''});
+          setFormData({id: '', name: '', role: '1', labor: 'N', campus: '斗六', password: ''});
         }}>
           <div className="grid grid-cols-2 gap-2">
             <input className="border p-2 rounded-xl text-sm font-mono outline-none" placeholder="員編" value={formData.id} onChange={e => setFormData({...formData, id: e.target.value})} disabled={!!editingId} />
@@ -1854,6 +1857,12 @@ const AccountManagementView = ({ employees, updateEmployees, setDeleteTarget, on
             <select className="border p-2 rounded-xl text-sm bg-white font-bold" value={formData.labor} onChange={e => setFormData({...formData, labor: e.target.value})}>
               <option value="Y">適用勞基法 (Y)</option>
               <option value="N">不適用勞基法 (N)</option>
+            </select>
+          </div>
+          <div className="grid grid-cols-1">
+            <select className="border p-2 rounded-xl text-sm bg-white font-bold" value={formData.campus || '斗六'} onChange={e => setFormData({...formData, campus: e.target.value})}>
+              <option value="斗六">斗六院區（可登入系統）</option>
+              <option value="虎尾">虎尾院區（僅員工資料建置，不可登入）</option>
             </select>
           </div>
           <input className="w-full border p-2 rounded-xl text-sm outline-none font-mono" placeholder="初始密碼/備註" value={formData.password} onChange={e => setFormData({...formData, password: e.target.value})} />
@@ -1909,6 +1918,9 @@ const AccountManagementView = ({ employees, updateEmployees, setDeleteTarget, on
                         <span className={`px-2 py-0.5 rounded-full text-[10px] font-black ${emp.role === '0' ? 'bg-purple-100 text-purple-600' : emp.role === '1' ? 'bg-blue-100 text-blue-600' : 'bg-gray-100 text-gray-500'}`}>
                           {getRoleLabel(emp.role)}
                         </span>
+                        <span className={`ml-1 px-2 py-0.5 rounded-full text-[10px] font-black ${getCampus(emp) === '虎尾' ? 'bg-rose-100 text-rose-600' : 'bg-emerald-100 text-emerald-600'}`}>
+                          {getCampus(emp)}院區
+                        </span>
                         {emp.password === "" && (
                           <span className="ml-1 px-2 py-0.5 rounded-full text-[10px] font-black bg-amber-100 text-amber-600" title="下次登入時需先設定新密碼">
                             尚未設定密碼
@@ -1920,7 +1932,7 @@ const AccountManagementView = ({ employees, updateEmployees, setDeleteTarget, on
                   <td className="p-4 text-right">
                     {!emp.isSeparator && (
                       <>
-                        <button onClick={() => { setEditingId(emp.id); setFormData(emp); }} className="text-blue-500 text-xs font-black mr-3">編輯</button>
+                        <button onClick={() => { setEditingId(emp.id); setFormData({ ...emp, campus: getCampus(emp) }); }} className="text-blue-500 text-xs font-black mr-3">編輯</button>
                         <button
                           onClick={() => {
                             if (!window.confirm(`確定要重設「${emp.name}」的密碼嗎？\n重設後該員工下次登入時，輸入的任何密碼都會被設為新密碼。`)) return;
@@ -2724,6 +2736,25 @@ const SchedulingView = ({ currentMonth, employees, daysInMonth, schedule, setSch
     return data;
   };
 
+  // 💡 重複排班檢查：同一天，排除「休、國、例、#」與空白/"-" 後，同一個班別出現兩人以上就提醒
+  const getDuplicateData = () => {
+    const data = {};
+    const ignore = ["休", "國", "例", "#", "-", ""];
+    daysInMonth.forEach(d => {
+      const count = {};
+      Object.values(editSched).forEach(u => {
+        const v = u?.[d.day];
+        if (v === undefined || v === null) return;
+        const val = String(v).trim();
+        if (ignore.includes(val)) return;
+        count[val] = (count[val] || 0) + 1;
+      });
+      const dups = Object.keys(count).filter(k => count[k] > 1);
+      if (dups.length > 0) data[d.day] = dups;
+    });
+    return data;
+  };
+
   const handlePublishSchedule = async () => {
     const nextSchedule = { ...schedule, [currentMonth]: deepClone(editSched) };
     setSchedule(nextSchedule);
@@ -3070,7 +3101,10 @@ const SchedulingView = ({ currentMonth, employees, daysInMonth, schedule, setSch
                   {/* 排班格子 */}
                   {daysInMonth.map((d) => {
                     const originalVal = editSched[emp.name]?.[d.day] || (isNC ? "" : "-");
-                    const previewVal = importPreview ? importPreview[emp.name]?.[d.day] : null;
+                    const rawPreviewVal = importPreview ? importPreview[emp.name]?.[d.day] : null;
+                    // 💡 對比模式：匯入檔該格若是空值（空字串、"-"、無資料）視為「無變動」，
+                    // 不顯示藍框、不覆蓋原班別，避免多餘資訊干擾檢核
+                    const previewVal = (rawPreviewVal === null || rawPreviewVal === undefined || String(rawPreviewVal).trim() === "" || String(rawPreviewVal).trim() === "-") ? null : rawPreviewVal;
                     const isConflict = importPreview && 
                                       previewVal !== null && 
                                       previewVal !== undefined && 
@@ -3185,6 +3219,27 @@ const SchedulingView = ({ currentMonth, employees, daysInMonth, schedule, setSch
                 );
               })}
             </tr>
+            <tr>
+              <td className="sticky left-0 z-20 bg-gray-100 border p-1 text-[9px] font-black text-gray-400 text-center border-r-2">
+                重複提醒
+              </td>
+              {daysInMonth.map(d => { 
+                const duplicated = getDuplicateData()[d.day] || [];
+                return (
+                  <td key={d.day} className={`aborder p-0.5 align-top min-h-12 bg-orange-50 ${isCycleEnd(d.fullDate) ? 'border-r-4 border-r-gray-400' : ''}`}>
+                    {duplicated.length > 0 && (
+                      <div className="flex flex-col gap-0.5">
+                        {duplicated.map(m => (
+                          <div key={m} className="bg-white border border-orange-200 text-orange-600 font-bold text-[8px] rounded p-0.5 shadow-sm">
+                            {m}
+                          </div>
+                        ))}
+                      </div>
+                    )}
+                  </td>
+                );
+              })}
+            </tr>
           </tfoot>
         </table>
       </div>
@@ -3239,6 +3294,8 @@ const App = () => {
     localStorage.setItem('lastMonth', currentMonth);
   }, [currentMonth]);
   const [employees, setEmployees] = useState(INITIAL_EMPLOYEES);
+  // 💡 只含斗六院區（含分隔線）的員工清單：排班/預假/報表/換班/匯出等一律用這份，虎尾院區員工只存在帳號管理名冊
+  const activeEmployees = useMemo(() => employees.filter(e => e.isSeparator || getCampus(e) !== '虎尾'), [employees]);
   const [shifts, setShifts] = useState(INITIAL_SHIFTS);
   const [shiftTimeTable, setShiftTimeTable] = useState(INITIAL_SHIFT_TIME_TABLE);
   const [holidays, setHolidays] = useState({ "2026-05-01": "勞動節" });
@@ -3278,12 +3335,30 @@ const App = () => {
   // ---------------------------------------------------------------------------------
   // 💡 換班紀錄：只寫入該筆申請「所屬月份」的文件，不會動到其他月份的換班紀錄
   // mutatorFn 接收「該月份目前的換班紀錄陣列」，回傳新的陣列
+  // 💡 修正核心：不再依賴「本地可能過期的 swapRequestsByMonth」去覆蓋整包陣列，
+  // 一律用 transaction 讀取雲端當下最新的該月換班紀錄陣列，在最新資料上套用 mutatorFn 再寫回去。
+  // 這樣即使同一個月份同時有好幾個換班動作（新增申請、同意、核定、否決）幾乎同時發生，
+  // Firestore 會自動偵測衝突並重試，不會有人的動作被別人「洗掉」，也不會讓舊狀態復活。
   // ---------------------------------------------------------------------------------
-  const patchSwapRequestsMonth = (monthKey, mutatorFn) => {
-    const current = swapRequestsByMonth[monthKey] || [];
-    const next = mutatorFn(current).map(req => cleanBundleData(req));
-    setSwapRequestsByMonth(prev => ({ ...prev, [monthKey]: next }));
-    saveMonthDoc(monthKey, { swapRequests: next });
+  const patchSwapRequestsMonth = async (monthKey, mutatorFn) => {
+    if (!auth.currentUser || !monthKey) return;
+    try {
+      let nextResult = null;
+      await runTransaction(db, async (tx) => {
+        const mDocRef = getMonthDocRef(monthKey);
+        const snap = await tx.get(mDocRef);
+        const latestList = (snap.exists() && Array.isArray(snap.data().swapRequests)) ? snap.data().swapRequests : [];
+        const next = mutatorFn(deepClone(latestList)).map(req => cleanBundleData(req));
+        tx.set(mDocRef, { swapRequests: next }, { merge: true });
+        nextResult = next;
+      });
+      if (nextResult) {
+        setSwapRequestsByMonth(prev => ({ ...prev, [monthKey]: nextResult }));
+      }
+    } catch (error) {
+      console.error(`換班紀錄 Transaction 失敗(月份 ${monthKey}):`, error);
+      alert("換班操作儲存失敗，可能是網路問題，請重新操作一次。");
+    }
   };
 
   // ---------------------------------------------------------------------------------
@@ -3338,7 +3413,7 @@ const App = () => {
         // 不再需要每次都依賴「執行當下用預設值去補算」這種容易被誤解、也容易踩雷的隱性邏輯
         const nextDailyLimits = deepClone(data.dailyLimits || {});
 
-        const getLeaveListFresh = (day) => employees
+        const getLeaveListFresh = (day) => activeEmployees
           .filter(e => !e.isSeparator && !getIsNightClinic(e) && e.role !== '2' && e.role !== '3' && apps?.[e.name]?.[day] === "預假")
           .map(e => e.name);
 
@@ -3372,7 +3447,7 @@ const App = () => {
         // 沒有資料的格子存 "-"。之後只要月份是已抽籤狀態，畫面跟匯出都只讀這份凍結快照，
         // 完全不會再去看即時班表——抽籤結果就是結果，不會因為之後排班異動而被「連帶看起來也變了」。
         const frozenSnapshot = {};
-        employees.forEach(emp => {
+        activeEmployees.forEach(emp => {
           if (emp.isSeparator) return;
           frozenSnapshot[emp.name] = {};
           daysInMonthArr.forEach(d => {
@@ -3504,10 +3579,12 @@ const App = () => {
         // 不會留下殘影，也不需要額外判斷誰被刪除、誰改名。
         if (fieldName === 'employees' && Array.isArray(nextVal)) {
           const entries = {};
+          const campuses = {};
           nextVal.forEach(emp => {
-            if (!emp.isSeparator && emp.id && emp.name) entries[emp.id] = emp.name;
+            if (!emp.isSeparator && emp.id && emp.name) { entries[emp.id] = emp.name; campuses[emp.id] = getCampus(emp); }
           });
-          tx.set(directoryDocRef, { entries, updatedAt: new Date().toISOString() });
+          // 💡 entries 維持「員編 -> 姓名」不變（含虎尾院區員工）；另外新增 campuses「員編 -> 院區」供其他系統使用
+          tx.set(directoryDocRef, { entries, campuses, updatedAt: new Date().toISOString() });
         }
       });
     } catch (error) {
@@ -3727,6 +3804,7 @@ const App = () => {
 const handleLoginAction = async (id, pwd) => {
   const emp = employees.find(e => e.id === id);
   if (!emp) { alert("無此員編權限。"); return; }
+  if (getCampus(emp) === '虎尾') { alert("此帳號屬於虎尾院區，目前未開放登入系統。"); return; }
 
   // 💡 修正核心：不再依賴「本地可能過期的 employees 陣列」判斷密碼，
   // 一律用 transaction 讀取雲端當下最新的那一筆資料來驗證/設定密碼，
@@ -3738,6 +3816,7 @@ const handleLoginAction = async (id, pwd) => {
       const latestEmployees = (snap.exists() && snap.data().employees) ? snap.data().employees : employees;
       const latestEmp = latestEmployees.find(e => e.id === id);
       if (!latestEmp) { loginResult = { ok: false, msg: "無此員編權限。" }; return; }
+      if (getCampus(latestEmp) === '虎尾') { loginResult = { ok: false, msg: "此帳號屬於虎尾院區，目前未開放登入系統。" }; return; }
 
       if (latestEmp.password === "" || latestEmp.password === pwd) {
         if (latestEmp.password === "" && pwd !== "") {
@@ -3932,7 +4011,7 @@ const handleSwapBack = () => {
   setSwapTarget({ ...swapTarget, participants: newParticipants });
 };
 
-const handleRecordAction = (req, action) => {
+const handleRecordAction = async (req, action) => {
   // 💡 解鎖名單內所有人的日期鎖：透過 transaction 對雲端最新員工資料操作，避免覆蓋其他人剛好也在做的變更
   const unlockParticipantIds = req.participants ? req.participants.map(p => p.id) : [req.creatorId, req.targetId];
   let datesToUnlock = req.date ? [req.date] : [];
@@ -3956,72 +4035,115 @@ const handleRecordAction = (req, action) => {
   if (action === 'Approve') {
     if (req.status === 'WaitingParticipants') {
       patchSwapRequestsMonth(reqMonthKey, list => list.map(r => r.id === req.id ? { ...r, status: 'PendingAdmin' } : r));
-    } 
+    }
     else if (req.status === 'PendingAdmin') {
       const targetMonthKey = req.date ? req.date.substring(0, 7) : currentMonth;
 
-      let isAllShiftsValid = true;
-      let errorMsg = "";
+      // 💡 修正核心：核定換班時，班表與換班紀錄的最新狀態都改成在同一個 transaction 裡
+      // 直接讀雲端當下最新資料來驗證與寫入，不再依賴本地畫面上可能過期的 schedule / 換班清單，
+      // 避免跟其他同時發生的排班編輯或換班動作互相覆蓋，也避免拿舊資料誤判「班別不符」。
+      let outcome = null;
+      try {
+        await runTransaction(db, async (tx) => {
+          const reqDocRef = getMonthDocRef(reqMonthKey);
+          const targetDocRef = getMonthDocRef(targetMonthKey);
+          const sameDoc = reqMonthKey === targetMonthKey;
 
-      if (req.participants && !req.isBundle) {
-        req.participants.forEach(p => {
-          const exactDay = p.day || req.day || (req.startDate ? req.startDate.split('-')[2] : null);
-          if (!exactDay) return;
+          const reqSnap = await tx.get(reqDocRef);
+          const targetSnap = sameDoc ? reqSnap : await tx.get(targetDocRef);
 
-          const currentSystemShift = schedule[targetMonthKey]?.[p.name]?.[Number(exactDay)];
-          const normalize = (v) => {
-            const s = (v === null || v === undefined) ? "-" : String(v).trim();
-            return (s === "" || s === "-") ? "-" : s;
-          };
-          const clean = (val) => val.replace(/#|\(國\)/g, '');
+          const latestSwapList = (reqSnap.exists() && Array.isArray(reqSnap.data().swapRequests)) ? reqSnap.data().swapRequests : [];
+          const latestReq = latestSwapList.find(r => r.id === req.id);
 
-          if (clean(normalize(currentSystemShift)) !== clean(normalize(p.oldShift))) {
-            isAllShiftsValid = false;
-            errorMsg += `【${p.name}】的班別不符（目前首頁：${normalize(currentSystemShift)}，紀錄：${p.oldShift}）\n`;
+          if (!latestReq || latestReq.status !== 'PendingAdmin') {
+            outcome = { ok: false, msg: "此換班申請的狀態已被更新（可能已被其他人處理過），請重新整理後再確認一次。" };
+            return;
           }
+
+          const monthSchedBase = deepClone((targetSnap.exists() && targetSnap.data().schedule) || {});
+
+          let isAllShiftsValid = true;
+          let errorMsg = "";
+
+          if (latestReq.participants && !latestReq.isBundle) {
+            latestReq.participants.forEach(p => {
+              const exactDay = p.day || latestReq.day || (latestReq.startDate ? latestReq.startDate.split('-')[2] : null);
+              if (!exactDay) return;
+
+              const currentSystemShift = monthSchedBase?.[p.name]?.[Number(exactDay)];
+              const normalize = (v) => {
+                const s = (v === null || v === undefined) ? "-" : String(v).trim();
+                return (s === "" || s === "-") ? "-" : s;
+              };
+              const clean = (val) => val.replace(/#|\(國\)/g, '');
+
+              if (clean(normalize(currentSystemShift)) !== clean(normalize(p.oldShift))) {
+                isAllShiftsValid = false;
+                errorMsg += `【${p.name}】的班別不符（目前首頁：${normalize(currentSystemShift)}，紀錄：${p.oldShift}）\n`;
+              }
+            });
+          }
+
+          if (!isAllShiftsValid) {
+            outcome = { ok: false, msg: `無法核定換班！\n\n${errorMsg}\n請組長再次確認「首頁」目前的最新班表。` };
+            return;
+          }
+
+          let daysArray = [];
+          if (latestReq.isBundle && latestReq.daysToSwap) {
+            daysArray = [...latestReq.daysToSwap];
+          } else {
+            const exactDay = latestReq.day || (latestReq.date ? Number(latestReq.date.split('-')[2]) : null);
+            if (exactDay) daysArray = [exactDay];
+          }
+
+          daysArray.forEach(dRaw => {
+            // daysToSwap 可能是 "YYYY-MM-DD"（整段換班）或純數字（單日換班），統一換算成當月的「日」數字
+            const d = latestReq.isBundle ? Number(String(dRaw).split('-')[2]) : dRaw;
+            if (!latestReq.participants || latestReq.participants.length < 2) return;
+
+            const originalShifts = latestReq.participants.map(p => {
+              if (!monthSchedBase[p.name]) monthSchedBase[p.name] = {};
+              return monthSchedBase[p.name][d] || "-";
+            });
+
+            latestReq.participants.forEach((p, idx) => {
+              const nextIdx = (idx + 1) % latestReq.participants.length;
+              monthSchedBase[p.name][d] = originalShifts[nextIdx];
+            });
+          });
+
+          const nextSwapList = latestSwapList.map(r => r.id === req.id ? { ...r, status: 'Approved' } : r).map(r => cleanBundleData(r));
+
+          // 💡 分流寫入：schedule 只存到「目標月份自己的文件」；換班紀錄只更新這一筆申請所屬的月份文件
+          // 若兩者剛好是同一份月份文件，合併成一次 tx.set，避免對同一份文件寫入兩次
+          if (sameDoc) {
+            tx.set(targetDocRef, { schedule: monthSchedBase, swapRequests: nextSwapList }, { merge: true });
+          } else {
+            tx.set(targetDocRef, { schedule: monthSchedBase }, { merge: true });
+            tx.set(reqDocRef, { swapRequests: nextSwapList }, { merge: true });
+          }
+
+          const entries = buildScheduleDirEntries(monthSchedBase, employees);
+          tx.set(getScheduleDirDocRef(targetMonthKey), { entries, updatedAt: new Date().toISOString() });
+
+          outcome = { ok: true, monthSchedBase, targetMonthKey, nextSwapList, reqMonthKey };
         });
+      } catch (error) {
+        console.error("核定換班 Transaction 失敗:", error);
+        outcome = { ok: false, msg: "核定換班時發生錯誤，可能是網路問題，請重新操作一次。" };
       }
 
-      if (!isAllShiftsValid) {
-        alert(`無法核定換班！\n\n${errorMsg}\n請組長再次確認「首頁」目前的最新班表。`);
-        return; 
+      if (!outcome || !outcome.ok) {
+        alert(outcome?.msg || "核定換班失敗。");
+        return;
       }
 
-      const nextStatus = 'Approved';
-      const monthSchedBase = deepClone(schedule[targetMonthKey] || {});
-
-      let daysArray = [];
-        if (req.isBundle && req.daysToSwap) {
-          daysArray = [...req.daysToSwap];
-        } else {
-          const exactDay = req.day || (req.date ? Number(req.date.split('-')[2]) : null);
-          if (exactDay) daysArray = [exactDay];
-        }
-
-      daysArray.forEach(dRaw => {
-        // daysToSwap 可能是 "YYYY-MM-DD"（整段換班）或純數字（單日換班），統一換算成當月的「日」數字
-        const d = req.isBundle ? Number(String(dRaw).split('-')[2]) : dRaw;
-        if (!req.participants || req.participants.length < 2) return;
-
-        const originalShifts = req.participants.map(p => {
-          if (!monthSchedBase[p.name]) monthSchedBase[p.name] = {};
-          return monthSchedBase[p.name][d] || "-";
-        });
-
-        req.participants.forEach((p, idx) => {
-          const nextIdx = (idx + 1) % req.participants.length;
-          monthSchedBase[p.name][d] = originalShifts[nextIdx];
-        });
-      });
-
-      setSchedule(prev => ({ ...prev, [targetMonthKey]: monthSchedBase }));
-
-      // 💡 分流寫入：schedule 只存到「目標月份自己的文件」；換班紀錄只更新這一筆申請所屬的月份文件
-      saveScheduleMonth(targetMonthKey, monthSchedBase);
-      patchSwapRequestsMonth(reqMonthKey, list => list.map(r => r.id === req.id ? { ...r, status: nextStatus } : r));
+      setSchedule(prev => ({ ...prev, [outcome.targetMonthKey]: outcome.monthSchedBase }));
+      setSwapRequestsByMonth(prev => ({ ...prev, [outcome.reqMonthKey]: outcome.nextSwapList }));
       doUnlock();
     }
-  } 
+  }
   else if (action === 'Reject' || action === 'Delete') {
     patchSwapRequestsMonth(reqMonthKey, list => (action === 'Delete')
       ? list.filter(r => r.id !== req.id)
@@ -4050,7 +4172,7 @@ const handleParticipantApprove = (reqId) => {
     const exportScheduleCSV = (prefix = "") => {
     const rt = toROCTitle(currentMonth), fp = prefix ? `${prefix}_` : "";
     let csv = `\ufeff台大醫院雲林分院藥劑部 ${rt} 班表,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,\n`; csv += "員編,姓名," + daysInMonth.map(d => `${d.day}(${d.dayOfWeek})`).join(",") + "\n";
-    employees.forEach(emp => { if (emp.isSeparator) return; let row = [emp.id, emp.name]; daysInMonth.forEach(d => row.push(schedule[currentMonth]?.[emp.name]?.[d.day] || "-")); csv += row.join(",") + "\n"; });
+    activeEmployees.forEach(emp => { if (emp.isSeparator) return; let row = [emp.id, emp.name]; daysInMonth.forEach(d => row.push(schedule[currentMonth]?.[emp.name]?.[d.day] || "-")); csv += row.join(",") + "\n"; });
     const b = new Blob([csv], { type: 'text/csv;charset=utf-8' }), l = document.createElement("a"); l.href = URL.createObjectURL(b); l.download = `${fp}班表_${currentMonth}.csv`; l.click();
   };
 
@@ -4125,10 +4247,11 @@ const handleParticipantApprove = (reqId) => {
         // 這裡補上同一份「員編->姓名」摘要文件重建，確保還原後不會跟摘要文件對不起來
         {
           const entries = {};
+          const campuses = {};
           (backup.meta.employees || []).forEach(emp => {
-            if (!emp.isSeparator && emp.id && emp.name) entries[emp.id] = emp.name;
+            if (!emp.isSeparator && emp.id && emp.name) { entries[emp.id] = emp.name; campuses[emp.id] = getCampus(emp); }
           });
-          await setDoc(directoryDocRef, { entries, updatedAt: new Date().toISOString() });
+          await setDoc(directoryDocRef, { entries, campuses, updatedAt: new Date().toISOString() });
         }
 
         const monthlyData = deepClone(backup.monthlyData || {});
@@ -4185,15 +4308,15 @@ const handleParticipantApprove = (reqId) => {
             );
           }
           switch (currentPage) {
-            case 'home': return <ScheduleTableView currentMonth={currentMonth} employees={employees} schedule={schedule} cellColors={cellColors} daysInMonth={daysInMonth} swapRequests={swapRequests} currentPage={currentPage} currentUser={currentUser} />;
+            case 'home': return <ScheduleTableView currentMonth={currentMonth} employees={activeEmployees} schedule={schedule} cellColors={cellColors} daysInMonth={daysInMonth} swapRequests={swapRequests} currentPage={currentPage} currentUser={currentUser} />;
             case 'shiftTimes': return <ShiftTimeTableView shiftTimeTable={shiftTimeTable} updateShiftTimeTable={updateShiftTimeTable} isAdmin={isLoggedIn && currentUser?.role === '0'} />;
             case 'account': return <AccountManagementView employees={employees} updateEmployees={updateEmployees} setDeleteTarget={setDeleteTarget} onExportFullBackup={handleExportFullBackup} onImportFullBackup={handleImportFullBackup} />;
             case 'shifts': return <ShiftsManagementView shifts={shifts} updateShifts={updateShifts} holidays={holidays} updateHolidays={updateHolidays} setDeleteShiftTarget={setDeleteShiftTarget} personDayRules={personDayRules} updatePersonDayRules={updatePersonDayRules} />;
-            case 'swap': return <ScheduleTableView currentMonth={currentMonth} employees={employees} schedule={schedule} cellColors={cellColors} daysInMonth={daysInMonth} onCellClick={handleSwapApply} swapRequests={swapRequests} currentPage={currentPage} currentUser={currentUser} swapTarget={swapTarget} handleSwapBack={handleSwapBack} isCycleEnd={isCycleEnd}/>;
+            case 'swap': return <ScheduleTableView currentMonth={currentMonth} employees={activeEmployees} schedule={schedule} cellColors={cellColors} daysInMonth={daysInMonth} onCellClick={handleSwapApply} swapRequests={swapRequests} currentPage={currentPage} currentUser={currentUser} swapTarget={swapTarget} handleSwapBack={handleSwapBack} isCycleEnd={isCycleEnd}/>;
             case 'records': return <RecordsView currentUser={currentUser} swapRequests={swapRequests} onAction={handleRecordAction} onApprove={handleParticipantApprove} setRejectingReq={setRejectingReq} schedule={schedule} currentMonth={currentMonth} />;
-            case 'leave':  return  <PreLeaveView currentMonth={currentMonth} employees={employees} daysInMonth={daysInMonth} currentUser={currentUser} schedule={schedule} setSchedule={setSchedule} preLeaveData={preLeaveData} setPreLeaveData={setPreLeaveData} savePreLeaveMonth={savePreLeaveMonth} saveMetaPreLeave={saveMetaPreLeave} saveScheduleMonth={saveScheduleMonth} saveMonthDoc={saveMonthDoc} runLotteryTransaction={runLotteryTransaction} resetMonthDraw={resetMonthDraw} restorePreUnlockBackup={restorePreUnlockBackup} />;
-            case 'schedule': return <SchedulingView currentMonth={currentMonth} employees={employees} daysInMonth={daysInMonth} schedule={schedule} setSchedule={setSchedule} cellColors={cellColors} setCellColors={setCellColors} shifts={shifts} exportScheduleCSV={exportScheduleCSV} setCurrentPage={setCurrentPage} setIsDirty={setIsDirty} saveScheduleMonth={saveScheduleMonth} saveCellColorsMonth={saveCellColorsMonth} preLeaveData={preLeaveData} setPreLeaveData={setPreLeaveData} savePreLeaveMonth={savePreLeaveMonth} isAdmin={currentUser?.role === '0'} isMonthDrawn={(preLeaveData.drawnMonths || []).includes(currentMonth)} /> ;
-            case 'report': return <ManagementReportView currentMonth={currentMonth} employees={employees} schedule={schedule} personDayRules={personDayRules} holidays={holidays} shifts={shifts} cellColors={cellColors}/>;
+            case 'leave':  return  <PreLeaveView currentMonth={currentMonth} employees={activeEmployees} daysInMonth={daysInMonth} currentUser={currentUser} schedule={schedule} setSchedule={setSchedule} preLeaveData={preLeaveData} setPreLeaveData={setPreLeaveData} savePreLeaveMonth={savePreLeaveMonth} saveMetaPreLeave={saveMetaPreLeave} saveScheduleMonth={saveScheduleMonth} saveMonthDoc={saveMonthDoc} runLotteryTransaction={runLotteryTransaction} resetMonthDraw={resetMonthDraw} restorePreUnlockBackup={restorePreUnlockBackup} />;
+            case 'schedule': return <SchedulingView currentMonth={currentMonth} employees={activeEmployees} daysInMonth={daysInMonth} schedule={schedule} setSchedule={setSchedule} cellColors={cellColors} setCellColors={setCellColors} shifts={shifts} exportScheduleCSV={exportScheduleCSV} setCurrentPage={setCurrentPage} setIsDirty={setIsDirty} saveScheduleMonth={saveScheduleMonth} saveCellColorsMonth={saveCellColorsMonth} preLeaveData={preLeaveData} setPreLeaveData={setPreLeaveData} savePreLeaveMonth={savePreLeaveMonth} isAdmin={currentUser?.role === '0'} isMonthDrawn={(preLeaveData.drawnMonths || []).includes(currentMonth)} /> ;
+            case 'report': return <ManagementReportView currentMonth={currentMonth} employees={activeEmployees} schedule={schedule} personDayRules={personDayRules} holidays={holidays} shifts={shifts} cellColors={cellColors}/>;
             case 'login': {
               return <LoginPage employees={employees} onLogin={handleLoginAction} />;
             }
