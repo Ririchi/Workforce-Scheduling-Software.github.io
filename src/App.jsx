@@ -2677,6 +2677,9 @@ const SchedulingView = ({ currentMonth, employees, daysInMonth, schedule, setSch
                                ? "-" 
                                : String(currentRaw).trim();
 
+            // 💡 匯入檔該格是空白或 "-" 視為「不更動」，不進入對比清單（不顯示藍框，確認套用時也不會覆蓋現有班別）
+            if (finalValue === "-") continue;
+
             if (finalValue !== currentVal) {
               if (!nextImportData[emp.name]) nextImportData[emp.name] = {};
               nextImportData[emp.name][day] = finalValue;
@@ -2878,6 +2881,16 @@ const SchedulingView = ({ currentMonth, employees, daysInMonth, schedule, setSch
                   className={`w-6 h-6 rounded-full border-2 ${p.class} ${activeColor === p.class ? 'border-blue-500 scale-110 shadow' : 'border-white'}`}
                 />
               ))}
+              {/* 💡 清除顏色：點格子會移除該格自訂顏色，恢復預設底色（週六橘、週日/假日粉或白色） */}
+              <button
+                key="clear-color"
+                type="button"
+                title="清除顏色，恢復預設"
+                onClick={() => setActiveColor('clear')}
+                className={`w-6 h-6 rounded-full border-2 bg-white flex items-center justify-center text-red-500 ${activeColor === 'clear' ? 'border-blue-500 scale-110 shadow' : 'border-gray-300'}`}
+              >
+                <X size={14} strokeWidth={3} />
+              </button>
             </div>
           )}
           {importPreview && (
@@ -3142,7 +3155,7 @@ const SchedulingView = ({ currentMonth, employees, daysInMonth, schedule, setSch
                           if (!nc[currentMonth][emp.name]) nc[currentMonth][emp.name] = {}; 
 
                           // 1. 更新或刪除顏色
-                          if (activeColor === 'bg-white') {
+                          if (activeColor === 'bg-white' || activeColor === 'clear') {
                             delete nc[currentMonth][emp.name][d.day];
                           } else {
                             nc[currentMonth][emp.name][d.day] = activeColor;
@@ -3230,7 +3243,7 @@ const SchedulingView = ({ currentMonth, employees, daysInMonth, schedule, setSch
                     {duplicated.length > 0 && (
                       <div className="flex flex-col gap-0.5">
                         {duplicated.map(m => (
-                          <div key={m} className="bg-white border border-orange-200 text-orange-600 font-bold text-[8px] rounded p-0.5 shadow-sm">
+                          <div key={m} className="bg-orange-500 border border-orange-500 text-white font-bold text-[8px] rounded p-0.5 shadow-sm">
                             {m}
                           </div>
                         ))}
@@ -3381,7 +3394,21 @@ const App = () => {
   };
 
   const saveScheduleMonth = (monthKey, monthScheduleObj) => saveMonthDoc(monthKey, { schedule: monthScheduleObj });
-  const saveCellColorsMonth = (monthKey, monthColorObj) => saveMonthDoc(monthKey, { cellColors: monthColorObj });
+  // 💡 顏色一律「整份取代」當月的 cellColors（updateDoc 會整個替換欄位），
+  // 不用 merge，否則被清除的顏色只會在本機消失、雲端仍保留，重新同步後舊顏色又會回來
+  const saveCellColorsMonth = async (monthKey, monthColorObj) => {
+    if (!auth.currentUser || !monthKey) return;
+    try {
+      try {
+        await updateDoc(getMonthDocRef(monthKey), { cellColors: monthColorObj || {} });
+      } catch (err) {
+        // 該月份文件還不存在時，改用 setDoc 建立
+        await setDoc(getMonthDocRef(monthKey), { cellColors: monthColorObj || {} }, { merge: true });
+      }
+    } catch (error) {
+      console.error(`雲端儲存失敗(顏色 ${monthKey}):`, error);
+    }
+  };
   const savePreLeaveMonth = (monthKey, partial) => saveMonthDoc(monthKey, partial); // partial: {apps} / {dailyLimits} / {remarks}
   const saveMetaPreLeave = (partial) => saveMeta({ preLeaveMeta: partial });
 
