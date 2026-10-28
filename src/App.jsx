@@ -219,6 +219,9 @@ const toROCTitle = (currentMonth) => {
   return `${year}年${month}月`;
 };
 
+// 💡 院區：沒有 campus 欄位的既有員工一律視為「斗六」；只有「斗六」可登入、並出現在排班/預假/報表/換班等畫面。
+// 「虎尾」員工只存在帳號管理名冊（作為員工資料建置用）。
+const getCampus = (emp) => (emp && emp.campus) ? emp.campus : '斗六';
 const getIsNightClinic = (emp) => {
   if (!emp) return false;
   return (
@@ -1732,7 +1735,7 @@ const RecordsView = ({ currentUser, swapRequests, onAction, onApprove, setReject
 };
 
 const AccountManagementView = ({ employees, updateEmployees, setDeleteTarget, onExportFullBackup, onImportFullBackup }) => {
-  const [formData, setFormData] = useState({ id: '', name: '', role: '1', labor: 'N', password: '' });
+  const [formData, setFormData] = useState({ id: '', name: '', role: '1', labor: 'N', campus: '斗六', password: '' });
   const [editingId, setEditingId] = useState(null);
   const [draggedIdx, setDraggedIdx] = useState(null);
   const [dragOverIdx, setDragOverIdx] = useState(null);
@@ -1768,9 +1771,9 @@ const AccountManagementView = ({ employees, updateEmployees, setDeleteTarget, on
   };
 
   const handleExport = () => {
-    let csv = "\ufeff員編,姓名,角色(0:管理1:藥師2:書記3:藥庫),適用勞基法(Y/N),密碼\n";
+    let csv = "\ufeff員編,姓名,角色(0:管理1:藥師2:書記3:藥庫),適用勞基法(Y/N),密碼,院區\n";
     employees.filter(e => !e.isSeparator).forEach(emp => {
-      csv += `${emp.id},${emp.name},${emp.role},${emp.labor},${emp.password || ''}\n`;
+      csv += `${emp.id},${emp.name},${emp.role},${emp.labor},${emp.password || ''},${getCampus(emp)}\n`;
     });
     const blob = new Blob([csv], { type: 'text/csv;charset=utf-8' });
     const link = document.createElement("a");
@@ -1786,8 +1789,8 @@ const AccountManagementView = ({ employees, updateEmployees, setDeleteTarget, on
     reader.onload = (ev) => {
       const rows = ev.target.result.split(/\r?\n/).map(r => r.trim()).filter(Boolean).slice(1);
       const parsedRows = rows.map(r => {
-        const [id, name, role, labor, pwd] = r.split(',');
-        return { id, name, role, labor, pwd };
+        const [id, name, role, labor, pwd, campus] = r.split(',');
+        return { id, name, role, labor, pwd, campus: (campus || '').trim() === '虎尾' ? '虎尾' : '斗六' };
       }).filter(r => r.id && r.name);
 
       // 💡 修正：以 Firestore 最新清單為基礎新增，避免匯入時把別人剛新增/編輯的人員蓋掉
@@ -1795,10 +1798,10 @@ const AccountManagementView = ({ employees, updateEmployees, setDeleteTarget, on
         let addedCount = 0;
         const existingIds = new Set(latest.map(emp => emp.id));
         const nextEmployees = [...latest];
-        parsedRows.forEach(({ id, name, role, labor, pwd }) => {
+        parsedRows.forEach(({ id, name, role, labor, pwd, campus }) => {
           if (!existingIds.has(id)) {
             const isNC = (id === "E1" || id === "E2" || id === "E3" || name.includes("夜診"));
-            nextEmployees.push({ id, name, role: role || '1', labor: labor || 'N', password: pwd || "", isNightClinic: isNC });
+            nextEmployees.push({ id, name, role: role || '1', labor: labor || 'N', campus: campus || '斗六', password: pwd || "", isNightClinic: isNC });
             existingIds.add(id);
             addedCount++;
           }
@@ -1836,7 +1839,7 @@ const AccountManagementView = ({ employees, updateEmployees, setDeleteTarget, on
             return [...latest, submittedData];
           });
           setEditingId(null);
-          setFormData({id: '', name: '', role: '1', labor: 'N', password: ''});
+          setFormData({id: '', name: '', role: '1', labor: 'N', campus: '斗六', password: ''});
         }}>
           <div className="grid grid-cols-2 gap-2">
             <input className="border p-2 rounded-xl text-sm font-mono outline-none" placeholder="員編" value={formData.id} onChange={e => setFormData({...formData, id: e.target.value})} disabled={!!editingId} />
@@ -1854,6 +1857,12 @@ const AccountManagementView = ({ employees, updateEmployees, setDeleteTarget, on
             <select className="border p-2 rounded-xl text-sm bg-white font-bold" value={formData.labor} onChange={e => setFormData({...formData, labor: e.target.value})}>
               <option value="Y">適用勞基法 (Y)</option>
               <option value="N">不適用勞基法 (N)</option>
+            </select>
+          </div>
+          <div className="grid grid-cols-1">
+            <select className="border p-2 rounded-xl text-sm bg-white font-bold" value={formData.campus || '斗六'} onChange={e => setFormData({...formData, campus: e.target.value})}>
+              <option value="斗六">斗六院區（可登入系統）</option>
+              <option value="虎尾">虎尾院區（僅員工資料建置，不可登入）</option>
             </select>
           </div>
           <input className="w-full border p-2 rounded-xl text-sm outline-none font-mono" placeholder="初始密碼/備註" value={formData.password} onChange={e => setFormData({...formData, password: e.target.value})} />
@@ -1909,6 +1918,9 @@ const AccountManagementView = ({ employees, updateEmployees, setDeleteTarget, on
                         <span className={`px-2 py-0.5 rounded-full text-[10px] font-black ${emp.role === '0' ? 'bg-purple-100 text-purple-600' : emp.role === '1' ? 'bg-blue-100 text-blue-600' : 'bg-gray-100 text-gray-500'}`}>
                           {getRoleLabel(emp.role)}
                         </span>
+                        <span className={`ml-1 px-2 py-0.5 rounded-full text-[10px] font-black ${getCampus(emp) === '虎尾' ? 'bg-rose-100 text-rose-600' : 'bg-emerald-100 text-emerald-600'}`}>
+                          {getCampus(emp)}院區
+                        </span>
                         {emp.password === "" && (
                           <span className="ml-1 px-2 py-0.5 rounded-full text-[10px] font-black bg-amber-100 text-amber-600" title="下次登入時需先設定新密碼">
                             尚未設定密碼
@@ -1920,7 +1932,7 @@ const AccountManagementView = ({ employees, updateEmployees, setDeleteTarget, on
                   <td className="p-4 text-right">
                     {!emp.isSeparator && (
                       <>
-                        <button onClick={() => { setEditingId(emp.id); setFormData(emp); }} className="text-blue-500 text-xs font-black mr-3">編輯</button>
+                        <button onClick={() => { setEditingId(emp.id); setFormData({ ...emp, campus: getCampus(emp) }); }} className="text-blue-500 text-xs font-black mr-3">編輯</button>
                         <button
                           onClick={() => {
                             if (!window.confirm(`確定要重設「${emp.name}」的密碼嗎？\n重設後該員工下次登入時，輸入的任何密碼都會被設為新密碼。`)) return;
@@ -2724,6 +2736,25 @@ const SchedulingView = ({ currentMonth, employees, daysInMonth, schedule, setSch
     return data;
   };
 
+  // 💡 重複排班檢查：同一天，排除「休、國、例、#」與空白/"-" 後，同一個班別出現兩人以上就提醒
+  const getDuplicateData = () => {
+    const data = {};
+    const ignore = ["休", "國", "例", "#", "-", ""];
+    daysInMonth.forEach(d => {
+      const count = {};
+      Object.values(editSched).forEach(u => {
+        const v = u?.[d.day];
+        if (v === undefined || v === null) return;
+        const val = String(v).trim();
+        if (ignore.includes(val)) return;
+        count[val] = (count[val] || 0) + 1;
+      });
+      const dups = Object.keys(count).filter(k => count[k] > 1);
+      if (dups.length > 0) data[d.day] = dups;
+    });
+    return data;
+  };
+
   const handlePublishSchedule = async () => {
     const nextSchedule = { ...schedule, [currentMonth]: deepClone(editSched) };
     setSchedule(nextSchedule);
@@ -2847,6 +2878,16 @@ const SchedulingView = ({ currentMonth, employees, daysInMonth, schedule, setSch
                   className={`w-6 h-6 rounded-full border-2 ${p.class} ${activeColor === p.class ? 'border-blue-500 scale-110 shadow' : 'border-white'}`}
                 />
               ))}
+              {/* 💡 清除顏色：點格子會移除該格自訂顏色，恢復預設底色（週六橘、週日/假日粉或白色） */}
+              <button
+                key="clear-color"
+                type="button"
+                title="清除顏色，恢復預設"
+                onClick={() => setActiveColor('clear')}
+                className={`w-6 h-6 rounded-full border-2 bg-white flex items-center justify-center text-red-500 ${activeColor === 'clear' ? 'border-blue-500 scale-110 shadow' : 'border-gray-300'}`}
+              >
+                <X size={14} strokeWidth={3} />
+              </button>
             </div>
           )}
           {importPreview && (
@@ -3071,14 +3112,22 @@ const SchedulingView = ({ currentMonth, employees, daysInMonth, schedule, setSch
                   {daysInMonth.map((d) => {
                     const originalVal = editSched[emp.name]?.[d.day] || (isNC ? "" : "-");
                     const previewVal = importPreview ? importPreview[emp.name]?.[d.day] : null;
+                    // 💡 原班表該格是空值或 "-"：不比對，直接帶入匯入檔內容（不顯示藍框，確認套用時一併寫入）；
+                    // 原班表該格已有班別且與匯入檔不同，才算「衝突」顯示藍框供確認
+                    const isAutoFill = importPreview && 
+                                      previewVal !== null && 
+                                      previewVal !== undefined && 
+                                      previewVal !== originalVal &&
+                                      (originalVal === "-" || originalVal === "");
                     const isConflict = importPreview && 
                                       previewVal !== null && 
                                       previewVal !== undefined && 
-                                      previewVal !== originalVal;
+                                      previewVal !== originalVal &&
+                                      !isAutoFill;
                     // 對比模式藍框衝突判定邏輯
                     const isIgnored = ignoredCells.has(`${emp.name}-${d.day}`);
                     // 如果預覽值存在、不是 null 且不等於原值，才判定為變動
-                    const isChanged = previewVal !== null && previewVal !== undefined && previewVal !== originalVal && !isIgnored;
+                    const isChanged = previewVal !== null && previewVal !== undefined && previewVal !== originalVal && !isIgnored && !isAutoFill;
                     // 3. 決定最終顯示內容
                     const displayVal = (previewVal !== null && previewVal !== undefined && !isIgnored) ? previewVal : originalVal;
                     const customColor = cellColors[currentMonth]?.[emp.name]?.[d.day];
@@ -3108,7 +3157,7 @@ const SchedulingView = ({ currentMonth, employees, daysInMonth, schedule, setSch
                           if (!nc[currentMonth][emp.name]) nc[currentMonth][emp.name] = {}; 
 
                           // 1. 更新或刪除顏色
-                          if (activeColor === 'bg-white') {
+                          if (activeColor === 'bg-white' || activeColor === 'clear') {
                             delete nc[currentMonth][emp.name][d.day];
                           } else {
                             nc[currentMonth][emp.name][d.day] = activeColor;
@@ -3185,6 +3234,27 @@ const SchedulingView = ({ currentMonth, employees, daysInMonth, schedule, setSch
                 );
               })}
             </tr>
+            <tr>
+              <td className="sticky left-0 z-20 bg-gray-100 border p-1 text-[9px] font-black text-gray-400 text-center border-r-2">
+                重複提醒
+              </td>
+              {daysInMonth.map(d => { 
+                const duplicated = getDuplicateData()[d.day] || [];
+                return (
+                  <td key={d.day} className={`aborder p-0.5 align-top min-h-12 bg-orange-50 ${isCycleEnd(d.fullDate) ? 'border-r-4 border-r-gray-400' : ''}`}>
+                    {duplicated.length > 0 && (
+                      <div className="flex flex-col gap-0.5">
+                        {duplicated.map(m => (
+                          <div key={m} className="bg-orange-500 border border-orange-500 text-white font-bold text-[8px] rounded p-0.5 shadow-sm">
+                            {m}
+                          </div>
+                        ))}
+                      </div>
+                    )}
+                  </td>
+                );
+              })}
+            </tr>
           </tfoot>
         </table>
       </div>
@@ -3239,6 +3309,8 @@ const App = () => {
     localStorage.setItem('lastMonth', currentMonth);
   }, [currentMonth]);
   const [employees, setEmployees] = useState(INITIAL_EMPLOYEES);
+  // 💡 只含斗六院區（含分隔線）的員工清單：排班/預假/報表/換班/匯出等一律用這份，虎尾院區員工只存在帳號管理名冊
+  const activeEmployees = useMemo(() => employees.filter(e => e.isSeparator || getCampus(e) !== '虎尾'), [employees]);
   const [shifts, setShifts] = useState(INITIAL_SHIFTS);
   const [shiftTimeTable, setShiftTimeTable] = useState(INITIAL_SHIFT_TIME_TABLE);
   const [holidays, setHolidays] = useState({ "2026-05-01": "勞動節" });
@@ -3324,7 +3396,21 @@ const App = () => {
   };
 
   const saveScheduleMonth = (monthKey, monthScheduleObj) => saveMonthDoc(monthKey, { schedule: monthScheduleObj });
-  const saveCellColorsMonth = (monthKey, monthColorObj) => saveMonthDoc(monthKey, { cellColors: monthColorObj });
+  // 💡 顏色一律「整份取代」當月的 cellColors（updateDoc 會整個替換欄位），
+  // 不用 merge，否則被清除的顏色只會在本機消失、雲端仍保留，重新同步後舊顏色又會回來
+  const saveCellColorsMonth = async (monthKey, monthColorObj) => {
+    if (!auth.currentUser || !monthKey) return;
+    try {
+      try {
+        await updateDoc(getMonthDocRef(monthKey), { cellColors: monthColorObj || {} });
+      } catch (err) {
+        // 該月份文件還不存在時，改用 setDoc 建立
+        await setDoc(getMonthDocRef(monthKey), { cellColors: monthColorObj || {} }, { merge: true });
+      }
+    } catch (error) {
+      console.error(`雲端儲存失敗(顏色 ${monthKey}):`, error);
+    }
+  };
   const savePreLeaveMonth = (monthKey, partial) => saveMonthDoc(monthKey, partial); // partial: {apps} / {dailyLimits} / {remarks}
   const saveMetaPreLeave = (partial) => saveMeta({ preLeaveMeta: partial });
 
@@ -3356,7 +3442,7 @@ const App = () => {
         // 不再需要每次都依賴「執行當下用預設值去補算」這種容易被誤解、也容易踩雷的隱性邏輯
         const nextDailyLimits = deepClone(data.dailyLimits || {});
 
-        const getLeaveListFresh = (day) => employees
+        const getLeaveListFresh = (day) => activeEmployees
           .filter(e => !e.isSeparator && !getIsNightClinic(e) && e.role !== '2' && e.role !== '3' && apps?.[e.name]?.[day] === "預假")
           .map(e => e.name);
 
@@ -3390,7 +3476,7 @@ const App = () => {
         // 沒有資料的格子存 "-"。之後只要月份是已抽籤狀態，畫面跟匯出都只讀這份凍結快照，
         // 完全不會再去看即時班表——抽籤結果就是結果，不會因為之後排班異動而被「連帶看起來也變了」。
         const frozenSnapshot = {};
-        employees.forEach(emp => {
+        activeEmployees.forEach(emp => {
           if (emp.isSeparator) return;
           frozenSnapshot[emp.name] = {};
           daysInMonthArr.forEach(d => {
@@ -3522,10 +3608,12 @@ const App = () => {
         // 不會留下殘影，也不需要額外判斷誰被刪除、誰改名。
         if (fieldName === 'employees' && Array.isArray(nextVal)) {
           const entries = {};
+          const campuses = {};
           nextVal.forEach(emp => {
-            if (!emp.isSeparator && emp.id && emp.name) entries[emp.id] = emp.name;
+            if (!emp.isSeparator && emp.id && emp.name) { entries[emp.id] = emp.name; campuses[emp.id] = getCampus(emp); }
           });
-          tx.set(directoryDocRef, { entries, updatedAt: new Date().toISOString() });
+          // 💡 entries 維持「員編 -> 姓名」不變（含虎尾院區員工）；另外新增 campuses「員編 -> 院區」供其他系統使用
+          tx.set(directoryDocRef, { entries, campuses, updatedAt: new Date().toISOString() });
         }
       });
     } catch (error) {
@@ -3745,6 +3833,7 @@ const App = () => {
 const handleLoginAction = async (id, pwd) => {
   const emp = employees.find(e => e.id === id);
   if (!emp) { alert("無此員編權限。"); return; }
+  if (getCampus(emp) === '虎尾') { alert("此帳號屬於虎尾院區，目前未開放登入系統。"); return; }
 
   // 💡 修正核心：不再依賴「本地可能過期的 employees 陣列」判斷密碼，
   // 一律用 transaction 讀取雲端當下最新的那一筆資料來驗證/設定密碼，
@@ -3756,6 +3845,7 @@ const handleLoginAction = async (id, pwd) => {
       const latestEmployees = (snap.exists() && snap.data().employees) ? snap.data().employees : employees;
       const latestEmp = latestEmployees.find(e => e.id === id);
       if (!latestEmp) { loginResult = { ok: false, msg: "無此員編權限。" }; return; }
+      if (getCampus(latestEmp) === '虎尾') { loginResult = { ok: false, msg: "此帳號屬於虎尾院區，目前未開放登入系統。" }; return; }
 
       if (latestEmp.password === "" || latestEmp.password === pwd) {
         if (latestEmp.password === "" && pwd !== "") {
@@ -4111,7 +4201,7 @@ const handleParticipantApprove = (reqId) => {
     const exportScheduleCSV = (prefix = "") => {
     const rt = toROCTitle(currentMonth), fp = prefix ? `${prefix}_` : "";
     let csv = `\ufeff台大醫院雲林分院藥劑部 ${rt} 班表,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,\n`; csv += "員編,姓名," + daysInMonth.map(d => `${d.day}(${d.dayOfWeek})`).join(",") + "\n";
-    employees.forEach(emp => { if (emp.isSeparator) return; let row = [emp.id, emp.name]; daysInMonth.forEach(d => row.push(schedule[currentMonth]?.[emp.name]?.[d.day] || "-")); csv += row.join(",") + "\n"; });
+    activeEmployees.forEach(emp => { if (emp.isSeparator) return; let row = [emp.id, emp.name]; daysInMonth.forEach(d => row.push(schedule[currentMonth]?.[emp.name]?.[d.day] || "-")); csv += row.join(",") + "\n"; });
     const b = new Blob([csv], { type: 'text/csv;charset=utf-8' }), l = document.createElement("a"); l.href = URL.createObjectURL(b); l.download = `${fp}班表_${currentMonth}.csv`; l.click();
   };
 
@@ -4186,10 +4276,11 @@ const handleParticipantApprove = (reqId) => {
         // 這裡補上同一份「員編->姓名」摘要文件重建，確保還原後不會跟摘要文件對不起來
         {
           const entries = {};
+          const campuses = {};
           (backup.meta.employees || []).forEach(emp => {
-            if (!emp.isSeparator && emp.id && emp.name) entries[emp.id] = emp.name;
+            if (!emp.isSeparator && emp.id && emp.name) { entries[emp.id] = emp.name; campuses[emp.id] = getCampus(emp); }
           });
-          await setDoc(directoryDocRef, { entries, updatedAt: new Date().toISOString() });
+          await setDoc(directoryDocRef, { entries, campuses, updatedAt: new Date().toISOString() });
         }
 
         const monthlyData = deepClone(backup.monthlyData || {});
@@ -4246,15 +4337,15 @@ const handleParticipantApprove = (reqId) => {
             );
           }
           switch (currentPage) {
-            case 'home': return <ScheduleTableView currentMonth={currentMonth} employees={employees} schedule={schedule} cellColors={cellColors} daysInMonth={daysInMonth} swapRequests={swapRequests} currentPage={currentPage} currentUser={currentUser} />;
+            case 'home': return <ScheduleTableView currentMonth={currentMonth} employees={activeEmployees} schedule={schedule} cellColors={cellColors} daysInMonth={daysInMonth} swapRequests={swapRequests} currentPage={currentPage} currentUser={currentUser} />;
             case 'shiftTimes': return <ShiftTimeTableView shiftTimeTable={shiftTimeTable} updateShiftTimeTable={updateShiftTimeTable} isAdmin={isLoggedIn && currentUser?.role === '0'} />;
             case 'account': return <AccountManagementView employees={employees} updateEmployees={updateEmployees} setDeleteTarget={setDeleteTarget} onExportFullBackup={handleExportFullBackup} onImportFullBackup={handleImportFullBackup} />;
             case 'shifts': return <ShiftsManagementView shifts={shifts} updateShifts={updateShifts} holidays={holidays} updateHolidays={updateHolidays} setDeleteShiftTarget={setDeleteShiftTarget} personDayRules={personDayRules} updatePersonDayRules={updatePersonDayRules} />;
-            case 'swap': return <ScheduleTableView currentMonth={currentMonth} employees={employees} schedule={schedule} cellColors={cellColors} daysInMonth={daysInMonth} onCellClick={handleSwapApply} swapRequests={swapRequests} currentPage={currentPage} currentUser={currentUser} swapTarget={swapTarget} handleSwapBack={handleSwapBack} isCycleEnd={isCycleEnd}/>;
+            case 'swap': return <ScheduleTableView currentMonth={currentMonth} employees={activeEmployees} schedule={schedule} cellColors={cellColors} daysInMonth={daysInMonth} onCellClick={handleSwapApply} swapRequests={swapRequests} currentPage={currentPage} currentUser={currentUser} swapTarget={swapTarget} handleSwapBack={handleSwapBack} isCycleEnd={isCycleEnd}/>;
             case 'records': return <RecordsView currentUser={currentUser} swapRequests={swapRequests} onAction={handleRecordAction} onApprove={handleParticipantApprove} setRejectingReq={setRejectingReq} schedule={schedule} currentMonth={currentMonth} />;
-            case 'leave':  return  <PreLeaveView currentMonth={currentMonth} employees={employees} daysInMonth={daysInMonth} currentUser={currentUser} schedule={schedule} setSchedule={setSchedule} preLeaveData={preLeaveData} setPreLeaveData={setPreLeaveData} savePreLeaveMonth={savePreLeaveMonth} saveMetaPreLeave={saveMetaPreLeave} saveScheduleMonth={saveScheduleMonth} saveMonthDoc={saveMonthDoc} runLotteryTransaction={runLotteryTransaction} resetMonthDraw={resetMonthDraw} restorePreUnlockBackup={restorePreUnlockBackup} />;
-            case 'schedule': return <SchedulingView currentMonth={currentMonth} employees={employees} daysInMonth={daysInMonth} schedule={schedule} setSchedule={setSchedule} cellColors={cellColors} setCellColors={setCellColors} shifts={shifts} exportScheduleCSV={exportScheduleCSV} setCurrentPage={setCurrentPage} setIsDirty={setIsDirty} saveScheduleMonth={saveScheduleMonth} saveCellColorsMonth={saveCellColorsMonth} preLeaveData={preLeaveData} setPreLeaveData={setPreLeaveData} savePreLeaveMonth={savePreLeaveMonth} isAdmin={currentUser?.role === '0'} isMonthDrawn={(preLeaveData.drawnMonths || []).includes(currentMonth)} /> ;
-            case 'report': return <ManagementReportView currentMonth={currentMonth} employees={employees} schedule={schedule} personDayRules={personDayRules} holidays={holidays} shifts={shifts} cellColors={cellColors}/>;
+            case 'leave':  return  <PreLeaveView currentMonth={currentMonth} employees={activeEmployees} daysInMonth={daysInMonth} currentUser={currentUser} schedule={schedule} setSchedule={setSchedule} preLeaveData={preLeaveData} setPreLeaveData={setPreLeaveData} savePreLeaveMonth={savePreLeaveMonth} saveMetaPreLeave={saveMetaPreLeave} saveScheduleMonth={saveScheduleMonth} saveMonthDoc={saveMonthDoc} runLotteryTransaction={runLotteryTransaction} resetMonthDraw={resetMonthDraw} restorePreUnlockBackup={restorePreUnlockBackup} />;
+            case 'schedule': return <SchedulingView currentMonth={currentMonth} employees={activeEmployees} daysInMonth={daysInMonth} schedule={schedule} setSchedule={setSchedule} cellColors={cellColors} setCellColors={setCellColors} shifts={shifts} exportScheduleCSV={exportScheduleCSV} setCurrentPage={setCurrentPage} setIsDirty={setIsDirty} saveScheduleMonth={saveScheduleMonth} saveCellColorsMonth={saveCellColorsMonth} preLeaveData={preLeaveData} setPreLeaveData={setPreLeaveData} savePreLeaveMonth={savePreLeaveMonth} isAdmin={currentUser?.role === '0'} isMonthDrawn={(preLeaveData.drawnMonths || []).includes(currentMonth)} /> ;
+            case 'report': return <ManagementReportView currentMonth={currentMonth} employees={activeEmployees} schedule={schedule} personDayRules={personDayRules} holidays={holidays} shifts={shifts} cellColors={cellColors}/>;
             case 'login': {
               return <LoginPage employees={employees} onLogin={handleLoginAction} />;
             }
