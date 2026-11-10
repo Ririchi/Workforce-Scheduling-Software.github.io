@@ -4343,7 +4343,7 @@ const handleParticipantApprove = (reqId) => {
           }
           switch (currentPage) {
             case 'home': return <ScheduleTableView currentMonth={currentMonth} employees={activeEmployees} schedule={schedule} cellColors={cellColors} daysInMonth={daysInMonth} swapRequests={swapRequests} currentPage={currentPage} currentUser={currentUser} />;
-            case 'rotation': return <RotationView rotationDocRef={rotationDocRef} rotationLogColRef={rotationLogColRef} currentUser={currentUser} isAdmin={isLoggedIn && currentUser?.role === '0'} employees={employees} activeEmployees={activeEmployees} currentMonth={currentMonth} />;
+            case 'rotation': return <RotationView rotationDocRef={rotationDocRef} rotationLogColRef={rotationLogColRef} currentUser={currentUser} isAdmin={isLoggedIn && currentUser?.role === '0'} employees={employees} activeEmployees={activeEmployees} currentMonth={currentMonth} shiftTimeTable={shiftTimeTable} />;
             case 'shiftTimes': return <ShiftTimeTableView shiftTimeTable={shiftTimeTable} updateShiftTimeTable={updateShiftTimeTable} isAdmin={isLoggedIn && currentUser?.role === '0'} />;
             case 'account': return <AccountManagementView employees={employees} updateEmployees={updateEmployees} setDeleteTarget={setDeleteTarget} onExportFullBackup={handleExportFullBackup} onImportFullBackup={handleImportFullBackup} />;
             case 'shifts': return <ShiftsManagementView shifts={shifts} updateShifts={updateShifts} holidays={holidays} updateHolidays={updateHolidays} setDeleteShiftTarget={setDeleteShiftTarget} personDayRules={personDayRules} updatePersonDayRules={updatePersonDayRules} />;

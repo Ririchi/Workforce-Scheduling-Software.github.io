@@ -27,7 +27,10 @@ const compareMembers = (a, b) => {
   return String(a.empId).localeCompare(String(b.empId));
 };
 
-const RotationView = ({ rotationDocRef, rotationLogColRef, currentUser, isAdmin, employees, activeEmployees, currentMonth }) => {
+const NO_GROUP = '__none__';
+const UNGROUPED_TITLE = '未分類';
+
+const RotationView = ({ rotationDocRef, rotationLogColRef, currentUser, isAdmin, employees, activeEmployees, currentMonth, shiftTimeTable }) => {
   const [shifts, setShifts] = useState([]);
   const [notes, setNotes] = useState('');
   const [notesDraft, setNotesDraft] = useState('');
@@ -35,7 +38,8 @@ const RotationView = ({ rotationDocRef, rotationLogColRef, currentUser, isAdmin,
   const [loaded, setLoaded] = useState(false);
   const [search, setSearch] = useState('');
   const [dialog, setDialog] = useState(null); // { type, shiftId, empId }
-  const [form, setForm] = useState({ name: '', empId: '', ym: '', reason: '' });
+  const [form, setForm] = useState({ name: '', group: '', picked: [], q: '', ym: '', reason: '' });
+  const [expanded, setExpanded] = useState(new Set()); // 展開中的分類
   const [busy, setBusy] = useState(false);
   const [showLog, setShowLog] = useState(false);
   const [logs, setLogs] = useState([]);
@@ -77,6 +81,19 @@ const RotationView = ({ rotationDocRef, rotationLogColRef, currentUser, isAdmin,
   const activeIds = useMemo(() => new Set((activeEmployees || []).filter(e => !e.isSeparator).map(e => String(e.id))), [activeEmployees]);
   const nameOf = (m) => empById[String(m.empId)]?.name || m.name || m.empId;
 
+  // ---- 班別分類：沿用「各班別上班時段」的分類；可手動指定，沒指定就依班別名稱自動對應 ----
+  const sectionTitles = useMemo(() => (shiftTimeTable || []).map(sec => sec.title).filter(Boolean), [shiftTimeTable]);
+  const autoGroupOf = (name) => {
+    for (const sec of (shiftTimeTable || [])) {
+      if ((sec.rows || []).some(r => String(r.name || '').split('/').map(x => x.trim()).includes(name))) return sec.title;
+    }
+    return '';
+  };
+  const groupOf = (shift) => {
+    if (shift.group === NO_GROUP) return UNGROUPED_TITLE;
+    return shift.group || autoGroupOf(shift.name) || UNGROUPED_TITLE;
+  };
+
   // ---- 共用寫入：Transaction + 異動紀錄 ----
   const commit = async (mutator, logEntry) => {
     if (!isAdmin) { alert('只有管理員可以編輯班別輪序。'); return false; }
@@ -88,7 +105,9 @@ const RotationView = ({ rotationDocRef, rotationLogColRef, currentUser, isAdmin,
         const next = mutator({ shifts: deepClone(data.shifts || []), notes: data.notes || '' });
         const now = new Date().toISOString();
         tx.set(rotationDocRef, { shifts: next.shifts, notes: next.notes, updatedAt: now });
-        tx.set(doc(rotationLogColRef), { ...logEntry, at: now, by: currentUser?.name || '', byId: currentUser?.id || '' });
+        (Array.isArray(logEntry) ? logEntry : [logEntry]).forEach(entry => {
+          tx.set(doc(rotationLogColRef), { ...entry, at: now, by: currentUser?.name || '', byId: currentUser?.id || '' });
+        });
       });
       return true;
     } catch (err) {
@@ -107,21 +126,24 @@ const RotationView = ({ rotationDocRef, rotationLogColRef, currentUser, isAdmin,
   };
 
   // ---- 各項操作 ----
-  const addShift = (name) => commit(({ shifts: list, notes: n }) => {
+  const addShift = (name, group) => commit(({ shifts: list, notes: n }) => {
     if (list.some(s => s.name === name)) throw new Error(`已經有「${name}」這個班別了。`);
-    list.push({ id: newId(), name, members: [] });
+    list.push({ id: newId(), name, group: group || '', members: [] });
     return { shifts: list, notes: n };
   }, { action: '新增班別', shiftName: name });
 
-  const renameShift = (shiftId, name, reason) => {
-    let oldName = '';
+  const editShift = (shiftId, name, group, reason) => {
+    const old = shifts.find(s => s.id === shiftId);
+    const changes = [];
+    if (old && old.name !== name) changes.push(`名稱 ${old.name} → ${name}`);
+    if (old && (old.group || '') !== (group || '')) changes.push('分類已調整');
     return commit(({ shifts: list, notes: n }) => {
       const s = findShift(list, shiftId);
       if (list.some(x => x.id !== shiftId && x.name === name)) throw new Error(`已經有「${name}」這個班別了。`);
-      oldName = s.name;
       s.name = name;
+      s.group = group || '';
       return { shifts: list, notes: n };
-    }, { action: '修改班別名稱', shiftName: name, detail: `${shifts.find(s => s.id === shiftId)?.name || ''} → ${name}`, reason: reason || '' });
+    }, { action: '修改班別', shiftName: name, detail: changes.join('、') || '無變更', reason: reason || '' });
   };
 
   const deleteShift = (shiftId, reason) => {
@@ -132,15 +154,16 @@ const RotationView = ({ rotationDocRef, rotationLogColRef, currentUser, isAdmin,
     }, { action: '刪除班別', shiftName, reason });
   };
 
-  const addMember = (shiftId, empId, ym, reason) => {
+  const addMembers = (shiftId, empIds, ym, reason) => {
     const shift = shifts.find(s => s.id === shiftId);
-    const emp = empById[String(empId)];
     return commit(({ shifts: list, notes: n }) => {
       const s = findShift(list, shiftId);
-      if (s.members.some(m => String(m.empId) === String(empId))) throw new Error('此人員已在這個班別的輪序名單中。');
-      s.members.push({ empId: String(empId), name: emp?.name || '', lastYm: ym || '' });
+      empIds.forEach(empId => {
+        if (s.members.some(m => String(m.empId) === String(empId))) throw new Error(`「${empById[String(empId)]?.name || empId}」已在這個班別的輪序名單中，請重新整理後再試。`);
+        s.members.push({ empId: String(empId), name: empById[String(empId)]?.name || '', lastYm: ym || '' });
+      });
       return { shifts: list, notes: n };
-    }, { action: '新增人員', shiftName: shift?.name || '', empId: String(empId), empName: emp?.name || '', to: ym || '', reason });
+    }, empIds.map(empId => ({ action: '新增人員', shiftName: shift?.name || '', empId: String(empId), empName: empById[String(empId)]?.name || '', to: ym || '', reason })));
   };
 
   const removeMember = (shiftId, empId, reason) => {
@@ -190,7 +213,7 @@ const RotationView = ({ rotationDocRef, rotationLogColRef, currentUser, isAdmin,
   const openDialog = (type, shiftId = '', empId = '') => {
     const shift = shifts.find(s => s.id === shiftId);
     const member = shift?.members.find(m => String(m.empId) === String(empId));
-    setForm({ name: type === 'renameShift' ? (shift?.name || '') : '', empId: '', ym: type === 'editYm' ? (member?.lastYm || '') : '', reason: '' });
+    setForm({ name: type === 'editShift' ? (shift?.name || '') : '', group: type === 'editShift' ? (shift?.group || '') : '', picked: [], q: '', ym: type === 'editYm' ? (member?.lastYm || '') : '', reason: '' });
     setDialog({ type, shiftId, empId });
   };
   const closeDialog = () => setDialog(null);
@@ -205,17 +228,17 @@ const RotationView = ({ rotationDocRef, rotationLogColRef, currentUser, isAdmin,
     switch (dialog.type) {
       case 'addShift':
         if (!name) return alert('請輸入班別名稱。');
-        ok = await addShift(name); break;
-      case 'renameShift':
+        ok = await addShift(name, form.group); break;
+      case 'editShift':
         if (!name) return alert('請輸入班別名稱。');
-        ok = await renameShift(dialog.shiftId, name, reason); break;
+        ok = await editShift(dialog.shiftId, name, form.group, reason); break;
       case 'deleteShift':
         if (!reason) return alert('刪除班別請填寫原因。');
         ok = await deleteShift(dialog.shiftId, reason); break;
       case 'addMember':
-        if (!form.empId) return alert('請選擇要新增的人員。');
+        if (form.picked.length === 0) return alert('請勾選要新增的人員。');
         if (!reason) return alert('新增人員請填寫原因。');
-        ok = await addMember(dialog.shiftId, form.empId, form.ym, reason); break;
+        ok = await addMembers(dialog.shiftId, form.picked, form.ym, reason); break;
       case 'removeMember':
         if (!reason) return alert('移除人員請填寫原因。');
         ok = await removeMember(dialog.shiftId, dialog.empId, reason); break;
@@ -229,10 +252,15 @@ const RotationView = ({ rotationDocRef, rotationLogColRef, currentUser, isAdmin,
   const addableEmployees = useMemo(() => {
     if (!dialog || dialog.type !== 'addMember' || !dialogShift) return [];
     const taken = new Set(dialogShift.members.map(m => String(m.empId)));
+    const q = (form.q || '').trim().toLowerCase();
+    // 只列「一般藥師(1)」且斗六院區（activeEmployees 已排除虎尾）；姓名含亂碼（資料編碼錯誤）者不列入
     return (activeEmployees || [])
-      .filter(e => !e.isSeparator && e.id && !taken.has(String(e.id)))
+      .filter(e => !e.isSeparator && e.id && String(e.role) === '1' && !String(e.name || '').includes('\uFFFD') && !taken.has(String(e.id)))
+      .filter(e => !q || String(e.name).toLowerCase().includes(q) || String(e.id).toLowerCase().includes(q))
       .sort((a, b) => String(a.id).localeCompare(String(b.id)));
-  }, [dialog, dialogShift, activeEmployees]);
+  }, [dialog, dialogShift, activeEmployees, form.q]);
+
+  const togglePick = (id) => setForm(f => ({ ...f, picked: f.picked.includes(id) ? f.picked.filter(x => x !== id) : [...f.picked, id] }));
 
   // ---- 搜尋篩選 ----
   const keyword = search.trim().toLowerCase();
@@ -245,10 +273,31 @@ const RotationView = ({ rotationDocRef, rotationLogColRef, currentUser, isAdmin,
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [shifts, keyword, empById]);
 
+  // 依分類整理（順序：各班別上班時段的分類順序 → 其他分類 → 未分類）
+  const groupedShifts = useMemo(() => {
+    const map = new Map();
+    sectionTitles.forEach(t => map.set(t, []));
+    visibleShifts.forEach(sh => {
+      const g = groupOf(sh);
+      if (!map.has(g)) map.set(g, []);
+      map.get(g).push(sh);
+    });
+    const ungrouped = map.get(UNGROUPED_TITLE);
+    map.delete(UNGROUPED_TITLE);
+    const arr = [...map.entries()].filter(([, list]) => list.length > 0);
+    if (ungrouped && ungrouped.length > 0) arr.push([UNGROUPED_TITLE, ungrouped]);
+    return arr;
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [visibleShifts, sectionTitles, shiftTimeTable]);
+
+  const toggleGroup = (title) => setExpanded(prev => { const n = new Set(prev); if (n.has(title)) n.delete(title); else n.add(title); return n; });
+  const allTitles = groupedShifts.map(([t]) => t);
+  const isGroupOpen = (title) => !!keyword || expanded.has(title); // 搜尋時自動展開
+
   const visibleLogs = useMemo(() => logShift ? logs.filter(l => l.shiftName === logShift) : logs, [logs, logShift]);
 
   const dialogTitle = {
-    addShift: '新增班別', renameShift: '修改班別名稱', deleteShift: '刪除班別',
+    addShift: '新增班別', editShift: '編輯班別', deleteShift: '刪除班別',
     addMember: '新增輪序人員', removeMember: '移除輪序人員', editYm: '修改上次輪序年月'
   }[dialog?.type] || '';
 
@@ -305,57 +354,78 @@ const RotationView = ({ rotationDocRef, rotationLogColRef, currentUser, isAdmin,
           )}
         </div>
 
-        {/* 班別卡片 */}
+        {/* 班別卡片（依「各班別上班時段」分類，可收合） */}
         {!loaded ? (
           <div className="text-center text-gray-400 font-bold py-10">讀取中...</div>
         ) : visibleShifts.length === 0 ? (
           <div className="text-center text-gray-300 italic font-bold py-10">{shifts.length === 0 ? (isAdmin ? '尚未建立任何班別，請按「新增班別」開始建立。' : '尚未建立任何班別。') : '沒有符合搜尋條件的班別。'}</div>
         ) : (
-          <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-4">
-            {visibleShifts.map(shift => {
-              const sorted = [...shift.members].sort(compareMembers);
+          <div className="space-y-3">
+            <div className="flex justify-end gap-2">
+              <button onClick={() => setExpanded(new Set(allTitles))} className="text-[11px] font-black text-gray-500 hover:text-blue-600">全部展開</button>
+              <span className="text-gray-300">|</span>
+              <button onClick={() => setExpanded(new Set())} className="text-[11px] font-black text-gray-500 hover:text-blue-600">全部收合</button>
+            </div>
+            {groupedShifts.map(([title, list]) => {
+              const open = isGroupOpen(title);
               return (
-                <div key={shift.id} className="bg-white rounded-2xl shadow-sm border overflow-hidden flex flex-col">
-                  <div className="px-4 py-2.5 bg-amber-50 border-b flex items-center justify-between">
-                    <div className="font-black text-gray-800">{shift.name} <span className="text-[11px] font-bold text-gray-400 ml-1">{shift.members.length} 人</span></div>
-                    {isAdmin && (
-                      <div className="flex gap-1">
-                        <button title="修改班別名稱" onClick={() => openDialog('renameShift', shift.id)} className="p-1.5 rounded-lg text-gray-400 hover:bg-white hover:text-blue-600"><Pencil size={14} /></button>
-                        <button title="刪除班別" onClick={() => openDialog('deleteShift', shift.id)} className="p-1.5 rounded-lg text-gray-400 hover:bg-white hover:text-red-600"><Trash2 size={14} /></button>
-                      </div>
-                    )}
-                  </div>
-                  <div className="flex-grow divide-y">
-                    {sorted.length === 0 && <div className="p-4 text-center text-gray-300 italic text-xs font-bold">尚無輪序人員</div>}
-                    {sorted.map((m, idx) => {
-                      const isNext = idx === 0;
-                      const inActive = activeIds.has(String(m.empId));
-                      const hit = keyword && (nameOf(m).toLowerCase().includes(keyword) || String(m.empId).toLowerCase().includes(keyword));
-                      return (
-                        <div key={m.empId} className={`px-3 py-2 flex items-center gap-2 ${isNext ? 'bg-yellow-50' : ''} ${hit ? 'ring-2 ring-inset ring-blue-300' : ''}`}>
-                          <span className={`w-6 h-6 flex-none rounded-full text-[11px] font-black flex items-center justify-center ${isNext ? 'bg-amber-500 text-white' : 'bg-gray-100 text-gray-500'}`}>{idx + 1}</span>
-                          <div className="flex-grow min-w-0">
-                            <div className="text-sm font-bold text-gray-800 flex items-center gap-1 flex-wrap">
-                              {nameOf(m)}
-                              {isNext && <span className="text-[10px] bg-amber-500 text-white px-1.5 py-0.5 rounded-full font-black">下一位</span>}
-                              {!inActive && <span className="text-[10px] bg-rose-100 text-rose-600 px-1.5 py-0.5 rounded-full font-black">不在斗六名冊</span>}
+                <div key={title} className="bg-white rounded-2xl shadow-sm border overflow-hidden">
+                  <button onClick={() => toggleGroup(title)} className="w-full px-4 py-3 flex items-center justify-between hover:bg-gray-50">
+                    <span className="font-black text-teal-700 text-sm">{title} <span className="text-[11px] font-bold text-gray-400 ml-1">（{list.length} 個班別）</span></span>
+                    <span className="text-gray-400 text-xs font-black">{open ? '▲' : '▼'}</span>
+                  </button>
+                  {open && (
+                    <div className="p-3 border-t bg-gray-50 grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-3">
+                      {list.map(shift => {
+                        const sorted = [...shift.members].sort(compareMembers);
+                        return (
+                          <div key={shift.id} className="bg-white rounded-xl shadow-sm border overflow-hidden flex flex-col">
+                            <div className="px-3 py-2 bg-amber-50 border-b flex items-center justify-between">
+                              <div className="font-black text-gray-800 text-sm">{shift.name} <span className="text-[10px] font-bold text-gray-400 ml-1">{shift.members.length} 人</span></div>
+                              {isAdmin && (
+                                <div className="flex gap-0.5">
+                                  <button title="編輯班別（名稱、分類）" onClick={() => openDialog('editShift', shift.id)} className="p-1 rounded-lg text-gray-400 hover:bg-white hover:text-blue-600"><Pencil size={13} /></button>
+                                  <button title="刪除班別" onClick={() => openDialog('deleteShift', shift.id)} className="p-1 rounded-lg text-gray-400 hover:bg-white hover:text-red-600"><Trash2 size={13} /></button>
+                                </div>
+                              )}
                             </div>
-                            <div className="text-[10px] text-gray-400 font-mono">{m.empId}</div>
+                            {/* 固定顯示前 4 位待輪值人員，其餘在框內滑動查看 */}
+                            <div className="divide-y overflow-y-auto" style={{ maxHeight: '208px' }}>
+                              {sorted.length === 0 && <div className="p-4 text-center text-gray-300 italic text-xs font-bold">尚無輪序人員</div>}
+                              {sorted.map((m, idx) => {
+                                const isNext = idx === 0;
+                                const inActive = activeIds.has(String(m.empId));
+                                const hit = keyword && (nameOf(m).toLowerCase().includes(keyword) || String(m.empId).toLowerCase().includes(keyword));
+                                return (
+                                  <div key={m.empId} style={{ minHeight: '52px' }} className={`px-2 py-1.5 flex items-center gap-1.5 ${isNext ? 'bg-yellow-50' : ''} ${hit ? 'ring-2 ring-inset ring-blue-300' : ''}`}>
+                                    <span className={`w-5 h-5 flex-none rounded-full text-[10px] font-black flex items-center justify-center ${isNext ? 'bg-amber-500 text-white' : 'bg-gray-100 text-gray-500'}`}>{idx + 1}</span>
+                                    <div className="flex-grow min-w-0">
+                                      <div className="text-[13px] font-bold text-gray-800 flex items-center gap-1 flex-wrap leading-tight">
+                                        {nameOf(m)}
+                                        {isNext && <span className="text-[9px] bg-amber-500 text-white px-1 py-0.5 rounded-full font-black">下一位</span>}
+                                        {!inActive && <span className="text-[9px] bg-rose-100 text-rose-600 px-1 py-0.5 rounded-full font-black">不在斗六名冊</span>}
+                                      </div>
+                                      <div className="text-[10px] text-gray-400 font-mono">{m.empId}</div>
+                                    </div>
+                                    <div className={`text-[11px] font-mono font-bold flex-none ${m.lastYm ? 'text-gray-600' : 'text-gray-300'}`}>{fmtYm(m.lastYm)}</div>
+                                    {isAdmin && (
+                                      <div className="flex flex-none items-center">
+                                        <button disabled={busy} title={`本月已輪（設為 ${currentMonth}）`} onClick={() => markDone(shift.id, m)} className="p-1 rounded-lg text-gray-400 hover:bg-emerald-50 hover:text-emerald-600 disabled:opacity-40"><CheckCircle2 size={14} /></button>
+                                        <button title="修改上次輪序年月" onClick={() => openDialog('editYm', shift.id, m.empId)} className="p-1 rounded-lg text-gray-400 hover:bg-blue-50 hover:text-blue-600"><Pencil size={13} /></button>
+                                        <button title="移除人員" onClick={() => openDialog('removeMember', shift.id, m.empId)} className="p-1 rounded-lg text-gray-400 hover:bg-red-50 hover:text-red-600"><X size={14} /></button>
+                                      </div>
+                                    )}
+                                  </div>
+                                );
+                              })}
+                            </div>
+                            {isAdmin && (
+                              <button onClick={() => openDialog('addMember', shift.id)} className="m-2 py-1 rounded-lg border border-dashed border-gray-300 text-[11px] font-black text-gray-400 hover:border-amber-400 hover:text-amber-600 flex items-center justify-center gap-1"><UserPlus size={13} /> 新增人員</button>
+                            )}
                           </div>
-                          <div className={`text-xs font-mono font-bold flex-none ${m.lastYm ? 'text-gray-600' : 'text-gray-300'}`}>{fmtYm(m.lastYm)}</div>
-                          {isAdmin && (
-                            <div className="flex flex-none items-center gap-0.5">
-                              <button disabled={busy} title={`本月已輪（設為 ${currentMonth}）`} onClick={() => markDone(shift.id, m)} className="p-1.5 rounded-lg text-gray-400 hover:bg-emerald-50 hover:text-emerald-600 disabled:opacity-40"><CheckCircle2 size={15} /></button>
-                              <button title="修改上次輪序年月" onClick={() => openDialog('editYm', shift.id, m.empId)} className="p-1.5 rounded-lg text-gray-400 hover:bg-blue-50 hover:text-blue-600"><Pencil size={14} /></button>
-                              <button title="移除人員" onClick={() => openDialog('removeMember', shift.id, m.empId)} className="p-1.5 rounded-lg text-gray-400 hover:bg-red-50 hover:text-red-600"><X size={15} /></button>
-                            </div>
-                          )}
-                        </div>
-                      );
-                    })}
-                  </div>
-                  {isAdmin && (
-                    <button onClick={() => openDialog('addMember', shift.id)} className="m-3 mt-2 py-1.5 rounded-xl border border-dashed border-gray-300 text-xs font-black text-gray-400 hover:border-amber-400 hover:text-amber-600 flex items-center justify-center gap-1"><UserPlus size={14} /> 新增人員</button>
+                        );
+                      })}
+                    </div>
                   )}
                 </div>
               );
@@ -411,23 +481,51 @@ const RotationView = ({ rotationDocRef, rotationLogColRef, currentUser, isAdmin,
       {/* 對話框 */}
       {dialog && (
         <div className="fixed inset-0 bg-black/40 z-[100] flex items-center justify-center p-4" onClick={closeDialog}>
-          <div className="bg-white rounded-2xl shadow-xl w-full max-w-md p-5 space-y-3" onClick={e => e.stopPropagation()}>
+          <div className="bg-white rounded-2xl shadow-xl w-full max-w-md max-h-[90vh] overflow-y-auto p-5 space-y-3" onClick={e => e.stopPropagation()}>
             <div className="flex items-center justify-between">
               <h3 className="font-black text-gray-800">{dialogTitle}{dialogShift ? `｜${dialogShift.name}` : ''}</h3>
               <button onClick={closeDialog} className="p-1 text-gray-400 hover:text-gray-700"><X size={18} /></button>
             </div>
 
-            {(dialog.type === 'addShift' || dialog.type === 'renameShift') && (
-              <input autoFocus value={form.name} onChange={e => setForm({ ...form, name: e.target.value })} placeholder="班別名稱（例如 A1、夜診）" className="w-full border rounded-xl p-2.5 text-sm outline-none focus:border-amber-400" />
+            {(dialog.type === 'addShift' || dialog.type === 'editShift') && (
+              <>
+                <input autoFocus value={form.name} onChange={e => setForm({ ...form, name: e.target.value })} placeholder="班別名稱（例如 A1、夜診）" className="w-full border rounded-xl p-2.5 text-sm outline-none focus:border-amber-400" />
+                <label className="block text-[11px] font-bold text-gray-500">分類（沿用「各班別上班時段」的分類）
+                  <select value={form.group} onChange={e => setForm({ ...form, group: e.target.value })} className="mt-1 w-full border rounded-xl p-2.5 text-sm bg-white font-bold">
+                    <option value="">自動判斷（依班別名稱對應上班時段）{form.name.trim() && autoGroupOf(form.name.trim()) ? `→ ${autoGroupOf(form.name.trim())}` : ''}</option>
+                    {sectionTitles.map(t => <option key={t} value={t}>{t}</option>)}
+                    <option value={NO_GROUP}>未分類</option>
+                  </select>
+                </label>
+              </>
             )}
 
             {dialog.type === 'addMember' && (
               <>
-                <select value={form.empId} onChange={e => setForm({ ...form, empId: e.target.value })} className="w-full border rounded-xl p-2.5 text-sm bg-white font-bold">
-                  <option value="">請選擇人員（僅斗六院區）</option>
-                  {addableEmployees.map(e => <option key={e.id} value={e.id}>{e.id}　{e.name}</option>)}
-                </select>
-                <label className="block text-[11px] font-bold text-gray-500">上次輪序年月（可留空＝從未輪過）
+                <div className="flex items-center gap-2">
+                  <div className="relative flex-grow">
+                    <Search size={14} className="absolute left-2.5 top-1/2 -translate-y-1/2 text-gray-400" />
+                    <input value={form.q} onChange={e => setForm({ ...form, q: e.target.value })} placeholder="搜尋姓名或員編" className="w-full pl-8 pr-3 py-2 border rounded-xl text-sm outline-none focus:border-amber-400" />
+                  </div>
+                  <button type="button" onClick={() => setForm(f => ({ ...f, picked: [...new Set([...f.picked, ...addableEmployees.map(e => String(e.id))])] }))} className="text-[11px] font-black text-blue-600 whitespace-nowrap">全選</button>
+                  <button type="button" onClick={() => setForm(f => ({ ...f, picked: [] }))} className="text-[11px] font-black text-gray-400 whitespace-nowrap">清除</button>
+                </div>
+                <div className="border rounded-xl divide-y overflow-y-auto" style={{ maxHeight: '240px' }}>
+                  {addableEmployees.length === 0 && <div className="p-4 text-center text-gray-300 italic text-xs font-bold">沒有可新增的人員（僅列出斗六院區、一般藥師）</div>}
+                  {addableEmployees.map(e => {
+                    const id = String(e.id);
+                    const checked = form.picked.includes(id);
+                    return (
+                      <label key={id} className={`flex items-center gap-2 px-3 py-2 cursor-pointer text-sm ${checked ? 'bg-amber-50' : 'hover:bg-gray-50'}`}>
+                        <input type="checkbox" checked={checked} onChange={() => togglePick(id)} className="w-4 h-4 accent-amber-500" />
+                        <span className="font-bold text-gray-800">{e.name}</span>
+                        <span className="text-[11px] text-gray-400 font-mono">{id}</span>
+                      </label>
+                    );
+                  })}
+                </div>
+                <div className="text-[11px] font-bold text-gray-500">已勾選 {form.picked.length} 人（僅列出斗六院區、一般藥師）</div>
+                <label className="block text-[11px] font-bold text-gray-500">上次輪序年月（套用到全部勾選人員，可留空＝從未輪過）
                   <input type="month" value={form.ym} onChange={e => setForm({ ...form, ym: e.target.value })} className="mt-1 w-full border rounded-xl p-2.5 text-sm outline-none focus:border-amber-400" />
                 </label>
               </>
