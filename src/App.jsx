@@ -6,8 +6,9 @@ import {
   Home, UserCog, CalendarRange, ArrowLeftRight, Clock, LayoutGrid, Download, Upload, LogIn, LogOut,
   GripVertical, Plus, Trash2, Save, UserPlus, AlertCircle, Calendar as CalendarIcon, CheckCircle2,
   XCircle, Undo2, Redo2, Copy, FileText, SeparatorHorizontal, Info, ChevronLeft, ChevronRight, PaintBucket,
-  Eye, EyeOff, ShieldCheck, ShieldAlert, BarChart3, History, Search, Check, X, ClipboardList, MessageSquare, User, Circle, Settings, Dice5, Lock, TrendingUp, KeyRound as ResetPasswordIcon, Link as LinkIcon, ChevronDown, ChevronUp
+  RefreshCcw, Eye, EyeOff, ShieldCheck, ShieldAlert, BarChart3, History, Search, Check, X, ClipboardList, MessageSquare, User, Circle, Settings, Dice5, Lock, TrendingUp, KeyRound as ResetPasswordIcon, Link as LinkIcon, ChevronDown, ChevronUp
 } from 'lucide-react';
+import RotationView from './RotationView.jsx';
 
 // --- 常數定義與初始資料 ---
 // 版本記錄：V1.9 - 修正多人並發資料覆蓋問題、Firestore 依月份分文件儲存、員工自助改密碼
@@ -453,6 +454,7 @@ const Header = ({ currentMonth, setCurrentMonth, currentPage, handlePageChange, 
           <NavButton id="swap" label="換班" icon={ArrowLeftRight} colorClass="bg-cyan-200" active={currentPage==='swap'} onClick={handlePageChange} />
           <NavButton id="records" label="紀錄" icon={History} colorClass="bg-indigo-200" active={currentPage==='records'} onClick={handlePageChange} hasDot={hasPending} />
           <NavButton id="leave" label="預假" icon={Clock} colorClass="bg-orange-200" active={currentPage==='leave'} onClick={handlePageChange} />
+          <NavButton id="rotation" label="班別輪序" icon={RefreshCcw} colorClass="bg-amber-200" active={currentPage==='rotation'} onClick={handlePageChange} />
           {isLoggedIn && isAdmin && (
             <>
               <NavButton id="schedule" label="排班" icon={LayoutGrid} colorClass="bg-purple-200" active={currentPage==='schedule'} onClick={handlePageChange} />
@@ -3271,6 +3273,9 @@ const SchedulingView = ({ currentMonth, employees, daysInMonth, schedule, setSch
 // =====================================================================================
 const mainDocRef = doc(db, 'artifacts', appId, 'public', 'data', 'roster', 'main');
 const monthlyColRef = collection(mainDocRef, 'monthlyData');
+// 💡 班別輪序：roster/rotation（班別、輪序人員、順序說明）＋ rotationLog 子集合（異動紀錄）
+const rotationDocRef = doc(db, 'artifacts', appId, 'public', 'data', 'roster', 'rotation');
+const rotationLogColRef = collection(rotationDocRef, 'rotationLog');
 const getMonthDocRef = (monthKey) => doc(monthlyColRef, monthKey);
 // 💡 給其他系統（例如分類系統）查詢「員編 -> 姓名」用的公開摘要文件，完全不含密碼等敏感資料。
 // 路徑跟 mainDocRef 同一層，appId 會跟著測試/正式環境自動切換，測試時不會動到正式資料。
@@ -3821,12 +3826,12 @@ const App = () => {
 
   const handlePageChange = (p) => {
     if (currentPage === 'schedule' && isDirty) { setTargetPage(p); setShowExitConfirm(true); return; }
-    const res = ['swap', 'records', 'schedule', 'account', 'shifts', 'leave', 'report'];
+    const res = ['swap', 'records', 'schedule', 'account', 'shifts', 'leave', 'report', 'rotation'];
     if (res.includes(p) && !isLoggedIn) { setPendingPage(p); setCurrentPage('login'); } else setCurrentPage(p);
   };
 
   const confirmExit = () => { setIsDirty(false); setShowExitConfirm(false); const p = targetPage; setTargetPage(null);
-    const res = ['swap', 'records', 'schedule', 'account', 'shifts', 'leave', 'report'];
+    const res = ['swap', 'records', 'schedule', 'account', 'shifts', 'leave', 'report', 'rotation'];
     if (res.includes(p) && !isLoggedIn) { setPendingPage(p); setCurrentPage('login'); } else setCurrentPage(p);
   };
 
@@ -4338,6 +4343,7 @@ const handleParticipantApprove = (reqId) => {
           }
           switch (currentPage) {
             case 'home': return <ScheduleTableView currentMonth={currentMonth} employees={activeEmployees} schedule={schedule} cellColors={cellColors} daysInMonth={daysInMonth} swapRequests={swapRequests} currentPage={currentPage} currentUser={currentUser} />;
+            case 'rotation': return <RotationView rotationDocRef={rotationDocRef} rotationLogColRef={rotationLogColRef} currentUser={currentUser} isAdmin={isLoggedIn && currentUser?.role === '0'} employees={employees} activeEmployees={activeEmployees} currentMonth={currentMonth} />;
             case 'shiftTimes': return <ShiftTimeTableView shiftTimeTable={shiftTimeTable} updateShiftTimeTable={updateShiftTimeTable} isAdmin={isLoggedIn && currentUser?.role === '0'} />;
             case 'account': return <AccountManagementView employees={employees} updateEmployees={updateEmployees} setDeleteTarget={setDeleteTarget} onExportFullBackup={handleExportFullBackup} onImportFullBackup={handleImportFullBackup} />;
             case 'shifts': return <ShiftsManagementView shifts={shifts} updateShifts={updateShifts} holidays={holidays} updateHolidays={updateHolidays} setDeleteShiftTarget={setDeleteShiftTarget} personDayRules={personDayRules} updatePersonDayRules={updatePersonDayRules} />;
