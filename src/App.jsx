@@ -3276,6 +3276,7 @@ const monthlyColRef = collection(mainDocRef, 'monthlyData');
 // 💡 班別輪序：roster/rotation（班別、輪序人員、順序說明）＋ rotationLog 子集合（異動紀錄）
 const rotationDocRef = doc(db, 'artifacts', appId, 'public', 'data', 'roster', 'rotation');
 const rotationLogColRef = collection(rotationDocRef, 'rotationLog');
+const rotationDraftRef = doc(db, 'artifacts', appId, 'public', 'data', 'roster', 'rotationDraft');
 const getMonthDocRef = (monthKey) => doc(monthlyColRef, monthKey);
 // 💡 給其他系統（例如分類系統）查詢「員編 -> 姓名」用的公開摘要文件，完全不含密碼等敏感資料。
 // 路徑跟 mainDocRef 同一層，appId 會跟著測試/正式環境自動切換，測試時不會動到正式資料。
@@ -3321,6 +3322,7 @@ const App = () => {
   const [holidays, setHolidays] = useState({ "2026-05-01": "勞動節" });
   const [personDayRules, setPersonDayRules] = useState(INITIAL_PERSON_DAY_RULES);
   const [schedule, setSchedule] = useState({});
+  const [rotationDirty, setRotationDirty] = useState(false); // 班別輪序有尚未暫存／發布的變更
   const [cellColors, setCellColors] = useState({});
   // 💡 換班紀錄改為「按月份分組」儲存 ({ '2026-06': [...], '2026-07': [...] })，
   // 對外仍用 swapRequests 這個攤平後的陣列，元件端完全不用改
@@ -3825,6 +3827,10 @@ const App = () => {
   }, [currentMonth, holidays]);
 
   const handlePageChange = (p) => {
+    if (currentPage === 'rotation' && rotationDirty && p !== 'rotation') {
+      if (!window.confirm('班別輪序有尚未「暫存」或「儲存（公布）」的變更，離開後會遺失。\n確定要離開嗎？')) return;
+      setRotationDirty(false);
+    }
     if (currentPage === 'schedule' && isDirty) { setTargetPage(p); setShowExitConfirm(true); return; }
     const res = ['swap', 'records', 'schedule', 'account', 'shifts', 'leave', 'report', 'rotation'];
     if (res.includes(p) && !isLoggedIn) { setPendingPage(p); setCurrentPage('login'); } else setCurrentPage(p);
@@ -4343,7 +4349,7 @@ const handleParticipantApprove = (reqId) => {
           }
           switch (currentPage) {
             case 'home': return <ScheduleTableView currentMonth={currentMonth} employees={activeEmployees} schedule={schedule} cellColors={cellColors} daysInMonth={daysInMonth} swapRequests={swapRequests} currentPage={currentPage} currentUser={currentUser} />;
-            case 'rotation': return <RotationView rotationDocRef={rotationDocRef} rotationLogColRef={rotationLogColRef} currentUser={currentUser} isAdmin={isLoggedIn && currentUser?.role === '0'} employees={employees} activeEmployees={activeEmployees} currentMonth={currentMonth} shiftTimeTable={shiftTimeTable} />;
+            case 'rotation': return <RotationView rotationDocRef={rotationDocRef} rotationLogColRef={rotationLogColRef} rotationDraftRef={rotationDraftRef} schedule={schedule} setRotationDirty={setRotationDirty} currentUser={currentUser} isAdmin={isLoggedIn && currentUser?.role === '0'} employees={employees} activeEmployees={activeEmployees} currentMonth={currentMonth} shiftTimeTable={shiftTimeTable} />;
             case 'shiftTimes': return <ShiftTimeTableView shiftTimeTable={shiftTimeTable} updateShiftTimeTable={updateShiftTimeTable} isAdmin={isLoggedIn && currentUser?.role === '0'} />;
             case 'account': return <AccountManagementView employees={employees} updateEmployees={updateEmployees} setDeleteTarget={setDeleteTarget} onExportFullBackup={handleExportFullBackup} onImportFullBackup={handleImportFullBackup} />;
             case 'shifts': return <ShiftsManagementView shifts={shifts} updateShifts={updateShifts} holidays={holidays} updateHolidays={updateHolidays} setDeleteShiftTarget={setDeleteShiftTarget} personDayRules={personDayRules} updatePersonDayRules={updatePersonDayRules} />;
