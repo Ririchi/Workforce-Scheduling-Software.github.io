@@ -1,5 +1,5 @@
 import React, { useMemo, useState } from 'react';
-import { ChevronUp, ChevronDown, X, UserPlus, Moon, Pencil, Check } from 'lucide-react';
+import { ChevronUp, ChevronDown, X, UserPlus, Moon, Pencil, Check, SkipForward, Star } from 'lucide-react';
 
 // =====================================================================================
 // 大夜（P）輪序面板
@@ -241,35 +241,28 @@ const NightRotationPanel = ({ open, onToggle, p, setP, canEdit, isAdmin, schedul
   };
 
   return (
-    <div className="bg-white rounded-2xl shadow-sm border overflow-hidden">
-      <button onClick={onToggle} className="w-full px-4 py-3 flex items-center justify-between hover:bg-gray-50 bg-indigo-50">
-        <span className="font-black text-indigo-700 text-sm flex items-center gap-2"><Moon size={16} /> 大夜（P）輪序
-          <span className="text-[11px] font-bold text-gray-400">每週六 ～ 下週四（6 天，週五不排）｜計入 P、P#、P(國)</span>
+    <div className="col-span-full bg-white rounded-xl shadow-sm border overflow-hidden">
+      <button onClick={onToggle} className="w-full px-3 py-2 flex items-center justify-between hover:bg-indigo-100 bg-indigo-50">
+        <span className="font-black text-indigo-700 text-sm flex items-center gap-1.5 flex-wrap"><Moon size={15} /> 大夜（P）輪序
+          <span className="text-[10px] font-bold text-gray-400">週六～下週四｜P、P#、P(國)</span>
         </span>
         <span className="text-gray-400 text-xs font-black">{open ? '▲' : '▼'}</span>
       </button>
 
       {open && (
-        <div className="p-3 border-t grid grid-cols-1 lg:grid-cols-3 gap-3">
-          {/* 左：每週排序 */}
-          <div className="lg:col-span-2 min-w-0">
-            <div className="border rounded-xl overflow-auto" style={{ maxHeight: '480px' }}>
+        <div className="p-2 border-t grid grid-cols-1 lg:grid-cols-5 gap-2">
+          {/* 左：每週排序（預排／實際班表同一格，節省寬度）*/}
+          <div className="lg:col-span-3 min-w-0">
+            <div className="border rounded-lg overflow-auto" style={{ maxHeight: '300px' }}>
               <table className="w-full text-xs">
-                <thead className="bg-gray-50 text-gray-500 sticky top-0 z-10">
-                  <tr>
-                    <th className="p-2 text-left whitespace-nowrap">週期（六～四）</th>
-                    <th className="p-2 text-left whitespace-nowrap">預排</th>
-                    <th className="p-2 text-left whitespace-nowrap">實際班表</th>
-                    {editable && <th className="p-2 text-left whitespace-nowrap">跳過</th>}
-                  </tr>
-                </thead>
                 <tbody className="divide-y">
-                  {keys.map(k => {
+                  {keys.map((k, ki) => {
                     const start = parseD(k);
                     const end = addDays(start, 5);
                     const past = k < currentKey;
                     const isCur = k === currentKey;
                     const o = derived.out[k];
+                    const showYear = ki === 0 || parseD(keys[ki - 1]).getFullYear() !== start.getFullYear();
                     let planCell = <span className="text-gray-200">—</span>;
                     if (o && o.kind === 'skip') {
                       planCell = <span className="text-[11px] font-black text-rose-500 bg-rose-50 px-1.5 py-0.5 rounded">跳過（過年班）</span>;
@@ -278,72 +271,66 @@ const NightRotationPanel = ({ open, onToggle, p, setP, canEdit, isAdmin, schedul
                     } else if (o && o.kind === 'plan' && !past) {
                       planCell = <span className="font-bold text-gray-400">{nameOf(o.empId)}</span>;
                     }
-                    const canAct = editable && !past && !(o && o.kind === 'skip');
+                    const canAct = editable && !past;
                     return (
-                      <tr key={k} className={`align-top ${isCur ? 'bg-yellow-50' : past ? 'bg-gray-50 text-gray-400' : ''}`}>
-                        <td className="p-2 whitespace-nowrap font-mono">
-                          <span className="text-[10px] text-gray-400 mr-1">{start.getFullYear()}</span>
-                          {start.getMonth() + 1}/{start.getDate()}({WD[start.getDay()]})～{end.getMonth() + 1}/{end.getDate()}({WD[end.getDay()]})
-                          {isCur && <span className="ml-1 text-[9px] bg-amber-500 text-white px-1 py-0.5 rounded-full font-black">本週</span>}
-                        </td>
-                        <td className="p-2 whitespace-nowrap">
-                          {editKey === k ? (
-                            <select autoFocus value={o?.empId || ''} onChange={e => e.target.value && setConfirm(k, e.target.value)} onBlur={() => setEditKey('')} className="border rounded-lg px-1 py-0.5 text-[11px] bg-white">
-                              <option value="" disabled>選擇人員…</option>
-                              {pickable.map(id => <option key={id} value={id}>{nameOf(id)}</option>)}
-                              {o && o.kind === 'confirmed' && <option value="__cancel__">（取消確定）</option>}
-                            </select>
-                          ) : (
-                            <span className="inline-flex items-center gap-1">
-                              {planCell}
-                              {canAct && o && o.empId && (
-                                <>
-                                  {o.kind === 'plan' && <button title="確定此人" onClick={() => setConfirm(k, o.empId)} className="p-0.5 rounded text-gray-300 hover:text-emerald-600 hover:bg-emerald-50"><Check size={14} /></button>}
-                                  <button title="指定其他人員／重新指定" onClick={() => setEditKey(k)} className="p-0.5 rounded text-gray-300 hover:text-blue-600 hover:bg-blue-50"><Pencil size={12} /></button>
-                                </>
-                              )}
-                            </span>
-                          )}
-                        </td>
-                        <td className="p-2">{renderActual(k)}</td>
-                        {editable && (
-                          <td className="p-2 whitespace-nowrap">
-                            {!past && <button onClick={() => toggleSkip(k)} className={`text-[10px] font-black px-1.5 py-0.5 rounded ${o && o.kind === 'skip' ? 'bg-rose-500 text-white' : 'bg-gray-100 text-gray-500 hover:bg-rose-50 hover:text-rose-600'}`}>{o && o.kind === 'skip' ? '取消跳過' : '跳過'}</button>}
+                      <React.Fragment key={k}>
+                        {showYear && <tr><td colSpan={3} className="px-2 py-0.5 bg-gray-100 text-[10px] font-black text-gray-500">{start.getFullYear()} 年</td></tr>}
+                        <tr className={`align-top ${isCur ? 'bg-yellow-50' : past ? 'bg-gray-50 text-gray-400' : ''}`}>
+                          <td className="px-2 py-1 whitespace-nowrap font-mono text-[11px] leading-tight">
+                            {start.getMonth() + 1}/{start.getDate()}～{end.getMonth() + 1}/{end.getDate()}
+                            {isCur && <span className="ml-1 text-[9px] bg-amber-500 text-white px-1 py-0.5 rounded-full font-black">本週</span>}
                           </td>
-                        )}
-                      </tr>
+                          <td className="px-1 py-1 leading-tight">
+                            {editKey === k ? (
+                              <select autoFocus value={o?.empId || ''} onChange={e => e.target.value && setConfirm(k, e.target.value)} onBlur={() => setEditKey('')} className="border rounded-lg px-1 py-0.5 text-[11px] bg-white max-w-full">
+                                <option value="" disabled>選擇人員…</option>
+                                {pickable.map(id => <option key={id} value={id}>{nameOf(id)}</option>)}
+                                {o && o.kind === 'confirmed' && <option value="__cancel__">（取消公告）</option>}
+                              </select>
+                            ) : (
+                              <div>{planCell}</div>
+                            )}
+                            <div className="text-[10px] text-gray-500 mt-0.5">實際：{renderActual(k)}</div>
+                          </td>
+                          <td className="px-1 py-1 whitespace-nowrap text-right">
+                            {canAct && (
+                              <span className="inline-flex items-center">
+                                {o && o.kind === 'plan' && <button title="確定（公告）此人" onClick={() => setConfirm(k, o.empId)} className="p-0.5 rounded text-gray-300 hover:text-emerald-600 hover:bg-emerald-50"><Check size={15} /></button>}
+                                {o && o.empId && <button title="指定其他人員／重新指定" onClick={() => setEditKey(k)} className="p-0.5 rounded text-gray-300 hover:text-blue-600 hover:bg-blue-50"><Pencil size={13} /></button>}
+                                <button title={o && o.kind === 'skip' ? '取消跳過' : '跳過此週（過年班）'} onClick={() => toggleSkip(k)} className={`p-0.5 rounded ${o && o.kind === 'skip' ? 'bg-rose-500 text-white' : 'text-gray-300 hover:text-rose-600 hover:bg-rose-50'}`}><SkipForward size={13} /></button>
+                              </span>
+                            )}
+                          </td>
+                        </tr>
+                      </React.Fragment>
                     );
                   })}
                 </tbody>
               </table>
             </div>
-            {queue.length === 0 && <div className="mt-2 text-[11px] text-gray-400 font-bold">{editable ? '尚未建立輪序表：請先在右側加入人員，預排就會自動帶入。' : '尚未建立大夜輪序表。'}</div>}
+            {queue.length === 0 && <div className="mt-1 text-[11px] text-gray-400 font-bold">{editable ? '尚未建立輪序表：請先在右側加入人員，預排就會自動帶入。' : '尚未建立大夜輪序表。'}</div>}
           </div>
 
-          {/* 右：輪序表 */}
-          <div className="min-w-0">
-            <div className="text-[12px] font-black text-gray-700 mb-2">輪序表（手動維護，不連動班表）</div>
-            <div className="border rounded-xl divide-y overflow-y-auto" style={{ maxHeight: '420px' }}>
-              {queue.length === 0 && <div className="p-4 text-center text-gray-300 italic text-xs font-bold">尚未建立輪序表</div>}
+          {/* 右：輪序表（兩欄緊湊）*/}
+          <div className="lg:col-span-2 min-w-0">
+            <div className="text-[11px] font-black text-gray-500 mb-1">輪序表（不連動班表）</div>
+            <div className="grid grid-cols-2 lg:grid-cols-1 gap-px bg-gray-200 border rounded-lg overflow-y-auto" style={{ maxHeight: '260px' }}>
+              {queue.length === 0 && <div className="bg-white p-3 text-center text-gray-300 italic text-xs font-bold col-span-2 lg:col-span-1">尚未建立輪序表</div>}
               {queue.map((id, idx) => {
                 const st = stats[id] || { done: 0, plan: 0, last: '', next: '' };
                 return (
-                  <div key={id} className="px-2 py-1.5 flex items-center gap-1.5">
-                    <span className="w-5 h-5 flex-none rounded-full text-[10px] font-black flex items-center justify-center bg-gray-100 text-gray-500">{idx + 1}</span>
-                    <div className="flex-grow min-w-0">
-                      <div className="text-[13px] font-bold text-gray-800 leading-tight">{nameOf(id)}</div>
-                      <div className="text-[10px] text-gray-400 font-bold">上次 {fmtShort(st.last)}｜下次 {fmtShort(st.next)}</div>
-                    </div>
-                    <div className="flex-none text-center leading-tight" title="顯示區間內的大夜班次數（已公告＋預排）">
-                      <div className="text-sm font-black text-indigo-600">{st.done + st.plan}</div>
-                      <div className="text-[9px] text-gray-400 font-bold whitespace-nowrap">公告{st.done}・預排{st.plan}</div>
+                  <div key={id} className="bg-white px-1.5 py-1 flex items-center gap-1 min-w-0">
+                    <span className="w-4 h-4 flex-none rounded-full text-[9px] font-black flex items-center justify-center bg-gray-100 text-gray-500">{idx + 1}</span>
+                    <div className="flex-grow min-w-0 leading-tight">
+                      <div className="text-[12px] font-bold text-gray-800 truncate">{nameOf(id)}</div>
+                      <div className="text-[10px] text-gray-400 font-bold truncate" title="顯示區間內：已公告＋預排">公{st.done}・預{st.plan}｜下次 {fmtShort(st.next)}</div>
                     </div>
                     {editable && (
                       <div className="flex flex-none items-center">
-                        <button title="設為下一位（自動預排從此人開始）" onClick={() => setNext(id)} className="px-1 text-[10px] font-black text-gray-300 hover:text-amber-600">下一位</button>
-                        <button title="上移" onClick={() => moveQueue(idx, -1)} className="p-0.5 text-gray-400 hover:text-blue-600"><ChevronUp size={14} /></button>
-                        <button title="下移" onClick={() => moveQueue(idx, 1)} className="p-0.5 text-gray-400 hover:text-blue-600"><ChevronDown size={14} /></button>
-                        <button title="移出輪序表" onClick={() => removeFromQueue(id)} className="p-0.5 text-gray-400 hover:text-red-600"><X size={14} /></button>
+                        <button title="設為下一位（自動預排從此人開始）" onClick={() => setNext(id)} className="p-0.5 text-gray-300 hover:text-amber-500"><Star size={12} /></button>
+                        <button title="上移" onClick={() => moveQueue(idx, -1)} className="p-0.5 text-gray-400 hover:text-blue-600"><ChevronUp size={13} /></button>
+                        <button title="下移" onClick={() => moveQueue(idx, 1)} className="p-0.5 text-gray-400 hover:text-blue-600"><ChevronDown size={13} /></button>
+                        <button title="移出輪序表" onClick={() => removeFromQueue(id)} className="p-0.5 text-gray-400 hover:text-red-600"><X size={13} /></button>
                       </div>
                     )}
                   </div>
@@ -351,18 +338,16 @@ const NightRotationPanel = ({ open, onToggle, p, setP, canEdit, isAdmin, schedul
               })}
             </div>
             {editable && (
-              <div className="mt-2 flex items-center gap-1">
-                <select value={addId} onChange={e => setAddId(e.target.value)} className="flex-grow border rounded-lg px-2 py-1 text-xs bg-white min-w-0">
-                  <option value="">加入輪序表（僅斗六一般藥師，放最後）…</option>
+              <div className="mt-1 flex items-center gap-1">
+                <select value={addId} onChange={e => setAddId(e.target.value)} className="flex-grow border rounded-lg px-1.5 py-1 text-[11px] bg-white min-w-0">
+                  <option value="">加入輪序表（放最後）…</option>
                   {addable.map(e => <option key={e.id} value={String(e.id)}>{e.name}（{e.id}）</option>)}
                 </select>
-                <button onClick={addToQueue} disabled={!addId} className="flex-none text-[11px] font-black text-white bg-indigo-500 hover:bg-indigo-600 disabled:opacity-40 px-2 py-1.5 rounded-lg flex items-center gap-1"><UserPlus size={12} /> 加入</button>
+                <button onClick={addToQueue} disabled={!addId} className="flex-none text-[11px] font-black text-white bg-indigo-500 hover:bg-indigo-600 disabled:opacity-40 px-2 py-1 rounded-lg flex items-center gap-1"><UserPlus size={12} /> 加入</button>
               </div>
             )}
-            <div className="mt-2 text-[10px] text-gray-400 font-bold leading-relaxed">
-              ※ 次數＝顯示區間內輪序表的「已公告＋預排」週數（不含實際班表）。<br />
-              ※ 指定某人到某週時，原預排者該次輪空，指定者最近一次預排被拿掉，後面的人各往前一位。<br />
-              ※ 「跳過」的週不排大夜、也不計入輪序（最多 2 週）。
+            <div className="mt-1 text-[10px] text-gray-400 font-bold leading-snug">
+              ※ 次數＝顯示區間（過去 1 個月～未來 8 個月）已公告＋預排，不含實際班表。指定他人時原預排者該次輪空，指定者最近一次預排被拿掉。跳過週不計入輪序（最多 2 週）。
             </div>
           </div>
         </div>
