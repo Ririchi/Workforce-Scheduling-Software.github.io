@@ -1,6 +1,7 @@
 import React, { useState, useEffect, useMemo } from 'react';
-import { onSnapshot, runTransaction, doc, query, orderBy, limit } from 'firebase/firestore';
-import { Plus, Trash2, Pencil, X, History, Search, Download, CheckCircle2, UserPlus, FileText, RefreshCcw } from 'lucide-react';
+import { onSnapshot, runTransaction, doc, query, orderBy, limit, getDoc, setDoc, deleteDoc } from 'firebase/firestore';
+import { Plus, Trash2, Pencil, X, History, Search, Download, CheckCircle2, UserPlus, FileText, RefreshCcw, Save, RotateCcw } from 'lucide-react';
+import NightRotationPanel from './NightRotationPanel.jsx';
 
 // =====================================================================================
 // 班別輪序頁面
@@ -30,7 +31,22 @@ const compareMembers = (a, b) => {
 const NO_GROUP = '__none__';
 const UNGROUPED_TITLE = '未分類';
 
-const RotationView = ({ rotationDocRef, rotationLogColRef, currentUser, isAdmin, employees, activeEmployees, currentMonth, shiftTimeTable }) => {
+const EMPTY_P = { queue: [], start: null, confirmed: {}, skips: {} };
+// 舊格式（slots）轉新格式：只保留順序與「跳過」，預排改由輪序表自動推算
+const normalizeP = (p) => {
+  if (!p || !Array.isArray(p.queue)) return EMPTY_P;
+  const skips = { ...(p.skips || {}) };
+  Object.entries(p.slots || {}).forEach(([k, v]) => { if (v && v.skip) skips[k] = true; });
+  return { queue: p.queue, start: p.start || null, confirmed: p.confirmed || {}, skips };
+};
+// 「打勾」一律代表排「今天所在月份的下一個月」
+const nextMonthOfToday = () => {
+  const t = new Date();
+  const d = new Date(t.getFullYear(), t.getMonth() + 1, 1);
+  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`;
+};
+
+const RotationView = ({ rotationDocRef, rotationLogColRef, rotationDraftRef, currentUser, isAdmin, employees, activeEmployees, currentMonth, shiftTimeTable, schedule, setRotationDirty }) => {
   const [shifts, setShifts] = useState([]);
   const [notes, setNotes] = useState('');
   const [notesDraft, setNotesDraft] = useState('');
@@ -44,6 +60,13 @@ const RotationView = ({ rotationDocRef, rotationLogColRef, currentUser, isAdmin,
   const [showLog, setShowLog] = useState(false);
   const [logs, setLogs] = useState([]);
   const [logShift, setLogShift] = useState('');
+  // ---- 暫存區（只有管理員有）：打勾標記 + 大夜預排 ----
+  const [committedP, setCommittedP] = useState(EMPTY_P);
+  const [work, setWork] = useState({ marks: {}, p: null }); // marks: { 'shiftId|empId': 'YYYY-MM' }；p: 大夜草稿（null＝沒改過）
+  const [draftLoaded, setDraftLoaded] = useState(false);
+  const [hasDraft, setHasDraft] = useState(false);
+  const [dirty, setDirty] = useState(false); // 有尚未暫存／發布的變更
+  const stageYm = useMemo(() => nextMonthOfToday(), []);
 
   // ---- 即時監聽輪序資料 ----
   useEffect(() => {
@@ -53,12 +76,39 @@ const RotationView = ({ rotationDocRef, rotationLogColRef, currentUser, isAdmin,
         const data = snap.exists() ? snap.data() : {};
         setShifts(Array.isArray(data.shifts) ? data.shifts : []);
         setNotes(data.notes || '');
+        setCommittedP(normalizeP(data.p));
         setLoaded(true);
       },
       (err) => { console.error('讀取輪序資料失敗:', err); setLoaded(true); }
     );
     return () => unsub();
   }, [rotationDocRef]);
+
+  // ---- 載入暫存區（僅管理員）----
+  useEffect(() => {
+    if (!isAdmin || !rotationDraftRef) { setDraftLoaded(true); return; }
+    let alive = true;
+    getDoc(rotationDraftRef).then(snap => {
+      if (!alive) return;
+      if (snap.exists()) {
+        const d = snap.data();
+        setWork({ marks: d.marks || {}, p: d.p ? normalizeP(d.p) : null });
+        setHasDraft(true);
+      }
+      setDraftLoaded(true);
+    }).catch(err => { console.error('讀取暫存區失敗:', err); if (alive) setDraftLoaded(true); });
+    return () => { alive = false; };
+  }, [isAdmin, rotationDraftRef]);
+
+  // 未暫存／發布的變更：通知上層（離開頁面時提示），並在關閉分頁時提示
+  useEffect(() => {
+    if (setRotationDirty) setRotationDirty(dirty);
+    if (!dirty) return;
+    const h = (e) => { e.preventDefault(); e.returnValue = ''; };
+    window.addEventListener('beforeunload', h);
+    return () => window.removeEventListener('beforeunload', h);
+  }, [dirty, setRotationDirty]);
+  useEffect(() => () => { if (setRotationDirty) setRotationDirty(false); }, [setRotationDirty]);
 
   // 說明文字：沒有未儲存的編輯時，跟著雲端同步
   useEffect(() => {
@@ -95,16 +145,18 @@ const RotationView = ({ rotationDocRef, rotationLogColRef, currentUser, isAdmin,
   };
 
   // ---- 共用寫入：Transaction + 異動紀錄 ----
-  const commit = async (mutator, logEntry) => {
+  const commit = async (mutator, logEntry, opts = {}) => {
     if (!isAdmin) { alert('只有管理員可以編輯班別輪序。'); return false; }
     setBusy(true);
     try {
       await runTransaction(rotationDocRef.firestore, async (tx) => {
         const snap = await tx.get(rotationDocRef);
         const data = snap.exists() ? snap.data() : {};
-        const next = mutator({ shifts: deepClone(data.shifts || []), notes: data.notes || '' });
+        const next = mutator({ shifts: deepClone(data.shifts || []), notes: data.notes || '', p: data.p ? deepClone(data.p) : null });
         const now = new Date().toISOString();
-        tx.set(rotationDocRef, { shifts: next.shifts, notes: next.notes, updatedAt: now });
+        const nextP = next.p !== undefined ? next.p : (data.p || null);
+        tx.set(rotationDocRef, { shifts: next.shifts, notes: next.notes, ...(nextP ? { p: nextP } : {}), updatedAt: now });
+        if (opts.clearDraft && rotationDraftRef) tx.delete(rotationDraftRef);
         (Array.isArray(logEntry) ? logEntry : [logEntry]).forEach(entry => {
           tx.set(doc(rotationLogColRef), { ...entry, at: now, by: currentUser?.name || '', byId: currentUser?.id || '' });
         });
@@ -188,10 +240,95 @@ const RotationView = ({ rotationDocRef, rotationLogColRef, currentUser, isAdmin,
     }, { action, shiftName: shift?.name || '', empId: String(empId), empName: member ? nameOf(member) : '', from: member?.lastYm || '', to: ym || '', reason: reason || '' });
   };
 
-  const markDone = (shiftId, member) => {
-    const shiftName = shifts.find(s => s.id === shiftId)?.name || '';
-    if (!window.confirm(`將「${nameOf(member)}」在「${shiftName}」的上次輪序年月設為 ${currentMonth}？`)) return;
-    setMemberYm(shiftId, member.empId, currentMonth, '', '本月已輪');
+  // ---- 暫存區操作 ----
+  const markKey = (shiftId, empId) => `${shiftId}|${empId}`;
+  const toggleMark = (shiftId, empId) => {
+    if (!draftLoaded) return;
+    setWork(w => {
+      const marks = { ...w.marks };
+      const k = markKey(shiftId, empId);
+      if (marks[k]) delete marks[k]; else marks[k] = stageYm;
+      return { ...w, marks };
+    });
+    setDirty(true);
+  };
+  const effectiveP = work.p || committedP;
+  const setDraftP = (next) => { setWork(w => ({ ...w, p: next })); setDirty(true); };
+  const markCount = Object.keys(work.marks).length;
+  const hasStaged = markCount > 0 || !!work.p;
+
+  const pDiffCount = (a, b) => {
+    let n = 0;
+    ['confirmed', 'skips'].forEach(f => {
+      const keys = new Set([...Object.keys(a?.[f] || {}), ...Object.keys(b?.[f] || {})]);
+      keys.forEach(k => {
+        const x = f === 'confirmed' ? a?.[f]?.[k]?.empId : a?.[f]?.[k];
+        const y = f === 'confirmed' ? b?.[f]?.[k]?.empId : b?.[f]?.[k];
+        if ((x || null) !== (y || null)) n++;
+      });
+    });
+    return n;
+  };
+
+  const saveDraft = async () => {
+    setBusy(true);
+    try {
+      if (!hasStaged) {
+        await deleteDoc(rotationDraftRef);
+        setHasDraft(false);
+      } else {
+        await setDoc(rotationDraftRef, { marks: work.marks, p: work.p || null, by: currentUser?.name || '', byId: currentUser?.id || '', updatedAt: new Date().toISOString() });
+        setHasDraft(true);
+      }
+      setDirty(false);
+    } catch (err) {
+      console.error('暫存失敗:', err);
+      alert('暫存失敗，可能是網路問題，請重新操作一次。');
+    } finally { setBusy(false); }
+  };
+
+  const discardDraft = async () => {
+    if (!window.confirm('捨棄所有尚未發布的暫存內容（打勾標記與大夜預排修改）？')) return;
+    setBusy(true);
+    try {
+      if (hasDraft) await deleteDoc(rotationDraftRef);
+      setWork({ marks: {}, p: null });
+      setHasDraft(false);
+      setDirty(false);
+    } catch (err) {
+      console.error('捨棄暫存失敗:', err);
+      alert('捨棄失敗，請重新操作一次。');
+    } finally { setBusy(false); }
+  };
+
+  const publishDraft = async () => {
+    if (!hasStaged) { alert('目前沒有可發布的變更。'); return; }
+    const parts = [];
+    if (markCount) parts.push(`${markCount} 筆打勾標記（設為已排 ${stageYm}）`);
+    if (work.p) parts.push('大夜輪序表／已確定週次');
+    if (!window.confirm(`確定發布（公布）以下內容？\n・${parts.join('\n・')}`)) return;
+    const marks = Object.entries(work.marks);
+    const logs = [];
+    marks.forEach(([key, ym]) => {
+      const [sid, eid] = key.split('|');
+      const sh = shifts.find(x => x.id === sid);
+      const m = sh?.members.find(x => String(x.empId) === eid);
+      if (sh && m) logs.push({ action: '已排', shiftName: sh.name, empId: eid, empName: nameOf(m), from: m.lastYm || '', to: ym, reason: '暫存標記發布' });
+    });
+    if (work.p) {
+      const q0 = committedP.queue.length, q1 = work.p.queue.length;
+      logs.push({ action: '大夜預排更新', shiftName: '大夜(P)', detail: `輪序表 ${q0}→${q1} 人；已確定／跳過異動 ${pDiffCount(committedP, work.p)} 週` });
+    }
+    const ok = await commit(({ shifts: list, notes: n, p: cp }) => {
+      marks.forEach(([key, ym]) => {
+        const [sid, eid] = key.split('|');
+        const sh = list.find(x => x.id === sid);
+        const m = sh?.members.find(x => String(x.empId) === eid);
+        if (m) m.lastYm = ym; // 班別或人員若已被移除就略過
+      });
+      return { shifts: list, notes: n, p: work.p || cp };
+    }, logs, { clearDraft: true });
+    if (ok) { setWork({ marks: {}, p: null }); setHasDraft(false); setDirty(false); }
   };
 
   const saveNotes = async () => {
@@ -328,10 +465,10 @@ const RotationView = ({ rotationDocRef, rotationLogColRef, currentUser, isAdmin,
           </div>
         </div>
 
-        {/* 新人輪序順序說明 */}
+        {/* 輪序說明 */}
         <div className="bg-white rounded-2xl shadow-sm border p-4">
           <div className="flex items-center justify-between mb-2">
-            <h3 className="text-sm font-black text-gray-700 flex items-center gap-1"><FileText size={16} className="text-teal-500" /> 新人輪序順序說明</h3>
+            <h3 className="text-sm font-black text-gray-700 flex items-center gap-1"><FileText size={16} className="text-teal-500" /> 輪序說明</h3>
             {isAdmin && notesDirty && (
               <div className="flex gap-2">
                 <button onClick={() => { setNotesDraft(notes); setNotesDirty(false); }} className="text-xs font-bold text-gray-500 px-3 py-1 rounded-lg bg-gray-100 hover:bg-gray-200">還原</button>
@@ -353,6 +490,34 @@ const RotationView = ({ rotationDocRef, rotationLogColRef, currentUser, isAdmin,
             </div>
           )}
         </div>
+
+        {/* 暫存區操作列（僅管理員） */}
+        {isAdmin && (dirty || hasDraft || hasStaged) && (
+          <div className={`rounded-2xl border p-3 flex flex-wrap items-center gap-3 justify-between sticky top-0 z-20 shadow-sm ${dirty ? 'bg-red-50 border-red-200' : 'bg-blue-50 border-blue-200'}`}>
+            <div className="text-xs font-black text-gray-700">
+              {dirty ? <span className="text-red-600">有尚未暫存／發布的變更</span> : <span className="text-blue-600">已暫存（僅管理員看得到，尚未發布）</span>}
+              <span className="ml-2 text-gray-500 font-bold">打勾標記 {markCount} 筆{work.p ? '｜大夜預排已修改' : ''}（發布後記為 {stageYm} 已排）</span>
+            </div>
+            <div className="flex gap-2">
+              <button disabled={busy} onClick={discardDraft} className="text-xs font-black text-gray-500 px-3 py-1.5 rounded-lg bg-white border hover:bg-gray-100 flex items-center gap-1 disabled:opacity-50"><RotateCcw size={13} /> 捨棄</button>
+              <button disabled={busy || !dirty} onClick={saveDraft} className="text-xs font-black text-white px-3 py-1.5 rounded-lg bg-gray-700 hover:bg-gray-800 flex items-center gap-1 disabled:opacity-40"><Save size={13} /> 暫存</button>
+              <button disabled={busy || !hasStaged} onClick={publishDraft} className="text-xs font-black text-white px-3 py-1.5 rounded-lg bg-blue-600 hover:bg-blue-700 flex items-center gap-1 disabled:opacity-40"><CheckCircle2 size={13} /> 儲存（公布）</button>
+            </div>
+          </div>
+        )}
+
+        {/* 大夜（P）輪序 */}
+        {loaded && (
+          <NightRotationPanel
+            p={effectiveP}
+            setP={setDraftP}
+            canEdit={draftLoaded}
+            isAdmin={isAdmin}
+            schedule={schedule}
+            activeEmployees={activeEmployees}
+            nameOf={(id) => empById[String(id)]?.name || String(id)}
+          />
+        )}
 
         {/* 班別卡片（依「各班別上班時段」分類，可收合） */}
         {!loaded ? (
@@ -395,6 +560,7 @@ const RotationView = ({ rotationDocRef, rotationLogColRef, currentUser, isAdmin,
                               {sorted.map((m, idx) => {
                                 const isNext = idx === 0;
                                 const inActive = activeIds.has(String(m.empId));
+                                const staged = work.marks[markKey(shift.id, m.empId)] || '';
                                 const hit = keyword && (nameOf(m).toLowerCase().includes(keyword) || String(m.empId).toLowerCase().includes(keyword));
                                 return (
                                   <div key={m.empId} style={{ minHeight: '52px' }} className={`px-2 py-1.5 flex items-center gap-1.5 ${isNext ? 'bg-yellow-50' : ''} ${hit ? 'ring-2 ring-inset ring-blue-300' : ''}`}>
@@ -407,10 +573,11 @@ const RotationView = ({ rotationDocRef, rotationLogColRef, currentUser, isAdmin,
                                       </div>
                                       <div className="text-[10px] text-gray-400 font-mono">{m.empId}</div>
                                     </div>
+                                    {staged && <div className="text-[11px] font-black text-red-600 flex-none whitespace-nowrap" title={`${staged} 已排（尚未公布）`}>{Number(staged.slice(5))}月已排</div>}
                                     <div className={`text-[11px] font-mono font-bold flex-none ${m.lastYm ? 'text-gray-600' : 'text-gray-300'}`}>{fmtYm(m.lastYm)}</div>
                                     {isAdmin && (
                                       <div className="flex flex-none items-center">
-                                        <button disabled={busy} title={`本月已輪（設為 ${currentMonth}）`} onClick={() => markDone(shift.id, m)} className="p-1 rounded-lg text-gray-400 hover:bg-emerald-50 hover:text-emerald-600 disabled:opacity-40"><CheckCircle2 size={14} /></button>
+                                        <button disabled={busy || !draftLoaded} title={staged ? `取消標記（${staged}）` : `標記為 ${stageYm} 已排（暫存，需按暫存或公布）`} onClick={() => toggleMark(shift.id, m.empId)} className={`p-1 rounded-lg disabled:opacity-40 ${staged ? 'bg-red-50 text-red-600' : 'text-gray-400 hover:bg-emerald-50 hover:text-emerald-600'}`}><CheckCircle2 size={14} /></button>
                                         <button title="修改上次輪序年月" onClick={() => openDialog('editYm', shift.id, m.empId)} className="p-1 rounded-lg text-gray-400 hover:bg-blue-50 hover:text-blue-600"><Pencil size={13} /></button>
                                         <button title="移除人員" onClick={() => openDialog('removeMember', shift.id, m.empId)} className="p-1 rounded-lg text-gray-400 hover:bg-red-50 hover:text-red-600"><X size={14} /></button>
                                       </div>
