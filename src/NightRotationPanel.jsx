@@ -7,7 +7,7 @@ import { ChevronUp, ChevronDown, X, UserPlus, Moon, Pencil, Check } from 'lucide
 // - 計入的班別代碼：P、P#、P(國)（SP、HP 不計入）
 // - 顯示範圍：今天往前 1 個月 ～ 往後 8 個月
 // - 預排由「輪序表」自動算出（淺灰字），不另外儲存；輪序表、跳過週一改，預排就自動重排
-// - 只有點選「確定」或「指定人員」的週才算數（黑字），確定的週不會被自動重排動到
+// - 只有點選「確定」或「指定人員」的週才算數（黑字，顯示「已公告」），確定的週不會被自動重排動到
 // - 確定的人 ≠ 該週預排者時：原預排者該次輪空，確定者「最近一次預排」被拿掉，後面的人各往前一位
 //   （輪序 A、B、C、D，指定 C 補第 1 週 → C(確定)、B、D、A、B、C、D）
 // - 班表實際：即時讀取班表（含換班），單純列出該週大夜藥師與天數
@@ -28,8 +28,7 @@ const weekStartSat = (d) => addDays(d, -((d.getDay() + 1) % 7));
 const isPCode = (c) => String(c || '').trim().replace('(國)', '').replace('（國）', '').replace('#', '') === 'P';
 const WD = ['日', '一', '二', '三', '四', '五', '六'];
 
-const NightRotationPanel = ({ p, setP, canEdit, isAdmin, schedule, activeEmployees, nameOf }) => {
-  const [open, setOpen] = useState(true);
+const NightRotationPanel = ({ open, onToggle, p, setP, canEdit, isAdmin, schedule, activeEmployees, nameOf }) => {
   const [addId, setAddId] = useState('');
   const [editKey, setEditKey] = useState('');
 
@@ -156,29 +155,20 @@ const NightRotationPanel = ({ p, setP, canEdit, isAdmin, schedule, activeEmploye
   }, [keys, schedule, nameToId]);
 
   // ---------- 輪序表統計（顯示區間內）----------
-  // 過去的週：以班表實際（天數最多者）為準，沒有班表資料才看「已確定」；未來的週：已確定／預排
+  // 只計「輪序表」的已公告＋預排（過去週只計已公告），不看實際班表，用來看大夜班次是否平均
   const stats = useMemo(() => {
     const m = {};
     queue.forEach(id => { m[id] = { done: 0, plan: 0, last: '', next: '' }; });
     keys.forEach(k => {
-      let id = '';
-      let kind = '';
-      if (k < currentKey) {
-        const counts = actualByKey[k]?.counts || {};
-        const top = Object.entries(counts).sort((a, b) => b[1] - a[1])[0];
-        if (top && nameToId[top[0]]) { id = nameToId[top[0]]; kind = 'done'; }
-        else if (derived.out[k]?.kind === 'confirmed') { id = derived.out[k].empId; kind = 'done'; }
-      } else {
-        const o = derived.out[k];
-        if (o && o.empId) { id = o.empId; kind = o.kind === 'confirmed' ? 'done' : 'plan'; }
-      }
-      if (!id || !m[id]) return;
-      m[id][kind]++;
-      if (k < currentKey) m[id].last = k;
-      else if (!m[id].next) m[id].next = k;
+      const o = derived.out[k];
+      if (!o || !o.empId || !m[o.empId]) return;
+      if (k < currentKey && o.kind !== 'confirmed') return;
+      m[o.empId][o.kind === 'confirmed' ? 'done' : 'plan']++;
+      if (k < currentKey) m[o.empId].last = k;
+      else if (!m[o.empId].next) m[o.empId].next = k;
     });
     return m;
-  }, [queue, keys, currentKey, derived, actualByKey, nameToId]);
+  }, [queue, keys, currentKey, derived]);
 
   const fmtShort = (k) => { if (!k) return '—'; const d = parseD(k); return `${d.getMonth() + 1}/${d.getDate()}`; };
 
@@ -191,7 +181,7 @@ const NightRotationPanel = ({ p, setP, canEdit, isAdmin, schedule, activeEmploye
     setP(reanchor(p, nq));
   };
   const removeFromQueue = (id) => {
-    if (!window.confirm(`將「${nameOf(id)}」移出輪序表？（已確定的週不會改動，後面的預排會自動重排）`)) return;
+    if (!window.confirm(`將「${nameOf(id)}」移出輪序表？（已公告的週不會改動，後面的預排會自動重排）`)) return;
     setP(reanchor(p, queue.filter(x => x !== id)));
   };
   const addToQueue = () => {
@@ -245,14 +235,14 @@ const NightRotationPanel = ({ p, setP, canEdit, isAdmin, schedule, activeEmploye
     const a = actualByKey[k];
     const names = Object.keys(a?.counts || {});
     if (!a || a.known === 0) return <span className="text-gray-300">—</span>;
-    if (names.length === 0) return <span className="text-gray-300">未排</span>;
+    if (names.length === 0) return <span className="text-gray-300">—</span>;
     if (names.length === 1 && a.counts[names[0]] === a.known) return <span className="font-black text-gray-800">{names[0]}{a.known < 6 && <span className="text-[10px] text-gray-400 font-bold ml-1">（{a.known} 天有資料）</span>}</span>;
     return <span className="font-black text-gray-800">{names.map(n => `${n}(${a.counts[n]}天)`).join('、')}</span>;
   };
 
   return (
     <div className="bg-white rounded-2xl shadow-sm border overflow-hidden">
-      <button onClick={() => setOpen(v => !v)} className="w-full px-4 py-3 flex items-center justify-between hover:bg-gray-50 bg-indigo-50">
+      <button onClick={onToggle} className="w-full px-4 py-3 flex items-center justify-between hover:bg-gray-50 bg-indigo-50">
         <span className="font-black text-indigo-700 text-sm flex items-center gap-2"><Moon size={16} /> 大夜（P）輪序
           <span className="text-[11px] font-bold text-gray-400">每週六 ～ 下週四（6 天，週五不排）｜計入 P、P#、P(國)</span>
         </span>
@@ -263,16 +253,13 @@ const NightRotationPanel = ({ p, setP, canEdit, isAdmin, schedule, activeEmploye
         <div className="p-3 border-t grid grid-cols-1 lg:grid-cols-3 gap-3">
           {/* 左：每週排序 */}
           <div className="lg:col-span-2 min-w-0">
-            <div className="text-[11px] font-bold text-gray-500 mb-2">
-              淺灰字＝依輪序表自動預排（尚未確定）；黑字＝已確定。{editable ? '點 ✓ 確定該週人選，或按 ✎ 改指定其他人。' : ''}顯示過去 1 個月～未來 8 個月。
-            </div>
             <div className="border rounded-xl overflow-auto" style={{ maxHeight: '480px' }}>
               <table className="w-full text-xs">
                 <thead className="bg-gray-50 text-gray-500 sticky top-0 z-10">
                   <tr>
                     <th className="p-2 text-left whitespace-nowrap">週期（六～四）</th>
                     <th className="p-2 text-left whitespace-nowrap">預排</th>
-                    <th className="p-2 text-left whitespace-nowrap">班表實際</th>
+                    <th className="p-2 text-left whitespace-nowrap">實際班表</th>
                     {editable && <th className="p-2 text-left whitespace-nowrap">跳過</th>}
                   </tr>
                 </thead>
@@ -287,7 +274,7 @@ const NightRotationPanel = ({ p, setP, canEdit, isAdmin, schedule, activeEmploye
                     if (o && o.kind === 'skip') {
                       planCell = <span className="text-[11px] font-black text-rose-500 bg-rose-50 px-1.5 py-0.5 rounded">跳過（過年班）</span>;
                     } else if (o && o.kind === 'confirmed') {
-                      planCell = <span className="font-black text-gray-900">{nameOf(o.empId)}<span className="ml-1 text-[9px] bg-indigo-100 text-indigo-600 px-1 py-0.5 rounded-full font-black">已確定</span></span>;
+                      planCell = <span className="font-black text-gray-900">{nameOf(o.empId)}<span className="ml-1 text-[9px] bg-indigo-100 text-indigo-600 px-1 py-0.5 rounded-full font-black">已公告</span></span>;
                     } else if (o && o.kind === 'plan' && !past) {
                       planCell = <span className="font-bold text-gray-400">{nameOf(o.empId)}</span>;
                     }
@@ -347,9 +334,9 @@ const NightRotationPanel = ({ p, setP, canEdit, isAdmin, schedule, activeEmploye
                       <div className="text-[13px] font-bold text-gray-800 leading-tight">{nameOf(id)}</div>
                       <div className="text-[10px] text-gray-400 font-bold">上次 {fmtShort(st.last)}｜下次 {fmtShort(st.next)}</div>
                     </div>
-                    <div className="flex-none text-center leading-tight" title="顯示區間內的大夜班次數（已確定＋預排）">
+                    <div className="flex-none text-center leading-tight" title="顯示區間內的大夜班次數（已公告＋預排）">
                       <div className="text-sm font-black text-indigo-600">{st.done + st.plan}</div>
-                      <div className="text-[9px] text-gray-400 font-bold whitespace-nowrap">確{st.done}・預{st.plan}</div>
+                      <div className="text-[9px] text-gray-400 font-bold whitespace-nowrap">公告{st.done}・預排{st.plan}</div>
                     </div>
                     {editable && (
                       <div className="flex flex-none items-center">
@@ -373,7 +360,7 @@ const NightRotationPanel = ({ p, setP, canEdit, isAdmin, schedule, activeEmploye
               </div>
             )}
             <div className="mt-2 text-[10px] text-gray-400 font-bold leading-relaxed">
-              ※ 次數＝顯示區間內：過去週依班表實際、未來週依「已確定＋預排」。<br />
+              ※ 次數＝顯示區間內輪序表的「已公告＋預排」週數（不含實際班表）。<br />
               ※ 指定某人到某週時，原預排者該次輪空，指定者最近一次預排被拿掉，後面的人各往前一位。<br />
               ※ 「跳過」的週不排大夜、也不計入輪序（最多 2 週）。
             </div>
