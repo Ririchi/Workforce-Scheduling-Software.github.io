@@ -314,12 +314,12 @@ const NightRotationPanel = ({ open, onToggle, p, setP, canEdit, isAdmin, schedul
           {/* 右：輪序表（兩欄緊湊）*/}
           <div className="lg:col-span-2 min-w-0">
             <div className="text-[11px] font-black text-gray-500 mb-1">輪序表（不連動班表）</div>
-            <div className="grid grid-cols-2 lg:grid-cols-1 gap-px bg-gray-200 border rounded-lg overflow-y-auto" style={{ maxHeight: '260px' }}>
-              {queue.length === 0 && <div className="bg-white p-3 text-center text-gray-300 italic text-xs font-bold col-span-2 lg:col-span-1">尚未建立輪序表</div>}
+            <div className="columns-2 lg:columns-1 gap-0 bg-white border rounded-lg [column-rule:1px_solid_rgb(229_231_235)]">
+              {queue.length === 0 && <div className="p-3 text-center text-gray-300 italic text-xs font-bold">尚未建立輪序表</div>}
               {queue.map((id, idx) => {
                 const st = stats[id] || { done: 0, plan: 0, last: '', next: '' };
                 return (
-                  <div key={id} className="bg-white px-1.5 py-1 flex items-center gap-1 min-w-0">
+                  <div key={id} className="break-inside-avoid border-b bg-white px-1.5 py-1 flex items-center gap-1 min-w-0">
                     <span className="w-4 h-4 flex-none rounded-full text-[9px] font-black flex items-center justify-center bg-gray-100 text-gray-500">{idx + 1}</span>
                     <div className="flex-grow min-w-0 leading-tight">
                       <div className="text-[12px] font-bold text-gray-800 truncate">{nameOf(id)}</div>
