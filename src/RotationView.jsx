@@ -28,6 +28,7 @@ const compareMembers = (a, b) => {
   return String(a.empId).localeCompare(String(b.empId));
 };
 
+const NIGHT_TITLE = '__night_p__';
 const NO_GROUP = '__none__';
 const UNGROUPED_TITLE = '未分類';
 
@@ -428,7 +429,7 @@ const RotationView = ({ rotationDocRef, rotationLogColRef, rotationDraftRef, cur
   }, [visibleShifts, sectionTitles, shiftTimeTable]);
 
   const toggleGroup = (title) => setExpanded(prev => { const n = new Set(prev); if (n.has(title)) n.delete(title); else n.add(title); return n; });
-  const allTitles = groupedShifts.map(([t]) => t);
+  const allTitles = [...groupedShifts.map(([t]) => t), NIGHT_TITLE];
   const isGroupOpen = (title) => !!keyword || expanded.has(title); // 搜尋時自動展開
 
   const visibleLogs = useMemo(() => logShift ? logs.filter(l => l.shiftName === logShift) : logs, [logs, logShift]);
@@ -506,26 +507,14 @@ const RotationView = ({ rotationDocRef, rotationLogColRef, rotationDraftRef, cur
           </div>
         )}
 
-        {/* 大夜（P）輪序 */}
-        {loaded && (
-          <NightRotationPanel
-            p={effectiveP}
-            setP={setDraftP}
-            canEdit={draftLoaded}
-            isAdmin={isAdmin}
-            schedule={schedule}
-            activeEmployees={activeEmployees}
-            nameOf={(id) => empById[String(id)]?.name || String(id)}
-          />
-        )}
-
         {/* 班別卡片（依「各班別上班時段」分類，可收合） */}
         {!loaded ? (
           <div className="text-center text-gray-400 font-bold py-10">讀取中...</div>
-        ) : visibleShifts.length === 0 ? (
-          <div className="text-center text-gray-300 italic font-bold py-10">{shifts.length === 0 ? (isAdmin ? '尚未建立任何班別，請按「新增班別」開始建立。' : '尚未建立任何班別。') : '沒有符合搜尋條件的班別。'}</div>
         ) : (
           <div className="space-y-3">
+            {visibleShifts.length === 0 && (
+              <div className="text-center text-gray-300 italic font-bold py-10">{shifts.length === 0 ? (isAdmin ? '尚未建立任何班別，請按「新增班別」開始建立。' : '尚未建立任何班別。') : '沒有符合搜尋條件的班別。'}</div>
+            )}
             <div className="flex justify-end gap-2">
               <button onClick={() => setExpanded(new Set(allTitles))} className="text-[11px] font-black text-gray-500 hover:text-blue-600">全部展開</button>
               <span className="text-gray-300">|</span>
@@ -597,6 +586,18 @@ const RotationView = ({ rotationDocRef, rotationLogColRef, rotationDraftRef, cur
                 </div>
               );
             })}
+            {/* 大夜（P）輪序：放在所有班別分類的最後面，一起受「全部展開｜全部收合」控制 */}
+            <NightRotationPanel
+              open={expanded.has(NIGHT_TITLE)}
+              onToggle={() => toggleGroup(NIGHT_TITLE)}
+              p={effectiveP}
+              setP={setDraftP}
+              canEdit={draftLoaded}
+              isAdmin={isAdmin}
+              schedule={schedule}
+              activeEmployees={activeEmployees}
+              nameOf={(id) => empById[String(id)]?.name || String(id)}
+            />
           </div>
         )}
 
