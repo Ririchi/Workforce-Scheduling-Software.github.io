@@ -117,7 +117,7 @@ const MonthlyRotationCard = ({ item, onChange, onDelete, onRename, canEdit, acti
   const addAll = () => {
     const ids = addable.map(e => String(e.id));
     if (!ids.length) return;
-    if (!window.confirm(`將 ${ids.length} 位一般藥師依員編順序全部加入「${item.name}」輪序表？`)) return;
+    if (!window.confirm(`將 ${ids.length} 位同仁（斗六院區全部人員）依員編順序全部加入「${item.name}」輪序表？`)) return;
     onChange(reanchor(item, [...queue, ...ids]));
   };
   const setNext = (id) => {
@@ -153,7 +153,7 @@ const MonthlyRotationCard = ({ item, onChange, onDelete, onRename, canEdit, acti
   }, [queue, derived, winKeys, curYm]);
 
   const addable = useMemo(() => (activeEmployees || [])
-    .filter(e => !e.isSeparator && e.id && String(e.role) === '1' && !String(e.name || '').includes('�') && !queue.includes(String(e.id)))
+    .filter(e => !e.isSeparator && e.id && !String(e.name || '').includes('�') && !queue.includes(String(e.id)))
     .sort((a, b) => String(a.id).localeCompare(String(b.id))), [activeEmployees, queue]);
 
   return (
