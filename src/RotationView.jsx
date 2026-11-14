@@ -31,7 +31,14 @@ const compareMembers = (a, b) => {
 const NO_GROUP = '__none__';
 const UNGROUPED_TITLE = '未分類';
 
-const EMPTY_P = { queue: [], slots: {} };
+const EMPTY_P = { queue: [], start: null, confirmed: {}, skips: {} };
+// 舊格式（slots）轉新格式：只保留順序與「跳過」，預排改由輪序表自動推算
+const normalizeP = (p) => {
+  if (!p || !Array.isArray(p.queue)) return EMPTY_P;
+  const skips = { ...(p.skips || {}) };
+  Object.entries(p.slots || {}).forEach(([k, v]) => { if (v && v.skip) skips[k] = true; });
+  return { queue: p.queue, start: p.start || null, confirmed: p.confirmed || {}, skips };
+};
 // 「打勾」一律代表排「今天所在月份的下一個月」
 const nextMonthOfToday = () => {
   const t = new Date();
@@ -69,7 +76,7 @@ const RotationView = ({ rotationDocRef, rotationLogColRef, rotationDraftRef, cur
         const data = snap.exists() ? snap.data() : {};
         setShifts(Array.isArray(data.shifts) ? data.shifts : []);
         setNotes(data.notes || '');
-        setCommittedP(data.p && data.p.queue ? { queue: data.p.queue || [], slots: data.p.slots || {} } : EMPTY_P);
+        setCommittedP(normalizeP(data.p));
         setLoaded(true);
       },
       (err) => { console.error('讀取輪序資料失敗:', err); setLoaded(true); }
@@ -85,7 +92,7 @@ const RotationView = ({ rotationDocRef, rotationLogColRef, rotationDraftRef, cur
       if (!alive) return;
       if (snap.exists()) {
         const d = snap.data();
-        setWork({ marks: d.marks || {}, p: d.p || null });
+        setWork({ marks: d.marks || {}, p: d.p ? normalizeP(d.p) : null });
         setHasDraft(true);
       }
       setDraftLoaded(true);
@@ -250,10 +257,16 @@ const RotationView = ({ rotationDocRef, rotationLogColRef, rotationDraftRef, cur
   const markCount = Object.keys(work.marks).length;
   const hasStaged = markCount > 0 || !!work.p;
 
-  const slotsDiffCount = (a, b) => {
-    const keys = new Set([...Object.keys(a || {}), ...Object.keys(b || {})]);
+  const pDiffCount = (a, b) => {
     let n = 0;
-    keys.forEach(k => { if (JSON.stringify(a?.[k] || null) !== JSON.stringify(b?.[k] || null)) n++; });
+    ['confirmed', 'skips'].forEach(f => {
+      const keys = new Set([...Object.keys(a?.[f] || {}), ...Object.keys(b?.[f] || {})]);
+      keys.forEach(k => {
+        const x = f === 'confirmed' ? a?.[f]?.[k]?.empId : a?.[f]?.[k];
+        const y = f === 'confirmed' ? b?.[f]?.[k]?.empId : b?.[f]?.[k];
+        if ((x || null) !== (y || null)) n++;
+      });
+    });
     return n;
   };
 
@@ -292,7 +305,7 @@ const RotationView = ({ rotationDocRef, rotationLogColRef, rotationDraftRef, cur
     if (!hasStaged) { alert('目前沒有可發布的變更。'); return; }
     const parts = [];
     if (markCount) parts.push(`${markCount} 筆打勾標記（設為已排 ${stageYm}）`);
-    if (work.p) parts.push('大夜預排順序／週次');
+    if (work.p) parts.push('大夜輪序表／已確定週次');
     if (!window.confirm(`確定發布（公布）以下內容？\n・${parts.join('\n・')}`)) return;
     const marks = Object.entries(work.marks);
     const logs = [];
@@ -304,7 +317,7 @@ const RotationView = ({ rotationDocRef, rotationLogColRef, rotationDraftRef, cur
     });
     if (work.p) {
       const q0 = committedP.queue.length, q1 = work.p.queue.length;
-      logs.push({ action: '大夜預排更新', shiftName: '大夜(P)', detail: `預排順序 ${q0}→${q1} 人；週次異動 ${slotsDiffCount(committedP.slots, work.p.slots)} 週` });
+      logs.push({ action: '大夜預排更新', shiftName: '大夜(P)', detail: `輪序表 ${q0}→${q1} 人；已確定／跳過異動 ${pDiffCount(committedP, work.p)} 週` });
     }
     const ok = await commit(({ shifts: list, notes: n, p: cp }) => {
       marks.forEach(([key, ym]) => {
