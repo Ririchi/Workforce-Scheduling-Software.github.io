@@ -207,11 +207,12 @@ const MonthlyRotationCard = ({ item, onChange, onDelete, onRename, canEdit, acti
             <div key={id} className="break-inside-avoid border-b bg-white px-1.5 py-1 flex items-center gap-1 min-w-0">
               <span className="w-4 h-4 flex-none rounded-full text-[11px] font-black flex items-center justify-center bg-gray-100 text-gray-500">{idx + 1}</span>
               <div className="flex-grow min-w-0 leading-tight">
-                <div className="text-sm font-bold text-gray-800 truncate">{nameOf(id)}
+                <div className="text-sm font-bold text-gray-800 flex flex-wrap items-baseline gap-x-1.5">{nameOf(id)}
                   {!gone && id === curPerson && <span className="ml-1 text-[11px] bg-amber-500 text-white px-1 py-0.5 rounded-full font-black">本月</span>}
                   {!gone && id === firstPlanPerson && <span className="ml-1 text-[11px] bg-gray-500 text-white px-1 py-0.5 rounded-full font-black">待公告 {firstPlanKey.slice(5)}月</span>}
-                  {gone && <span className="ml-1 text-[11px] bg-rose-100 text-rose-600 px-1 py-0.5 rounded-full font-black">不在名冊</span>}</div>
-                <div className="text-xs text-gray-400 font-bold truncate">{gone ? '已自動略過' : `預計輪到 ${st.next || '—'}`}｜公{st.done}・預{st.plan}</div>
+                  {gone && <span className="ml-1 text-[11px] bg-rose-100 text-rose-600 px-1 py-0.5 rounded-full font-black">不在名冊</span>}
+                  <span className="text-xs text-gray-400 font-bold">{gone ? '已自動略過' : `預計輪到 ${st.next || '—'}`}｜公{st.done}・預{st.plan}</span>
+                </div>
               </div>
               {canEdit && (
                 <div className="flex flex-none items-center">

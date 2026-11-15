@@ -88,6 +88,11 @@ const NightRotationPanel = ({ open, onToggle, p, setP, canEdit, isAdmin, schedul
         if (skips[w]) continue;
         const c = confirmed[w]?.empId;
         if (c) {
+          if (confirmed[w].replaced && confirmed[w].replaced.length) {
+            // 已公告後改指定他人：原人員只是被劃掉、不被取代（輪序不輪空），新人員視為代班
+            if (q.includes(c)) owed[c] = (owed[c] || 0) + 1;
+            continue;
+          }
           if (q.includes(c)) { // 不在輪序表內的人（外援）代班：不動輪序
             const e = take();
             if (e !== c) owed[c] = (owed[c] || 0) + 1;
@@ -206,7 +211,14 @@ const NightRotationPanel = ({ open, onToggle, p, setP, canEdit, isAdmin, schedul
       delete m.confirmed[k];
       if (m.start && k < m.start.key) m.start = { ...m.start, key: k };
     } else {
-      m.confirmed[k] = { empId: id };
+      const old = m.confirmed[k];
+      if (old && old.empId === id) { setEditKey(''); return; }
+      if (old && old.empId) {
+        // 已公告後改指定他人：舊人員劃掉保留（不取代）；要完全取代請先「退回未公告」再重新指定
+        m.confirmed[k] = { empId: id, replaced: [...(old.replaced || []).filter(x => x !== id), old.empId] };
+      } else {
+        m.confirmed[k] = { empId: id };
+      }
     }
     setP(m);
     setEditKey('');
@@ -272,7 +284,7 @@ const NightRotationPanel = ({ open, onToggle, p, setP, canEdit, isAdmin, schedul
                     if (o && o.kind === 'skip') {
                       planCell = <span className="text-[13px] font-black text-rose-500 bg-rose-50 px-1.5 py-0.5 rounded">跳過（過年班）</span>;
                     } else if (o && o.kind === 'confirmed') {
-                      planCell = <span className="font-black text-gray-900">{nameOf(o.empId)}<span className="ml-1 text-[11px] bg-indigo-100 text-indigo-600 px-1 py-0.5 rounded-full font-black">已公告</span></span>;
+                      planCell = <span className="font-black text-gray-900">{(p?.confirmed?.[k]?.replaced || []).map(rid => <s key={rid} className="mr-1.5 text-gray-400 font-bold">{nameOf(rid)}</s>)}{nameOf(o.empId)}<span className="ml-1 text-[11px] bg-indigo-100 text-indigo-600 px-1 py-0.5 rounded-full font-black">已公告</span></span>;
                     } else if (o && o.kind === 'plan' && !past) {
                       planCell = <span className="font-bold text-gray-400">{nameOf(o.empId)}</span>;
                     }
@@ -294,9 +306,11 @@ const NightRotationPanel = ({ open, onToggle, p, setP, canEdit, isAdmin, schedul
                                 {o && o.kind === 'confirmed' && <option value="__cancel__">（取消公告）</option>}
                               </select>
                             ) : (
-                              <div>{planCell}</div>
+                              <div className="flex flex-wrap items-baseline gap-x-2">
+                                {planCell}
+                                <span className="text-xs text-gray-500">實際：{renderActual(k)}</span>
+                              </div>
                             )}
-                            <div className="text-xs text-gray-500 mt-0.5">實際：{renderActual(k)}</div>
                           </td>
                           <td className="px-1 py-1 whitespace-nowrap text-right">
                             {canAct && (
@@ -329,11 +343,11 @@ const NightRotationPanel = ({ open, onToggle, p, setP, canEdit, isAdmin, schedul
                   <div key={id} className="break-inside-avoid border-b bg-white px-1.5 py-1 flex items-center gap-1 min-w-0">
                     <span className="w-4 h-4 flex-none rounded-full text-[11px] font-black flex items-center justify-center bg-gray-100 text-gray-500">{idx + 1}</span>
                     <div className="flex-grow min-w-0 leading-tight">
-                      <div className="text-sm font-bold text-gray-800 truncate">{nameOf(id)}
+                      <div className="text-sm font-bold text-gray-800 flex flex-wrap items-baseline gap-x-1.5">{nameOf(id)}
                         {id === curPerson && <span className="ml-1 text-[11px] bg-amber-500 text-white px-1 py-0.5 rounded-full font-black">本週</span>}
                         {id === firstPlanPerson && <span className="ml-1 text-[11px] bg-gray-500 text-white px-1 py-0.5 rounded-full font-black">待公告 {fmtShort(firstPlanKey)}</span>}
+                        <span className="text-xs text-gray-400 font-bold" title="顯示區間內：已公告＋預排">公{st.done}・預{st.plan}｜下次 {fmtShort(st.next)}</span>
                       </div>
-                      <div className="text-xs text-gray-400 font-bold truncate" title="顯示區間內：已公告＋預排">公{st.done}・預{st.plan}｜下次 {fmtShort(st.next)}</div>
                     </div>
                     {editable && (
                       <div className="flex flex-none items-center">
