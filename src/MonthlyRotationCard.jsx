@@ -152,6 +152,11 @@ const MonthlyRotationCard = ({ item, onChange, onDelete, onRename, canEdit, acti
     return s;
   }, [queue, derived, winKeys, curYm]);
 
+  // 本月、以及「未公告的第一個月」各是誰
+  const curPerson = derived.out[curYm]?.empId || '';
+  const firstPlanKey = winKeys.find(k => k >= curYm && derived.out[k]?.kind === 'plan') || '';
+  const firstPlanPerson = firstPlanKey ? derived.out[firstPlanKey].empId : '';
+
   const addable = useMemo(() => (activeEmployees || [])
     .filter(e => !e.isSeparator && e.id && !String(e.name || '').includes('�') && !queue.includes(String(e.id)))
     .sort((a, b) => String(a.id).localeCompare(String(b.id))), [activeEmployees, queue]);
@@ -159,11 +164,11 @@ const MonthlyRotationCard = ({ item, onChange, onDelete, onRename, canEdit, acti
   return (
     <div className="bg-white rounded-xl shadow-sm border overflow-hidden flex flex-col">
       <div className="px-3 py-2 bg-emerald-50 border-b flex items-center justify-between">
-        <div className="font-black text-gray-800 text-sm">{item.name} <span className="text-[10px] font-bold text-gray-400 ml-1">每月 1 位｜{queue.length} 人</span></div>
+        <div className="font-black text-gray-800 text-sm">{item.name} <span className="text-xs font-bold text-gray-400 ml-1">每月 1 位｜{queue.length} 人</span></div>
         {canEdit && (
           <div className="flex gap-0.5">
-            <button title="重新命名" onClick={() => onRename(item.id)} className="p-1 rounded-lg text-gray-400 hover:bg-white hover:text-blue-600"><Pencil size={13} /></button>
-            <button title="刪除此項目" onClick={() => onDelete(item.id)} className="p-1 rounded-lg text-gray-400 hover:bg-white hover:text-red-600"><Trash2 size={13} /></button>
+            <button title="重新命名" onClick={() => onRename(item.id)} className="p-1 rounded-lg text-gray-400 hover:bg-white hover:text-blue-600"><Pencil size={16} /></button>
+            <button title="刪除此項目" onClick={() => onDelete(item.id)} className="p-1 rounded-lg text-gray-400 hover:bg-white hover:text-red-600"><Trash2 size={16} /></button>
           </div>
         )}
       </div>
@@ -174,17 +179,17 @@ const MonthlyRotationCard = ({ item, onChange, onDelete, onRename, canEdit, acti
           const o = derived.out[k];
           const past = k < curYm;
           return (
-            <div key={k} className={`px-2 py-1 flex items-center gap-2 text-xs ${k === curYm ? 'bg-yellow-50' : past ? 'bg-gray-50' : ''}`}>
+            <div key={k} className={`px-2 py-1 flex items-center gap-2 text-sm ${k === curYm ? 'bg-yellow-50' : past ? 'bg-gray-50' : ''}`}>
               <span className={`font-mono w-16 flex-none ${past ? 'text-gray-400' : 'text-gray-600 font-bold'}`}>{k}</span>
               <span className="flex-grow min-w-0 truncate">
-                {o && o.kind === 'confirmed' ? <span className="font-black text-gray-900">{nameOf(o.empId)}<span className="ml-1 text-[9px] bg-indigo-100 text-indigo-600 px-1 py-0.5 rounded-full font-black">已公告</span></span>
+                {o && o.kind === 'confirmed' ? <span className="font-black text-gray-900">{nameOf(o.empId)}<span className="ml-1 text-[11px] bg-indigo-100 text-indigo-600 px-1 py-0.5 rounded-full font-black">已公告</span></span>
                   : o && o.kind === 'plan' && !past ? <span className="font-bold text-gray-400">{nameOf(o.empId)}</span>
                     : <span className="text-gray-200">—</span>}
               </span>
               {canEdit && !past && o && (
                 o.kind === 'plan'
-                  ? <button title="確定（公告）此人" onClick={() => confirmMonth(k, o.empId)} className="flex-none p-0.5 rounded text-gray-300 hover:text-emerald-600 hover:bg-emerald-50"><Check size={15} /></button>
-                  : <button title="取消公告" onClick={() => cancelMonth(k)} className="flex-none text-[10px] font-black text-gray-400 hover:text-red-600">取消</button>
+                  ? <button title="確定（公告）此人" onClick={() => confirmMonth(k, o.empId)} className="flex-none p-0.5 rounded text-gray-300 hover:text-emerald-600 hover:bg-emerald-50"><Check size={18} /></button>
+                  : <button title="退回未公告" onClick={() => cancelMonth(k)} className="flex-none text-xs font-black text-gray-400 hover:text-red-600 border rounded px-1.5 py-0.5">退回未公告</button>
               )}
             </div>
           );
@@ -192,25 +197,29 @@ const MonthlyRotationCard = ({ item, onChange, onDelete, onRename, canEdit, acti
       </div>
 
       {/* 輪序表 */}
-      <div className="border-t bg-gray-50 px-2 py-1 text-[11px] font-black text-gray-500">輪序表（不連動班表）</div>
+      <div className="border-t bg-gray-50 px-2 py-1 text-[13px] font-black text-gray-500">輪序表（不連動班表）</div>
       <div className="columns-1 sm:columns-2 gap-0 bg-white [column-rule:1px_solid_rgb(229_231_235)]">
-        {queue.length === 0 && <div className="p-3 text-center text-gray-300 italic text-xs font-bold">尚未建立輪序表</div>}
+        {queue.length === 0 && <div className="p-3 text-center text-gray-300 italic text-sm font-bold">尚未建立輪序表</div>}
         {queue.map((id, idx) => {
           const st = stats[id] || { done: 0, plan: 0, next: '' };
           const gone = !activeIds.has(id);
           return (
             <div key={id} className="break-inside-avoid border-b bg-white px-1.5 py-1 flex items-center gap-1 min-w-0">
-              <span className="w-4 h-4 flex-none rounded-full text-[9px] font-black flex items-center justify-center bg-gray-100 text-gray-500">{idx + 1}</span>
+              <span className="w-4 h-4 flex-none rounded-full text-[11px] font-black flex items-center justify-center bg-gray-100 text-gray-500">{idx + 1}</span>
               <div className="flex-grow min-w-0 leading-tight">
-                <div className="text-[12px] font-bold text-gray-800 truncate">{nameOf(id)}{gone && <span className="ml-1 text-[9px] bg-rose-100 text-rose-600 px-1 py-0.5 rounded-full font-black">不在名冊</span>}</div>
-                <div className="text-[10px] text-gray-400 font-bold truncate">{gone ? '已自動略過' : `預計輪到 ${st.next || '—'}`}｜公{st.done}・預{st.plan}</div>
+                <div className="text-sm font-bold text-gray-800 flex flex-wrap items-baseline gap-x-1.5">{nameOf(id)}
+                  {!gone && id === curPerson && <span className="ml-1 text-[11px] bg-amber-500 text-white px-1 py-0.5 rounded-full font-black">本月</span>}
+                  {!gone && id === firstPlanPerson && <span className="ml-1 text-[11px] bg-gray-500 text-white px-1 py-0.5 rounded-full font-black">待公告 {firstPlanKey.slice(5)}月</span>}
+                  {gone && <span className="ml-1 text-[11px] bg-rose-100 text-rose-600 px-1 py-0.5 rounded-full font-black">不在名冊</span>}
+                  <span className="text-xs text-gray-400 font-bold">{gone ? '已自動略過' : `預計輪到 ${st.next || '—'}`}｜公{st.done}・預{st.plan}</span>
+                </div>
               </div>
               {canEdit && (
                 <div className="flex flex-none items-center">
-                  <button title="設為下一位" onClick={() => setNext(id)} className="p-0.5 text-gray-300 hover:text-amber-500"><Star size={12} /></button>
-                  <button title="上移" onClick={() => moveQueue(idx, -1)} className="p-0.5 text-gray-400 hover:text-blue-600"><ChevronUp size={13} /></button>
-                  <button title="下移" onClick={() => moveQueue(idx, 1)} className="p-0.5 text-gray-400 hover:text-blue-600"><ChevronDown size={13} /></button>
-                  <button title="移出輪序表" onClick={() => removeFromQueue(id)} className="p-0.5 text-gray-400 hover:text-red-600"><X size={13} /></button>
+                  <button title="設為下一位" onClick={() => setNext(id)} className="p-0.5 text-gray-300 hover:text-amber-500"><Star size={14} /></button>
+                  <button title="上移" onClick={() => moveQueue(idx, -1)} className="p-0.5 text-gray-400 hover:text-blue-600"><ChevronUp size={16} /></button>
+                  <button title="下移" onClick={() => moveQueue(idx, 1)} className="p-0.5 text-gray-400 hover:text-blue-600"><ChevronDown size={16} /></button>
+                  <button title="移出輪序表" onClick={() => removeFromQueue(id)} className="p-0.5 text-gray-400 hover:text-red-600"><X size={16} /></button>
                 </div>
               )}
             </div>
@@ -219,12 +228,12 @@ const MonthlyRotationCard = ({ item, onChange, onDelete, onRename, canEdit, acti
       </div>
       {canEdit && (
         <div className="p-2 flex items-center gap-1 border-t">
-          <select value={addId} onChange={e => setAddId(e.target.value)} className="flex-grow border rounded-lg px-1.5 py-1 text-[11px] bg-white min-w-0">
+          <select value={addId} onChange={e => setAddId(e.target.value)} className="flex-grow border rounded-lg px-1.5 py-1 text-[13px] bg-white min-w-0">
             <option value="">加入人員（放最後）…</option>
             {addable.map(e => <option key={e.id} value={String(e.id)}>{e.name}（{e.id}）</option>)}
           </select>
-          <button onClick={addOne} disabled={!addId} className="flex-none text-[11px] font-black text-white bg-emerald-500 hover:bg-emerald-600 disabled:opacity-40 px-2 py-1 rounded-lg flex items-center gap-1"><UserPlus size={12} /> 加入</button>
-          <button onClick={addAll} disabled={addable.length === 0} className="flex-none text-[11px] font-black text-emerald-600 bg-emerald-50 hover:bg-emerald-100 disabled:opacity-40 px-2 py-1 rounded-lg">全部加入</button>
+          <button onClick={addOne} disabled={!addId} className="flex-none text-[13px] font-black text-white bg-emerald-500 hover:bg-emerald-600 disabled:opacity-40 px-2 py-1 rounded-lg flex items-center gap-1"><UserPlus size={14} /> 加入</button>
+          <button onClick={addAll} disabled={addable.length === 0} className="flex-none text-[13px] font-black text-emerald-600 bg-emerald-50 hover:bg-emerald-100 disabled:opacity-40 px-2 py-1 rounded-lg">全部加入</button>
         </div>
       )}
     </div>
