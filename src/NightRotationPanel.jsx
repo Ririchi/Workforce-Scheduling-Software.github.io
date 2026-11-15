@@ -1,5 +1,5 @@
 import React, { useMemo, useState } from 'react';
-import { ChevronUp, ChevronDown, X, UserPlus, Moon, Pencil, Check, SkipForward, Star } from 'lucide-react';
+import { ChevronUp, ChevronDown, X, UserPlus, Moon, Pencil, Check, SkipForward, Star, Undo2 } from 'lucide-react';
 
 // =====================================================================================
 // 大夜（P）輪序面板
@@ -170,6 +170,11 @@ const NightRotationPanel = ({ open, onToggle, p, setP, canEdit, isAdmin, schedul
     return m;
   }, [queue, keys, currentKey, derived]);
 
+  // 本週、以及「未公告的第一週」各是誰（顯示在輪序表上）
+  const curPerson = derived.out[currentKey]?.empId || '';
+  const firstPlanKey = keys.find(k => k >= currentKey && derived.out[k]?.kind === 'plan') || '';
+  const firstPlanPerson = firstPlanKey ? derived.out[firstPlanKey].empId : '';
+
   const fmtShort = (k) => { if (!k) return '—'; const d = parseD(k); return `${d.getMonth() + 1}/${d.getDate()}`; };
 
   // ---------- 編輯操作（只改草稿）----------
@@ -236,17 +241,17 @@ const NightRotationPanel = ({ open, onToggle, p, setP, canEdit, isAdmin, schedul
     const names = Object.keys(a?.counts || {});
     if (!a || a.known === 0) return <span className="text-gray-300">—</span>;
     if (names.length === 0) return <span className="text-gray-300">—</span>;
-    if (names.length === 1 && a.counts[names[0]] === a.known) return <span className="font-black text-gray-800">{names[0]}{a.known < 6 && <span className="text-[10px] text-gray-400 font-bold ml-1">（{a.known} 天有資料）</span>}</span>;
+    if (names.length === 1 && a.counts[names[0]] === a.known) return <span className="font-black text-gray-800">{names[0]}{a.known < 6 && <span className="text-xs text-gray-400 font-bold ml-1">（{a.known} 天有資料）</span>}</span>;
     return <span className="font-black text-gray-800">{names.map(n => `${n}(${a.counts[n]}天)`).join('、')}</span>;
   };
 
   return (
     <div className="col-span-full bg-white rounded-xl shadow-sm border overflow-hidden">
       <button onClick={onToggle} className="w-full px-3 py-2 flex items-center justify-between hover:bg-indigo-100 bg-indigo-50">
-        <span className="font-black text-indigo-700 text-sm flex items-center gap-1.5 flex-wrap"><Moon size={15} /> 大夜（P）輪序
-          <span className="text-[10px] font-bold text-gray-400">週六～下週四｜P、P#、P(國)</span>
+        <span className="font-black text-indigo-700 text-sm flex items-center gap-1.5 flex-wrap"><Moon size={18} /> 大夜（P）輪序
+          <span className="text-xs font-bold text-gray-400">週六～下週四｜P、P#、P(國)</span>
         </span>
-        <span className="text-gray-400 text-xs font-black">{open ? '▲' : '▼'}</span>
+        <span className="text-gray-400 text-sm font-black">{open ? '▲' : '▼'}</span>
       </button>
 
       {open && (
@@ -254,7 +259,7 @@ const NightRotationPanel = ({ open, onToggle, p, setP, canEdit, isAdmin, schedul
           {/* 左：每週排序（預排／實際班表同一格，節省寬度）*/}
           <div className="lg:col-span-3 min-w-0">
             <div className="border rounded-lg overflow-auto" style={{ maxHeight: '300px' }}>
-              <table className="w-full text-xs">
+              <table className="w-full text-sm">
                 <tbody className="divide-y">
                   {keys.map((k, ki) => {
                     const start = parseD(k);
@@ -265,24 +270,25 @@ const NightRotationPanel = ({ open, onToggle, p, setP, canEdit, isAdmin, schedul
                     const showYear = ki === 0 || parseD(keys[ki - 1]).getFullYear() !== start.getFullYear();
                     let planCell = <span className="text-gray-200">—</span>;
                     if (o && o.kind === 'skip') {
-                      planCell = <span className="text-[11px] font-black text-rose-500 bg-rose-50 px-1.5 py-0.5 rounded">跳過（過年班）</span>;
+                      planCell = <span className="text-[13px] font-black text-rose-500 bg-rose-50 px-1.5 py-0.5 rounded">跳過（過年班）</span>;
                     } else if (o && o.kind === 'confirmed') {
-                      planCell = <span className="font-black text-gray-900">{nameOf(o.empId)}<span className="ml-1 text-[9px] bg-indigo-100 text-indigo-600 px-1 py-0.5 rounded-full font-black">已公告</span></span>;
+                      planCell = <span className="font-black text-gray-900">{nameOf(o.empId)}<span className="ml-1 text-[11px] bg-indigo-100 text-indigo-600 px-1 py-0.5 rounded-full font-black">已公告</span></span>;
                     } else if (o && o.kind === 'plan' && !past) {
                       planCell = <span className="font-bold text-gray-400">{nameOf(o.empId)}</span>;
                     }
                     const canAct = editable && !past;
                     return (
                       <React.Fragment key={k}>
-                        {showYear && <tr><td colSpan={3} className="px-2 py-0.5 bg-gray-100 text-[10px] font-black text-gray-500">{start.getFullYear()} 年</td></tr>}
+                        {showYear && <tr><td colSpan={3} className="px-2 py-0.5 bg-gray-100 text-xs font-black text-gray-500">{start.getFullYear()} 年</td></tr>}
                         <tr className={`align-top ${isCur ? 'bg-yellow-50' : past ? 'bg-gray-50 text-gray-400' : ''}`}>
-                          <td className="px-2 py-1 whitespace-nowrap font-mono text-[11px] leading-tight">
+                          <td className="px-2 py-1 whitespace-nowrap font-mono text-[13px] leading-tight">
                             {start.getMonth() + 1}/{start.getDate()}～{end.getMonth() + 1}/{end.getDate()}
-                            {isCur && <span className="ml-1 text-[9px] bg-amber-500 text-white px-1 py-0.5 rounded-full font-black">本週</span>}
+                            {isCur && <span className="ml-1 text-[11px] bg-amber-500 text-white px-1 py-0.5 rounded-full font-black">本週</span>}
+                            {k === firstPlanKey && <span className="ml-1 text-[11px] bg-gray-500 text-white px-1 py-0.5 rounded-full font-black">待公告首週</span>}
                           </td>
                           <td className="px-1 py-1 leading-tight">
                             {editKey === k ? (
-                              <select autoFocus value={o?.empId || ''} onChange={e => e.target.value && setConfirm(k, e.target.value)} onBlur={() => setEditKey('')} className="border rounded-lg px-1 py-0.5 text-[11px] bg-white max-w-full">
+                              <select autoFocus value={o?.empId || ''} onChange={e => e.target.value && setConfirm(k, e.target.value)} onBlur={() => setEditKey('')} className="border rounded-lg px-1 py-0.5 text-[13px] bg-white max-w-full">
                                 <option value="" disabled>選擇人員…</option>
                                 {pickable.map(id => <option key={id} value={id}>{nameOf(id)}</option>)}
                                 {o && o.kind === 'confirmed' && <option value="__cancel__">（取消公告）</option>}
@@ -290,14 +296,15 @@ const NightRotationPanel = ({ open, onToggle, p, setP, canEdit, isAdmin, schedul
                             ) : (
                               <div>{planCell}</div>
                             )}
-                            <div className="text-[10px] text-gray-500 mt-0.5">實際：{renderActual(k)}</div>
+                            <div className="text-xs text-gray-500 mt-0.5">實際：{renderActual(k)}</div>
                           </td>
                           <td className="px-1 py-1 whitespace-nowrap text-right">
                             {canAct && (
                               <span className="inline-flex items-center">
-                                {o && o.kind === 'plan' && <button title="確定（公告）此人" onClick={() => setConfirm(k, o.empId)} className="p-0.5 rounded text-gray-300 hover:text-emerald-600 hover:bg-emerald-50"><Check size={15} /></button>}
-                                {o && o.empId && <button title="指定其他人員／重新指定" onClick={() => setEditKey(k)} className="p-0.5 rounded text-gray-300 hover:text-blue-600 hover:bg-blue-50"><Pencil size={13} /></button>}
-                                <button title={o && o.kind === 'skip' ? '取消跳過' : '跳過此週（過年班）'} onClick={() => toggleSkip(k)} className={`p-0.5 rounded ${o && o.kind === 'skip' ? 'bg-rose-500 text-white' : 'text-gray-300 hover:text-rose-600 hover:bg-rose-50'}`}><SkipForward size={13} /></button>
+                                {o && o.kind === 'plan' && <button title="確定（公告）此人" onClick={() => setConfirm(k, o.empId)} className="p-0.5 rounded text-gray-300 hover:text-emerald-600 hover:bg-emerald-50"><Check size={18} /></button>}
+                                {o && o.kind === 'confirmed' && <button title="退回未公告" onClick={() => setConfirm(k, '__cancel__')} className="p-0.5 rounded text-gray-400 hover:text-red-600 hover:bg-red-50"><Undo2 size={16} /></button>}
+                                {o && o.empId && <button title="指定其他人員／重新指定" onClick={() => setEditKey(k)} className="p-0.5 rounded text-gray-300 hover:text-blue-600 hover:bg-blue-50"><Pencil size={16} /></button>}
+                                <button title={o && o.kind === 'skip' ? '取消跳過' : '跳過此週（過年班）'} onClick={() => toggleSkip(k)} className={`p-0.5 rounded ${o && o.kind === 'skip' ? 'bg-rose-500 text-white' : 'text-gray-300 hover:text-rose-600 hover:bg-rose-50'}`}><SkipForward size={16} /></button>
                               </span>
                             )}
                           </td>
@@ -308,29 +315,32 @@ const NightRotationPanel = ({ open, onToggle, p, setP, canEdit, isAdmin, schedul
                 </tbody>
               </table>
             </div>
-            {queue.length === 0 && <div className="mt-1 text-[11px] text-gray-400 font-bold">{editable ? '尚未建立輪序表：請先在右側加入人員，預排就會自動帶入。' : '尚未建立大夜輪序表。'}</div>}
+            {queue.length === 0 && <div className="mt-1 text-[13px] text-gray-400 font-bold">{editable ? '尚未建立輪序表：請先在右側加入人員，預排就會自動帶入。' : '尚未建立大夜輪序表。'}</div>}
           </div>
 
           {/* 右：輪序表（兩欄緊湊）*/}
           <div className="lg:col-span-2 min-w-0">
-            <div className="text-[11px] font-black text-gray-500 mb-1">輪序表（不連動班表）</div>
+            <div className="text-[13px] font-black text-gray-500 mb-1">輪序表（不連動班表）</div>
             <div className="columns-2 lg:columns-1 gap-0 bg-white border rounded-lg [column-rule:1px_solid_rgb(229_231_235)]">
-              {queue.length === 0 && <div className="p-3 text-center text-gray-300 italic text-xs font-bold">尚未建立輪序表</div>}
+              {queue.length === 0 && <div className="p-3 text-center text-gray-300 italic text-sm font-bold">尚未建立輪序表</div>}
               {queue.map((id, idx) => {
                 const st = stats[id] || { done: 0, plan: 0, last: '', next: '' };
                 return (
                   <div key={id} className="break-inside-avoid border-b bg-white px-1.5 py-1 flex items-center gap-1 min-w-0">
-                    <span className="w-4 h-4 flex-none rounded-full text-[9px] font-black flex items-center justify-center bg-gray-100 text-gray-500">{idx + 1}</span>
+                    <span className="w-4 h-4 flex-none rounded-full text-[11px] font-black flex items-center justify-center bg-gray-100 text-gray-500">{idx + 1}</span>
                     <div className="flex-grow min-w-0 leading-tight">
-                      <div className="text-[12px] font-bold text-gray-800 truncate">{nameOf(id)}</div>
-                      <div className="text-[10px] text-gray-400 font-bold truncate" title="顯示區間內：已公告＋預排">公{st.done}・預{st.plan}｜下次 {fmtShort(st.next)}</div>
+                      <div className="text-sm font-bold text-gray-800 truncate">{nameOf(id)}
+                        {id === curPerson && <span className="ml-1 text-[11px] bg-amber-500 text-white px-1 py-0.5 rounded-full font-black">本週</span>}
+                        {id === firstPlanPerson && <span className="ml-1 text-[11px] bg-gray-500 text-white px-1 py-0.5 rounded-full font-black">待公告 {fmtShort(firstPlanKey)}</span>}
+                      </div>
+                      <div className="text-xs text-gray-400 font-bold truncate" title="顯示區間內：已公告＋預排">公{st.done}・預{st.plan}｜下次 {fmtShort(st.next)}</div>
                     </div>
                     {editable && (
                       <div className="flex flex-none items-center">
-                        <button title="設為下一位（自動預排從此人開始）" onClick={() => setNext(id)} className="p-0.5 text-gray-300 hover:text-amber-500"><Star size={12} /></button>
-                        <button title="上移" onClick={() => moveQueue(idx, -1)} className="p-0.5 text-gray-400 hover:text-blue-600"><ChevronUp size={13} /></button>
-                        <button title="下移" onClick={() => moveQueue(idx, 1)} className="p-0.5 text-gray-400 hover:text-blue-600"><ChevronDown size={13} /></button>
-                        <button title="移出輪序表" onClick={() => removeFromQueue(id)} className="p-0.5 text-gray-400 hover:text-red-600"><X size={13} /></button>
+                        <button title="設為下一位（自動預排從此人開始）" onClick={() => setNext(id)} className="p-0.5 text-gray-300 hover:text-amber-500"><Star size={14} /></button>
+                        <button title="上移" onClick={() => moveQueue(idx, -1)} className="p-0.5 text-gray-400 hover:text-blue-600"><ChevronUp size={16} /></button>
+                        <button title="下移" onClick={() => moveQueue(idx, 1)} className="p-0.5 text-gray-400 hover:text-blue-600"><ChevronDown size={16} /></button>
+                        <button title="移出輪序表" onClick={() => removeFromQueue(id)} className="p-0.5 text-gray-400 hover:text-red-600"><X size={16} /></button>
                       </div>
                     )}
                   </div>
@@ -339,14 +349,14 @@ const NightRotationPanel = ({ open, onToggle, p, setP, canEdit, isAdmin, schedul
             </div>
             {editable && (
               <div className="mt-1 flex items-center gap-1">
-                <select value={addId} onChange={e => setAddId(e.target.value)} className="flex-grow border rounded-lg px-1.5 py-1 text-[11px] bg-white min-w-0">
+                <select value={addId} onChange={e => setAddId(e.target.value)} className="flex-grow border rounded-lg px-1.5 py-1 text-[13px] bg-white min-w-0">
                   <option value="">加入輪序表（放最後）…</option>
                   {addable.map(e => <option key={e.id} value={String(e.id)}>{e.name}（{e.id}）</option>)}
                 </select>
-                <button onClick={addToQueue} disabled={!addId} className="flex-none text-[11px] font-black text-white bg-indigo-500 hover:bg-indigo-600 disabled:opacity-40 px-2 py-1 rounded-lg flex items-center gap-1"><UserPlus size={12} /> 加入</button>
+                <button onClick={addToQueue} disabled={!addId} className="flex-none text-[13px] font-black text-white bg-indigo-500 hover:bg-indigo-600 disabled:opacity-40 px-2 py-1 rounded-lg flex items-center gap-1"><UserPlus size={14} /> 加入</button>
               </div>
             )}
-            <div className="mt-1 text-[10px] text-gray-400 font-bold leading-snug">
+            <div className="mt-1 text-xs text-gray-400 font-bold leading-snug">
               ※ 次數＝顯示區間（過去 1 個月～未來 8 個月）已公告＋預排，不含實際班表。指定他人時原預排者該次輪空，指定者最近一次預排被拿掉。跳過週不計入輪序（最多 2 週）。
             </div>
           </div>
